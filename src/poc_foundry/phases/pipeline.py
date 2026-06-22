@@ -26,6 +26,7 @@ from poc_foundry.phases import integrity
 from poc_foundry.phases.context import (
     Ctx,
     chown_to_builder,
+    git,
     git_commit,
     git_diff,
     git_init,
@@ -341,6 +342,14 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     sha = state.commit_sha
     if it_status == "green":
         sha = git_commit(ctx.workspace_dir, f"iterate {i}: {it.goal[:56]}")
+    elif crit_status != "met":
+        # SALVAGE (design §5.8): discard a failed iteration's uncommitted coder edits so the workspace
+        # always reflects the last GREEN commit. Otherwise a later commit (P5 publish, or a met-existing
+        # iteration's `git add -A`) sweeps broken code into HEAD → the clean-room clones it and fails,
+        # tanking a build whose earlier iterations were sound. (`reset --hard` reverts TRACKED files
+        # only; untracked .deps / caches are left intact.)
+        git(ctx.workspace_dir, "reset", "--hard", "HEAD", check=False)
+        ctx.say(f"P4 iter{i}: rolled the workspace back to the last green commit (failed edits discarded)")
 
     for c in targets:                                    # reflect the outcome on THIS iteration's criteria
         c.status = crit_status

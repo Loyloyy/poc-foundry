@@ -153,9 +153,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       retrieval glue). `psycopg[binary]` baked into the sandbox image (iterations don't `uv pip
       install`). Spec prompt is service-aware. P7 records `services[]`. Local: **42/42 fakes** (+4:
       config pin, template decl, P3 spin+IP record, iteration env injection) + contract 11/11 + hygiene
-      clean. *Server: rebuild sandbox image (psycopg) + restart broker daemon; `build … --template
-      gradio-rag-pgvector` → pgvector spun, reached by IP, core retrieval met, clean-room green, no
-      leaks.*
+      clean. **Server run 1 (2026-06-23):** pgvector spun + ready @ IP, iter0/iter1 RED→GREEN vs REAL
+      pgvector, service reaped (ZERO leaks), clean-room GATE correctly caught a bug → `incomplete`.
+      Bug = workspace pollution from an abandoned iteration (DECISIONS #17, salvage `git reset --hard`
+      fix + regression test); **re-run pending** to confirm `done`.
 - **Acceptance:** a planted test-gaming attempt is caught by the ledger/scanner; clean-room gates
       a known-bad build red; broker runs out-of-process (orchestrator has no docker.sock).
       *(S1 proves the gaming-caught half via fakes; the on-server adversarial demo lands with S2's

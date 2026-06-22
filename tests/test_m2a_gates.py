@@ -530,3 +530,62 @@ def test_multi_iteration_build_completes_with_cumulative_publish(tmp_path, monke
     # both iterations' tests published into the clean-room workspace
     published = sorted((ws / "tests").glob("test_iter_*.py"))
     assert len(published) == 2
+
+
+def test_abandoned_iteration_rolls_back_to_last_green(tmp_path, monkeypatch):
+    """If a later iteration's coder fails (cap reached), its broken UNCOMMITTED edits are discarded so
+    the workspace stays at the last green commit — otherwise P5's `git add -A` would sweep broken code
+    into HEAD and the clean-room would clone it (the real bug the pgvector server run exposed)."""
+    import poc_foundry.models as M
+    from poc_foundry.coder import BespokeCoder
+    from poc_foundry.phases import (Ctx, load_template, p0_ingest, p1_spec, p2_plan, p3_scaffold,
+                                    p4_iterate, p_critic)
+    from poc_foundry.state import AdequacyReview
+
+    spec = Spec(goal="markers",
+                success_criteria=[SuccessCriterion(text="reply contains M0", core=True),
+                                  SuccessCriterion(text="reply contains M1")],
+                buildable=True, demo_scenario="x")
+
+    class _S:
+        def invoke(self, m):
+            return AdequacyReview(adequate=True, reason="ok")
+
+    class _Chat:
+        def with_structured_output(self, model):
+            return _S() if model is AdequacyReview else type("X", (), {"invoke": lambda s, mm: spec})()
+
+    def _ct(role, prompt, system=None, **k):
+        if role == "tester":
+            marker = "M1" if "M1" in prompt else "M0"
+            return (f"```python\nfrom core import generate_reply\n"
+                    f"def test_{marker.lower()}():\n    assert '{marker}' in generate_reply('x', [])\n```")
+        if role == "coder":
+            if "M1" in prompt:   # iter1's coder is broken — emits neither marker (also breaks M0)
+                return "*** FILE: core.py\n```python\ndef generate_reply(message, history=None):\n    return 'BAD'\n```"
+            return "*** FILE: core.py\n```python\ndef generate_reply(message, history=None):\n    return 'M0 only'\n```"
+        return "# Demo\n"
+
+    monkeypatch.setattr(M, "build_chat_model", lambda role, **k: _Chat())
+    monkeypatch.setattr(M, "chat_text", _ct)
+    monkeypatch.setattr(M, "same_family", lambda a, b: False)
+
+    cfg = load_config(tmp_path / "builds")
+    ws, st = tmp_path / "ws", tmp_path / "staging"
+    ws.mkdir(); st.mkdir()
+    ctx = Ctx(cfg=cfg, build_id="poc-rb", run_dir=_FIXTURE, template=load_template("gradio-chatbot"),
+              build_dir=cfg.builds_dir / "poc-rb", workspace_dir=ws, staging_dir=st,
+              broker=_FaithfulBroker(ws, st), coder=BespokeCoder())
+    state = BuildState(build_id="poc-rb", build_dir=str(ctx.build_dir), workspace_dir=str(ws))
+    for fn in (p0_ingest, p1_spec, p2_plan, p3_scaffold):
+        state = state.model_copy(update=fn(state, ctx))
+
+    state = state.model_copy(update=p4_iterate(state, ctx))          # iter0 → green (M0 only)
+    assert state.iteration_records[-1].status == "green"
+    state = state.model_copy(update=p_critic(state, ctx))            # → next, iteration 1
+    assert state.verdict == "next" and state.iteration == 1
+    state = state.model_copy(update=p4_iterate(state, ctx))          # iter1 coder broken → abandoned
+    assert state.iteration_records[-1].status == "abandoned"
+
+    core_txt = (ws / "core.py").read_text()
+    assert "M0 only" in core_txt and "BAD" not in core_txt           # last GREEN, not the failed edit

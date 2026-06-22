@@ -382,4 +382,18 @@ denials still pass). The same spike under runc resolves names fine.
   hard and descopes, the build is still `done` when the core retrieval criterion + the clean-room
   (published green tests) pass.
 
+## Salvage: the workspace always reflects the last GREEN commit (2026-06-23)
+
+- **An abandoned/descoped iteration's coder edits are DISCARDED** (`git reset --hard HEAD` in P4 when
+  `crit_status != "met"`). Without this, the failed attempt's `core.py` lingers uncommitted and a later
+  `git add -A` (P5 publish, or a met-existing iteration) commits it → the clean-room clones broken code
+  → suite RED → an otherwise-sound build is (correctly) gated to `incomplete`. The pgvector server run
+  exposed exactly this (iter2 descoped → broken `core.py` committed → clean-room failed). `reset --hard`
+  reverts TRACKED files only — untracked `.deps`/caches survive. Green commits + met-existing (no edits)
+  are unaffected.
+- **Corollary:** every published criterion test must pass against the FINAL committed code, because the
+  cumulative gate kept earlier criteria green AND the workspace never advances past a green commit. If a
+  clean-room test fails despite green iterations, suspect (a) the workspace reflecting a failed edit
+  (this salvage fix), or (b) an iteration vs clean-room ENV difference (e.g. a service not reachable).
+
 ## (sections appended as slices land)

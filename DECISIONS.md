@@ -572,3 +572,31 @@ round-trip is the server run.
   P3 spins pgvector with the fixed image/tag/ready_cmd + records the IP + password; the iteration
   sandbox receives `PF_SERVICE_PG_HOST`. The pgvector template's `_embed` is deterministic/normalized
   (ran directly). Contract 11/11; hygiene clean (psycopg lazy-imported, not at module load).
+
+## #17 — Salvage fix: abandoned iterations must roll back to the last green commit (2026-06-23)
+
+**Found by the first S4b server run (a successful test — it caught a real bug + the clean-room gate
+worked).** The pgvector build proved the sibling path end-to-end (service spun + ready @ IP; iter0/iter1
+RED→GREEN against REAL pgvector; service reaped, ZERO leaks) — but came out `incomplete` because the
+**clean-room suite failed**, correctly refusing `done` for a build whose final code was broken.
+
+- **The bug (multi-iteration, not pgvector-specific).** P4 committed ONLY on a green iteration. When a
+  later iteration was abandoned (coder hit the fix cap — here the "no-citation-for-absent-topic"
+  criterion, which needs a relevance threshold), the coder's **last failing uncommitted edit to
+  `core.py` stayed in the working tree**. A subsequent `git add -A` commit (P5's publish, or a
+  met-existing iteration) then swept that broken code into HEAD → P6 cloned it → the clean-room ran
+  broken `generate_reply` (returned the scaffold's "couldn't find" stub for every query) → suite RED.
+  So every criterion showed `[met]` (each passed in its OWN iteration) yet the final committed code was
+  broken. The clean-room GATE caught it (status `incomplete`) — exactly its job.
+- **The fix (design §5.8 salvage).** P4 now, on a non-green iteration (`crit_status != "met"`), runs
+  `git reset --hard HEAD` to discard the failed coder's uncommitted edits — the workspace ALWAYS
+  reflects the last green commit. `reset --hard` reverts tracked files only (untracked `.deps`/caches
+  survive). Green commits + met-existing (no edits) are unaffected. So an abandoned/descoped iteration
+  leaves the tree at the last sound state; P5 commits only the published tests on top; P6 clones sound
+  code. With this, the same pgvector build should be `done` (core retrieval + iter1 met; iter2 descoped
+  + NOT published; clean-room runs the published green tests against pgvector).
+- **Regression guard:** `test_abandoned_iteration_rolls_back_to_last_green` (faithful fake: iter0 green
+  emits `M0 only`, iter1's coder writes `BAD` that breaks the cumulative suite → abandoned → assert the
+  workspace `core.py` is `M0 only`, not `BAD`). 43/43 fakes; contract 11/11.
+- **What the run also validated:** out-of-process broker + the sibling-service infra are sound — the
+  failure was purely the workspace-pollution bug, downstream of the gates working.
