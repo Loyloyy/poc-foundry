@@ -30,6 +30,9 @@ RUN pip install --upgrade pip && pip install -e ".[runtime,obs]"
 # Runtime assets (config/scripts exist; playbooks/templates COPY in when they land).
 COPY config ./config
 COPY scripts ./scripts
+# tests/ carries the committed contract fixtures + suite — needed for the in-container M0(c) check
+# (`run_contract_checks.py`) and the pytest suite. compose also mounts it for live edits.
+COPY tests ./tests
 
 # Default to a harmless help banner; real runs override the command (CLI lands at M2c).
 CMD ["python", "-c", "import poc_foundry; print('poc-foundry', poc_foundry.__version__, '— orchestrator image OK')"]

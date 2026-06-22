@@ -61,7 +61,15 @@ docker network create "$NET_EGR" >/dev/null
 docker run -d --name "$PROXY" --network "$NET_EGR" \
   -e PF_VLLM_ALLOW_HOST="${PF_VLLM_ALLOW_HOST:-}" "$PROXY_IMAGE" >/dev/null
 docker network connect "$NET_INT" "$PROXY"
-sleep 2   # let squid come up
+sleep 3   # let squid come up
+# Fail FAST + LOUD if the proxy didn't stay up: a squid config error aborts startup, the container
+# Exits, its name drops out of Docker DNS, and every check below would fail with a cryptic
+# "could not resolve proxy". Surface the real squid error instead.
+if [ "$(docker inspect -f '{{.State.Running}}' "$PROXY" 2>/dev/null)" != "true" ]; then
+  echo "ERROR: proxy container is not running — squid failed to start. Last logs:"
+  docker logs "$PROXY" 2>&1 | tail -25 | sed 's/^/    /'
+  exit 3
+fi
 docker logs "$PROXY" 2>&1 | grep -qi 'ready to serve\|Accepting\|listening' || true
 
 echo "── ALLOW checks (should succeed THROUGH the proxy) ──"

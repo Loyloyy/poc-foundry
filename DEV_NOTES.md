@@ -106,4 +106,24 @@ the *why* behind architecture choices; this file is the *how* and the traps. Sta
 - **diff edit-format** is applied host-side with `patch -p1` then `-p0` (models vary on a/ b/
   prefixes); malformed diffs fail the attempt — that IS the signal (diff suits strong models only).
 
+## M0 server-run gotchas (found 2026-06-22, first on-server M0)
+
+- **squid FATAL on overlapping allowlist entries.** squid 5.7 aborts startup (FATAL "Bungled …",
+  not a warning) when an allowlist has a wildcard `dstdomain` that overlaps a more-specific sibling —
+  e.g. `.docker.io` together with `registry-1.docker.io`, or `.github.com` with `codeload.github.com`.
+  The container then Exits, its name leaves Docker DNS, and clients fail with "Could not resolve
+  proxy: pf-spike-proxy" (a misleading downstream symptom). **Fix:** keep ONLY the broadest
+  `dstdomain` per domain (the leading-dot wildcard already covers every subdomain). `m0d_egress_spike.sh`
+  now fail-fasts with the squid logs if the proxy isn't Running, so this surfaces directly next time.
+  `squid -k parse` did NOT catch it (it returned 0; the FATAL hit during real startup/store-init) —
+  the running-state check in the spike is the reliable guard.
+- **App image needs `tests/`.** The contract check (`scripts/run_contract_checks.py`) reads
+  `tests/fixtures/sample_artifact`, but the app Dockerfile didn't COPY `tests/` → `NotADirectoryError`
+  in-container. Fixed: `COPY tests ./tests` in the Dockerfile + a `../tests:/app/tests` mount in
+  compose (live edits, no rebuild). Ad-hoc unblock without rebuild:
+  `docker compose -f docker/compose.yaml run --rm -v "$(pwd)/tests:/app/tests" app python scripts/run_contract_checks.py`.
+- **Two-machine git loop.** Local WSL box = git source; the server pulls from GitHub. To test a fix
+  on the server before the git round-trip, hand-edit the file there + rebuild; before the next
+  `git pull`, `git checkout <file>` (or stash) so the pull applies cleanly.
+
 ## (sections appended as slices land)

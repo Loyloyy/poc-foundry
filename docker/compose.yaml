@@ -32,6 +32,7 @@ services:
       - ../config:/app/config            # edit pipeline.yaml without rebuilding
       - ../src:/app/src                  # code changes need no image rebuild
       - ../scripts:/app/scripts
+      - ../tests:/app/tests              # contract fixtures + suite (live; also COPYd into the image)
       # builds/ = emitted PoCs (server-local, gitignored). On NFS PRE-CREATE first (root-squash blocks
       # mkdir): `mkdir -p ../builds && chmod 777 ../builds`.
       - ../builds:/app/builds
