@@ -82,11 +82,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       M1; red-first best-effort (DECISIONS #11).*
 - [x] **S5 gradio template built (2026-06-22)** — `templates/gradio-chatbot/` (start-green core/UI
       split, pinned gradio, smoke suite, seeded RUN/README/AGENTS, manifest, pf:-tagged RUN blocks).
-- [ ] **(needs server)** end-to-end run on real Kata: one fixture → `builds/<id>/` (the M1 gate).
-- **Acceptance:** one fixture artifact runs end-to-end on the server; emits a `builds/<id>/` with a
-      valid `PoCBuildArtifact`; claim proven = orchestrator-writes / sandbox-executes.
-      Local: `py_compile` clean, no heavy stack at import, `tests/test_m1_spine.py` 7/7 (fakes),
-      contract 11/11. **Server run is the remaining gate.**
+- [x] **end-to-end run on real Kata GREEN (2026-06-22) — M1 GATE MET.** One fixture
+      (`tests/fixtures/sample_artifact`) → `builds/poc-…/` with `status=done`,
+      `demonstrates_core_value=yes`. P0→P7 all green on real Kata VMs + the egress proxy + GLM roles;
+      GLM wrote a real 5-criterion RAG-citation spec; scaffold GREEN in a fresh VM; coder RED→GREEN in
+      1 attempt; **clean-room install=test=demo=TRUE** (every RUN.md block runs in a fresh clone+VM).
+      Server fixes folded in: app image needs `docker-cli` not `docker.io` (Debian-13 split); git
+      `safe.directory` global (root over uid-1000 repos); gradio 4.44.1 needs `huggingface_hub==0.24.7`
+      (HfFolder). Claim proven: **orchestrator-writes / sandbox-executes**.
+- **Acceptance:** ✅ one fixture runs end-to-end on the server; emits a `builds/<id>/` with a valid
+      `PoCBuildArtifact`; claim proven = orchestrator-writes / sandbox-executes. Local: `py_compile`
+      clean, no heavy stack at import, `tests/test_m1_spine.py` 7/7, contract 11/11. **M1 COMPLETE → M2a.**
 
 ## M2a — gates
 - [ ] tester + adequacy review + critic verdict set + fix/descope/replan/respec + cumulative suite +

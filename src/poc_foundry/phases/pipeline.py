@@ -109,6 +109,13 @@ def p1_spec(state, ctx: Ctx) -> dict:
     spec = _normalize_spec(spec, ctx.template)
     lint = _lint_spec(spec)
 
+    # A buildable spec with no testable criteria can't drive P4 (and would crash on criteria[0]) —
+    # treat it honestly as NOT_BUILDABLE rather than emitting a vacuous build.
+    if spec.buildable and not spec.success_criteria:
+        spec.buildable = False
+        spec.not_buildable_reasons = (spec.not_buildable_reasons or
+                                      ["architect produced no testable success criteria"])
+
     if not spec.buildable:
         ctx.say(f"P1 spec: NOT_BUILDABLE — {'; '.join(spec.not_buildable_reasons) or 'no reason given'}")
         return {"phase": "spec", "spec": spec, "status": "not-buildable",

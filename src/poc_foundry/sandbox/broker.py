@@ -171,16 +171,22 @@ class Broker:
         if proxy_image not in self.allowed_images:
             raise BrokerInvariantError(f"proxy image {proxy_image!r} not in allowlist")
 
-        _run(["docker", "network", "create", "--internal", self.net_internal], check=True)
-        _run(["docker", "network", "create", self.net_egress], check=True)
-        _run(["docker", "volume", "create", self.uv_volume], check=True)
+        # Atomic: if ANY step fails (e.g. the proxy doesn't come up after the networks/volume were
+        # created), tear down the partial state so a failed provision never leaks docker resources.
+        try:
+            _run(["docker", "network", "create", "--internal", self.net_internal], check=True)
+            _run(["docker", "network", "create", self.net_egress], check=True)
+            _run(["docker", "volume", "create", self.uv_volume], check=True)
 
-        vllm_host = getattr(self.cfg, "vllm_allow_host", "") or ""
-        _run(["docker", "run", "-d", "--name", self.proxy_name, "--network", self.net_egress,
-              "-e", f"PF_VLLM_ALLOW_HOST={vllm_host}", proxy_image], check=True)
-        _run(["docker", "network", "connect", self.net_internal, self.proxy_name], check=True)
+            vllm_host = getattr(self.cfg, "vllm_allow_host", "") or ""
+            _run(["docker", "run", "-d", "--name", self.proxy_name, "--network", self.net_egress,
+                  "-e", f"PF_VLLM_ALLOW_HOST={vllm_host}", proxy_image], check=True)
+            _run(["docker", "network", "connect", self.net_internal, self.proxy_name], check=True)
+            self.proxy_url = self._await_proxy()
+        except Exception:
+            self.destroy()
+            raise
 
-        self.proxy_url = self._await_proxy()
         self._provisioned = True
         self._log(f"provisioned net={self.net_internal}/{self.net_egress} proxy={self.proxy_url}")
 
@@ -301,9 +307,12 @@ class Broker:
     def destroy(self) -> None:
         for sbx in list(self._sandboxes.values()):
             sbx.destroy()
+        # Always attempt teardown of the named resources (rm/network rm/volume rm are idempotent —
+        # no-ops if absent), so even a PARTIAL provision is fully cleaned. Order: sandboxes →
+        # proxy → networks → volume (a network can't be removed while a container is attached).
+        _run(["docker", "rm", "-f", self.proxy_name], check=False)
+        _run(["docker", "network", "rm", self.net_internal, self.net_egress], check=False)
+        _run(["docker", "volume", "rm", self.uv_volume], check=False)
         if self._provisioned:
-            _run(["docker", "rm", "-f", self.proxy_name], check=False)
-            _run(["docker", "network", "rm", self.net_internal, self.net_egress], check=False)
-            _run(["docker", "volume", "rm", self.uv_volume], check=False)
-            self._provisioned = False
             self._log("destroyed build environment")
+        self._provisioned = False

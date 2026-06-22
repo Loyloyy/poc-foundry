@@ -296,5 +296,37 @@ per the slice discipline; structural calls stayed inside M1 scope (no §10 ledge
 core/graph/cli/phases pulls **no** langchain/langgraph; the template stamps + its core is start-green;
 a fakes dry-run runs P0→P7 to `status=done` (RED→GREEN coder fired, clean-room green, artifact +
 workspace emitted); NOT_BUILDABLE short-circuits to `not-buildable`; broker invariant guards raise;
-`tests/test_m1_spine.py` 7/7 (via a pytest shim). Contract tests still 11/11. **Server run pending**
-(the M1 gate): one fixture → `builds/<id>/` end-to-end on real Kata.
+`tests/test_m1_spine.py` 7/7 (via a pytest shim). Contract tests still 11/11.
+
+**M1 GATE GREEN on the server (2026-06-22).** One fixture → `builds/poc-…/` with `status=done`,
+`demonstrates_core_value=yes`, **clean-room install=test=demo all TRUE**, on real Kata + the egress
+proxy + GLM. P1 spec quality is good (GLM produced a coherent 5-criterion RAG-citation spec, one core;
+the M0(c) spec-grading tail is satisfied). Four server-only fixes were needed (all logged in
+DEV_NOTES "M1 broker + pipeline" + the new gotchas):
+1. **app image: install `docker-cli`, not `docker.io`.** Debian 13 split the monolith — `docker.io
+   --no-install-recommends` ships `dockerd`/`docker-init` but **no `/usr/bin/docker`**; the broker
+   shells out to `docker`. `docker-cli` is the client (lighter; we use the host socket).
+2. **git `safe.directory` must be GLOBAL, not `-c`.** The orchestrator (root) git-operates on
+   workspaces chown'd to uid 1000; git ignores `safe.directory` from `-c`/local config (security), and
+   local-path `git clone` in particular needs it global → `ensure_git_global_safe()` sets it (root-only
+   guard so a dev box is untouched) + the image sets it too.
+3. **gradio dep pin.** `gradio==4.44.1` imports `HfFolder` (removed in `huggingface_hub>=0.26`); uv's
+   latest resolve broke gradio at import in the clean-room `demo` step → pinned `huggingface_hub==0.24.7`.
+   Lesson: start-green templates must pin the *transitive* break-prone deps, not just the headline one.
+4. **drop `analytics_enabled=` from `gr.ChatInterface`** (env var is the version-stable disable).
+Also hardened P6 to capture the failing clean-room step's output into `caveats[]`/report (that's how
+fix #3 was diagnosed in one round-trip).
+
+**Foundation-hardening pass (post-gate, before M2a)** — close cracks that would compound over M2a's
+many iterations:
+- **No resource leaks on partial provision.** `Broker.provision()` is now atomic — if any step fails
+  (e.g. the proxy never reaches Running after the networks/volume exist), it calls `destroy()` and
+  re-raises; `destroy()` unconditionally rm's the named resources (idempotent) so nothing leaks. Both
+  `build_poc`/`resume_build` now call `provision()` INSIDE the try so a provision failure also gets a
+  forensic artifact + teardown. Regression-tested (`test_broker_partial_provision_cleans_up`).
+- **Empty-criteria spec ≠ crash.** A buildable spec with zero success criteria would crash P4 on
+  `criteria[0]`; P1 now flips it to NOT_BUILDABLE ("architect produced no testable criteria"). Tested.
+- Spine suite now 8/8.
+
+**M1 COMPLETE → M2a (gates: tester/critic, ledger, scanner, clean-room GATES, out-of-process broker,
+sibling services).**

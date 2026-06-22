@@ -78,8 +78,8 @@ def build_poc(source: str | Path, brief: str = "", *, driver: str = "tech-scout"
     state = BuildState(build_id=build_id, brief=brief, driver=driver, source_dir=str(run_dir),
                        build_dir=str(build_dir), workspace_dir=str(ctx.workspace_dir))
 
-    broker.provision()
     try:
+        broker.provision()
         graph = build_graph(ctx, cfg)
         graph.invoke(state, config={"configurable": {"thread_id": build_id}})
     except Exception as e:  # noqa: BLE001 — leave a forensic artifact, then surface the error
@@ -127,8 +127,8 @@ def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime
     ctx, broker = _prepare(cfg, build_id, run_dir, meta.get("template", cfg.default_template), runtime)
     ctx.run_folder = load_run(run_dir)   # phases resumed past P0 still need the loaded artifact
 
-    broker.provision()
     try:
+        broker.provision()
         graph = build_graph(ctx, cfg)
         graph.invoke(None, config={"configurable": {"thread_id": build_id}})  # None → resume
     finally:

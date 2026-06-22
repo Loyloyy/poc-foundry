@@ -186,6 +186,22 @@ denials still pass). The same spike under runc resolves names fine.
   the daemon is the host's via the mounted socket. From Debian mirrors (build-time apt reachable). (If
   `docker-cli` is ever absent, the Docker apt repo's `docker-ce-cli` works but needs
   `download.docker.com` egress at build, which is NOT confirmed on this server.)
+- **git `safe.directory` must be GLOBAL — `-c` is ignored.** Root operating git on a uid-1000-owned
+  workspace trips "detected dubious ownership" (exit 128). Git **deliberately ignores `safe.directory`
+  set via `-c` on the command line or local config** (so a malicious repo can't whitelist itself) — it
+  only honours system/global config. `git add`/`commit` sometimes slip through with `-c`, but local-path
+  `git clone <workspace>` (P6) strictly needs it GLOBAL. Fix: `ensure_git_global_safe()` runs
+  `git config --global safe.directory '*'` **only when `os.geteuid()==0`** (so a dev box's gitconfig is
+  never touched), called from `git_init`; the app image sets it too (belt). Every `git()` call also
+  passes `-c safe.directory=*` (harmless defence).
+- **Start-green templates must pin TRANSITIVE break-prone deps.** `gradio==4.44.1` does
+  `from huggingface_hub import HfFolder` (removed in `huggingface_hub>=0.26`); `uv pip install`'s latest
+  resolve pulled a hub that broke gradio AT IMPORT — only the clean-room `demo` step (`import app`)
+  caught it (install + the stdlib smoke suite both pass without importing gradio). Pin
+  `huggingface_hub==0.24.7` alongside gradio. Also: don't pass `analytics_enabled=` to
+  `gr.ChatInterface` (not accepted across all 4.x point releases) — the env var
+  `GRADIO_ANALYTICS_ENABLED=False` is the stable disable. **Diagnosing this needed P6 to capture the
+  failing step's stderr into `caveats[]`** — it does now (don't run the clean-room blind).
 - **Broker reaches the proxy by IP** (Kata has no Docker name-DNS, DECISIONS #9): `provision()`
   inspects the proxy's internal-net IP and injects `HTTPS_PROXY=http://<ip>:3128`. Sibling services
   (M2a) are reached by IP the same way (`broker.service_ip`).

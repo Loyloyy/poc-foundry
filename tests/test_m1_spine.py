@@ -40,6 +40,41 @@ def test_broker_rejects_caps_and_untame_mounts():
     b._check_mounts([Mount("/var/tmp/ws", "/work", True)])
 
 
+def test_broker_partial_provision_cleans_up(monkeypatch):
+    """A provision that fails AFTER creating networks/volume must tear them down (no leak)."""
+    import poc_foundry.sandbox.broker as B
+
+    calls = []
+
+    class _R:
+        def __init__(self, rc=0, out="", err=""):
+            self.rc, self.stdout, self.stderr = rc, out, err
+
+        @property
+        def ok(self):
+            return self.rc == 0
+
+        @property
+        def combined(self):
+            return self.stdout + self.stderr
+
+    def fake_run(cmd, *, check, timeout_s=300):
+        calls.append(cmd)
+        if cmd[:3] == ["docker", "inspect", "-f"]:   # proxy Running-poll never goes true
+            return _R(0, "false\n")
+        return _R(0, "ok")
+
+    monkeypatch.setattr(B, "_run", fake_run)
+    monkeypatch.setattr(B.time, "sleep", lambda *a: None)
+
+    b = _broker()
+    with pytest.raises(B.BrokerError):
+        b.provision()
+    flat = " ".join(" ".join(c) for c in calls)
+    assert b.proxy_name in flat and b.net_internal in flat and b.uv_volume in flat
+    assert b._provisioned is False
+
+
 # ── coder loop (red→green, forbidden-file guard) ─────────────────────────────
 def test_bespoke_coder_red_to_green(tmp_path):
     from poc_foundry.coder import BespokeCoder
