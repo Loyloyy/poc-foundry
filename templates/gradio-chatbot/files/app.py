@@ -20,7 +20,9 @@ def _respond(message: str, history: list) -> str:
     return generate_reply(message, history)
 
 
-demo = gr.ChatInterface(fn=_respond, title="PoC Chatbot", analytics_enabled=False)
+# Analytics are disabled via GRADIO_ANALYTICS_ENABLED above (the canonical, version-stable way) —
+# don't pass analytics_enabled= to ChatInterface (not accepted across all gradio 4.x point releases).
+demo = gr.ChatInterface(fn=_respond, title="PoC Chatbot")
 
 
 if __name__ == "__main__":

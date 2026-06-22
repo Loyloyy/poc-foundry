@@ -270,25 +270,33 @@ def p6_cleanroom(state, ctx: Ctx) -> dict:
 
     blocks = parse_run_blocks((clone / "RUN.md").read_text())
     result = {"quickstart_ok": False, "suite_ok": False, "demo_ok": False}
+    fails: list[str] = []
     sbx = ctx.broker.create(mounts=[ws_mount(clone)], name="cleanroom")
     try:
         if "install" in blocks:
             r = sbx.exec(f"cd /work && {blocks['install']}", timeout_s=1800)
             result["quickstart_ok"] = r.ok
             if not r.ok:
-                ctx.say("P6 cleanroom: install FAILED\n" + r.combined[-600:])
+                fails.append("install:\n" + r.combined[-700:])
         if "test" in blocks and result["quickstart_ok"]:
             r = sbx.exec(f"cd /work && {blocks['test']}", timeout_s=600)
             result["suite_ok"] = r.ok
+            if not r.ok:
+                fails.append("test:\n" + r.combined[-700:])
         if "demo" in blocks and result["quickstart_ok"]:
             r = sbx.exec(f"cd /work && {blocks['demo']}", timeout_s=300)
             result["demo_ok"] = r.ok
+            if not r.ok:
+                fails.append("demo:\n" + r.combined[-700:])
     finally:
         sbx.destroy()
 
+    for f in fails:
+        ctx.say("P6 cleanroom FAILED step — " + f)
     ctx.say(f"P6 cleanroom: install={result['quickstart_ok']} test={result['suite_ok']} "
             f"demo={result['demo_ok']}")
     return {"phase": "cleanroom", "cleanroom": result,
+            "caveats": state.caveats + [f"cleanroom {f.splitlines()[0]}" for f in fails],
             "tests_total": max(state.tests_total, len(state.staged_tests) + 1),
             "tests_passing": (len(state.staged_tests) + 1) if result["suite_ok"] else state.tests_passing,
             "log": state.log + [f"P6 cleanroom: suite_ok={result['suite_ok']}"]}
