@@ -107,8 +107,18 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       Local: **24/24 fakes** (`run_spine_tests.py`: 8 spine + 16 gates incl. 3 planted-gaming caught)
       + contract 11/11 + import-hygiene clean. *Server: re-run the M1 gate to confirm the happy path
       still `done` with inventory_ok=true.*
-- [ ] S2 critic gate + verdict ladder (pass/fix/descope/replan/respec) + adequacy review +
-      degraded-critic + cumulative suite (LangGraph conditional routing around P4).
+- [~] **S2 critic gate + verdict ladder (2026-06-22, local):** new `p_critic` node + `_after_critic`
+      LangGraph routing around P4 (fix→iterate, respec→spec, replan→plan, pass/descope→docs; cycles
+      bounded by `fix_limit_k`/`respec_cap`/`replan_cap` + a recursion_limit). Critic **adequacy
+      review** (`critic` role, structured `AdequacyReview`) on a green iteration; **degraded-critic**
+      auto-detected via `models.same_family("critic","coder")` → lower K (`degraded_fix_limit_k`) +
+      `security.degraded_critic=true`, and in degraded mode the adequacy verdict is **advisory
+      (caveat), non-blocking** (a same-family judge can't independently certify — keeps the server
+      happy-path green; blocking adequacy returns with a frontier critic). `descope_report[]`
+      populated on descope; report gains Critic + Descope sections. Local: **32/32 fakes** (8 spine +
+      24 gates incl. the full verdict ladder + routing) + contract 11/11 + import-hygiene clean.
+      *Server: re-run the gate — happy path still `done`, now showing degraded_critic=true + critic
+      verdict=pass.* Cumulative suite deferred to S3 (meaningful only with multi-iteration).
 - [ ] S3 architect-driven multi-iteration P2 + clean-room GATES (red clean-room suite → never `done`).
 - [ ] S4 out-of-process broker (orchestrator drops the docker socket) + real sibling services.
 - **Acceptance:** a planted test-gaming attempt is caught by the ledger/scanner; clean-room gates

@@ -21,6 +21,7 @@ critic:
   fix_limit_k: 3                   # `fix` verdicts before forced descope-or-replan
   respec_cap: 1                    # spec revisions allowed (versioned)
   degraded_fix_limit_k: 2          # lower K when critic.family == coder.family (degraded-critic mode)
+  replan_cap: 1                    # replan-remaining verdicts before forced descope
 
 # ── License gate (design §3.15) ─────────────────────────────────────────────
 # permissive → may adapt code/**; copyleft/unknown → patterns-only, never copied, flagged in docs.

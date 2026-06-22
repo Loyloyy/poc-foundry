@@ -10,6 +10,7 @@ from poc_foundry.phases.pipeline import (
     p5_docs,
     p6_cleanroom,
     p7_emit,
+    p_critic,
 )
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "p2_plan",
     "p3_scaffold",
     "p4_iterate",
+    "p_critic",
     "p5_docs",
     "p6_cleanroom",
     "p7_emit",

@@ -43,6 +43,17 @@ def resolve_role(role: str) -> tuple[str, str, str]:
     return model, base, key
 
 
+def same_family(role_a: str, role_b: str) -> bool:
+    """True if two roles resolve to the SAME served model id — the degraded-critic test (design §5.4:
+    critic independence is contingent on a distinct judge family; otherwise degraded mode + a lower K
+    apply, recorded in ``security.degraded_critic``). CONSERVATIVE: if either role can't be resolved,
+    assume same-family (degraded) so we never silently over-trust an unconfigured critic."""
+    try:
+        return resolve_role(role_a)[0] == resolve_role(role_b)[0]
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def build_chat_model(role: str, *, temperature: float | None = None, max_tokens: int = 4000,
                      timeout: int | None = None):
     """A LangChain `ChatOpenAI` bound to the role's endpoint (lazy import). For structured calls

@@ -81,7 +81,7 @@ def build_poc(source: str | Path, brief: str = "", *, driver: str = "tech-scout"
     try:
         broker.provision()
         graph = build_graph(ctx, cfg)
-        graph.invoke(state, config={"configurable": {"thread_id": build_id}})
+        graph.invoke(state, config={"configurable": {"thread_id": build_id}, "recursion_limit": 60})
     except Exception as e:  # noqa: BLE001 — leave a forensic artifact, then surface the error
         _emit_failed(build_dir, build_id, ctx, e)
         raise
@@ -130,7 +130,8 @@ def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime
     try:
         broker.provision()
         graph = build_graph(ctx, cfg)
-        graph.invoke(None, config={"configurable": {"thread_id": build_id}})  # None → resume
+        graph.invoke(None, config={"configurable": {"thread_id": build_id},   # None → resume
+                                   "recursion_limit": 60})
     finally:
         broker.destroy()
 

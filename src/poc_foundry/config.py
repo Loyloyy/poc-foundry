@@ -59,6 +59,12 @@ class BuildConfig:
     max_iterations: int
     toolcalls_per_attempt: int
 
+    # critic gate (pipeline.yaml `critic:`, env-overridable) — design §5.4/§5.8
+    fix_limit_k: int
+    respec_cap: int
+    degraded_fix_limit_k: int
+    replan_cap: int
+
     # templates
     default_template: str
 
@@ -72,6 +78,7 @@ def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
     y = _yaml(_PIPELINE_YAML)
     budgets = y.get("budgets", {})
     templates = y.get("templates", {})
+    critic = y.get("critic", {})
 
     ws = os.environ.get("PF_WORKSPACE_DIR", "").strip() or "/var/tmp/pf-workspaces"
     return BuildConfig(
@@ -86,5 +93,9 @@ def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
         stuck_research_after=_int_env("PF_STUCK_RESEARCH_AFTER", int(budgets.get("stuck_research_after", 2))),
         max_iterations=_int_env("PF_MAX_ITERATIONS", int(budgets.get("max_iterations", 8))),
         toolcalls_per_attempt=_int_env("PF_TOOLCALLS_PER_ATTEMPT", int(budgets.get("toolcalls_per_attempt", 25))),
+        fix_limit_k=_int_env("PF_FIX_LIMIT_K", int(critic.get("fix_limit_k", 3))),
+        respec_cap=_int_env("PF_RESPEC_CAP", int(critic.get("respec_cap", 1))),
+        degraded_fix_limit_k=_int_env("PF_DEGRADED_FIX_LIMIT_K", int(critic.get("degraded_fix_limit_k", 2))),
+        replan_cap=_int_env("PF_REPLAN_CAP", int(critic.get("replan_cap", 1))),
         default_template=str(templates.get("default", "gradio-chatbot")),
     )

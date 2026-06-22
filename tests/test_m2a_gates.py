@@ -250,3 +250,102 @@ def test_p4_diff_scanner_catches_a_gaming_coder(tmp_path, monkeypatch):
     assert any("hard-exit" in i for i in state.incidents)
     assert not any(c.core and c.status == "met" for c in state.spec.success_criteria)
     assert _final_status(state.model_copy(update={"cleanroom": {"suite_ok": True}})) != "done"
+
+
+# ── S2: critic gate + verdict ladder ─────────────────────────────────────────
+def _critic_ctx(monkeypatch, tmp_path, *, adequate=True, degraded=False, reason=""):
+    import poc_foundry.models as M
+    from poc_foundry.phases import Ctx, load_template
+    from poc_foundry.state import AdequacyReview
+
+    class _Structured:
+        def invoke(self, messages):
+            return AdequacyReview(adequate=adequate, reason=reason or ("ok" if adequate else "trivial"))
+
+    class _Chat:
+        def with_structured_output(self, model):
+            return _Structured()
+
+    monkeypatch.setattr(M, "build_chat_model", lambda role, **k: _Chat())
+    monkeypatch.setattr(M, "same_family", lambda a, b: degraded)
+    cfg = load_config(tmp_path / "builds")
+    return Ctx(cfg=cfg, build_id="poc-x", run_dir=tmp_path, template=load_template("gradio-chatbot"),
+               build_dir=tmp_path, workspace_dir=tmp_path, staging_dir=tmp_path, broker=None, coder=None)
+
+
+def _critic_state(status, *, core_text="reply starts with 'ECHO:'", incidents=(), **kw):
+    from poc_foundry.artifact import IterationRecord
+    base = dict(build_id="poc-x",
+                spec=Spec(goal="g", success_criteria=[SuccessCriterion(text=core_text, core=True,
+                                                                       status=("met" if status == "green" else "pending"))]),
+                iteration_records=[IterationRecord(goal="g", status=status, attempts=1, tests_added=1)],
+                pending_criterion=core_text, pending_test_src="def test_x():\n    assert True\n",
+                incidents=list(incidents))
+    base.update(kw)
+    return BuildState(**base)
+
+
+def test_critic_passes_an_adequate_green(tmp_path, monkeypatch):
+    from poc_foundry.phases.pipeline import p_critic
+    ctx = _critic_ctx(monkeypatch, tmp_path, adequate=True)
+    upd = p_critic(_critic_state("green"), ctx)
+    assert upd["verdict"] == "pass"
+    assert upd["degraded_critic"] is False
+
+
+def test_critic_respecs_an_inadequate_green(tmp_path, monkeypatch):
+    from poc_foundry.phases.pipeline import p_critic
+    ctx = _critic_ctx(monkeypatch, tmp_path, adequate=False)
+    upd = p_critic(_critic_state("green", respec_count=0), ctx)
+    assert upd["verdict"] == "respec"
+    assert upd["respec_count"] == 1
+
+
+def test_critic_descopes_inadequate_after_respec_cap(tmp_path, monkeypatch):
+    from poc_foundry.phases.pipeline import p_critic
+    ctx = _critic_ctx(monkeypatch, tmp_path, adequate=False)   # respec_cap defaults to 1
+    upd = p_critic(_critic_state("green", respec_count=1), ctx)
+    assert upd["verdict"] == "descope"
+    assert upd["descope_report"] and upd["descope_report"][0]["criterion"] == "reply starts with 'ECHO:'"
+    assert any(c.status == "descoped" for c in upd["spec"].success_criteria)
+
+
+def test_critic_fixes_then_replans_then_descopes_a_failing_coder(tmp_path, monkeypatch):
+    from poc_foundry.phases.pipeline import p_critic
+    ctx = _critic_ctx(monkeypatch, tmp_path)                   # fix_limit_k=3 default
+    assert p_critic(_critic_state("abandoned", fix_count=0), ctx)["verdict"] == "fix"
+    assert p_critic(_critic_state("abandoned", fix_count=3), ctx)["verdict"] == "replan"   # K spent
+    desc = p_critic(_critic_state("abandoned", fix_count=3, replan_count=1), ctx)          # replan spent
+    assert desc["verdict"] == "descope" and desc["descope_report"]
+
+
+def test_critic_descopes_an_integrity_incident_never_rewards_gaming(tmp_path, monkeypatch):
+    from poc_foundry.phases.pipeline import p_critic
+    ctx = _critic_ctx(monkeypatch, tmp_path, adequate=True)    # even with an "adequate" test...
+    upd = p_critic(_critic_state("green", incidents=["[high] hard-exit: core.py: + sys.exit(0)"]), ctx)
+    assert upd["verdict"] == "descope"                        # ...a high-sev incident is never a pass
+
+
+def test_degraded_critic_adequacy_is_advisory_not_blocking(tmp_path, monkeypatch):
+    """A same-family (degraded) critic cannot independently certify adequacy → an 'inadequate' verdict
+    on a GREEN iteration is recorded as a caveat but does NOT respec/descope (the hard walls gate)."""
+    from poc_foundry.phases.pipeline import p_critic
+    ctx = _critic_ctx(monkeypatch, tmp_path, adequate=False, degraded=True)
+    upd = p_critic(_critic_state("green"), ctx)
+    assert upd["verdict"] == "pass"
+    assert any("degraded" in c for c in upd.get("caveats", []))
+
+
+def test_degraded_critic_lowers_the_fix_budget(tmp_path, monkeypatch):
+    from poc_foundry.phases.pipeline import p_critic
+    ctx = _critic_ctx(monkeypatch, tmp_path, degraded=True)   # degraded_fix_limit_k=2 default
+    assert p_critic(_critic_state("abandoned", fix_count=0), ctx)["degraded_critic"] is True
+    assert p_critic(_critic_state("abandoned", fix_count=1), ctx)["verdict"] == "fix"
+    assert p_critic(_critic_state("abandoned", fix_count=2), ctx)["verdict"] == "replan"  # K=2 spent earlier
+
+
+def test_after_critic_routing_maps_every_verdict():
+    from poc_foundry.graph import _after_critic
+    cases = {"fix": "iterate", "respec": "spec", "replan": "plan", "pass": "docs", "descope": "docs"}
+    for verdict, node in cases.items():
+        assert _after_critic(BuildState(build_id="x", verdict=verdict)) == node

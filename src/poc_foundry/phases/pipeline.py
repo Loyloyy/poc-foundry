@@ -290,6 +290,7 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     return {"phase": "iterate", "spec": spec, "commit_sha": sha,
             "iteration_records": state.iteration_records + [rec],
             "staged_tests": state.staged_tests + ["test_criterion.py"],
+            "pending_test_src": test_src, "pending_criterion": core.text,
             "authored_test_ids": state.authored_test_ids + sorted(authored),
             "inventory_ok": state.inventory_ok and inv_ok,
             "red_first_ok": state.red_first_ok and red_first_ok,
@@ -297,6 +298,98 @@ def p4_iterate(state, ctx: Ctx) -> dict:
             "iteration": state.iteration + 1,
             "caveats": state.caveats + ([note] if note else []),
             "log": state.log + [f"P4 iterate: {it_status} (attempts={attempts})"]}
+
+
+# ── critic gate + verdict ladder (design §5.4, §5.8) ─────────────────────────
+def _critic_adequacy(ctx: Ctx, criterion: str, test_src: str):
+    """Critic adequacy review: is passing this staged test trustworthy evidence for the criterion?
+    Defaults to adequate if the critic endpoint is unreachable (the ledger/red-first/scanner walls
+    still gate — the critic is an ADDED layer, never the sole gate)."""
+    from poc_foundry.state import AdequacyReview
+    try:
+        from poc_foundry.models import build_chat_model
+        llm = build_chat_model("critic").with_structured_output(AdequacyReview)
+        rv = llm.invoke([("system", prompts.CRITIC_SYSTEM),
+                         ("human", prompts.critic_adequacy_prompt(criterion, test_src, ctx.template.interface))])
+        return AdequacyReview(**rv) if isinstance(rv, dict) else rv
+    except Exception as e:  # noqa: BLE001 — critic is additive; never crash the build on its absence
+        return AdequacyReview(adequate=True, reason=f"critic unavailable ({type(e).__name__}); defaulting adequate")
+
+
+def p_critic(state, ctx: Ctx) -> dict:
+    """Adequacy review + the verdict ladder (pass / fix / descope / replan / respec). Wired as
+    conditional routing around P4 in ``graph.py``. Verdicts are gated by ``fix_limit_k`` (or
+    ``degraded_fix_limit_k`` when critic.family == coder.family) / ``replan_cap`` / ``respec_cap``;
+    on exhaustion the criterion is descoped honestly (recorded in ``descope_report[]``)."""
+    from poc_foundry.models import same_family
+
+    cfg = ctx.cfg
+    degraded = same_family("critic", "coder")
+    K = cfg.degraded_fix_limit_k if degraded else cfg.fix_limit_k
+
+    last = state.iteration_records[-1] if state.iteration_records else None
+    status = last.status if last else "abandoned"
+    has_incident = any(s.startswith("[high]") for s in state.incidents)
+    crit_text = state.pending_criterion
+
+    upd: dict = {"phase": "critic", "degraded_critic": degraded}
+    descope: tuple | None = None
+
+    if status == "green" and not has_incident:
+        review = _critic_adequacy(ctx, crit_text, state.pending_test_src)
+        if review.adequate:
+            verdict, reason = "pass", review.reason or "adequate"
+        elif degraded:
+            # A same-family critic can't INDEPENDENTLY certify adequacy (design §5.4) — so in degraded
+            # mode its adequacy concern is ADVISORY (recorded, non-blocking), never a respec/descope.
+            # The hard walls (ledger / red-first / diff-scanner) still gate. Blocking adequacy returns
+            # when a distinct frontier critic lands.
+            verdict, reason = "pass", "adequacy concern recorded (degraded critic, non-blocking)"
+            upd["caveats"] = state.caveats + [f"critic (degraded, advisory): {review.reason}"]
+        elif state.respec_count < cfg.respec_cap:
+            verdict, reason = "respec", review.reason or "test inadequate / gameable"
+        else:
+            verdict, reason = "descope", review.reason or "test inadequate; respec cap reached"
+            descope = (crit_text, reason)
+    elif has_incident:
+        verdict, reason = "descope", "integrity incident — gamed iteration not rewarded"
+        descope = (crit_text, reason)
+    elif status == "red-first-failed":
+        # the tester wrote a non-red test; a re-author may help, gated like a fix
+        if state.fix_count < K:
+            verdict, reason = "fix", "red-first failure — re-author the test"
+        else:
+            verdict, reason = "descope", "red-first failures exhausted fix budget"
+            descope = (crit_text, reason)
+    else:  # coder did not reach green
+        if state.fix_count < K:
+            verdict, reason = "fix", "coder did not reach green — another iteration"
+        elif state.replan_count < cfg.replan_cap:
+            verdict, reason = "replan", "fix budget exhausted — replan remaining"
+        else:
+            verdict, reason = "descope", "fix + replan budgets exhausted"
+            descope = (crit_text, reason)
+
+    upd["verdict"] = verdict
+    if verdict == "fix":
+        upd["fix_count"] = state.fix_count + 1
+    elif verdict == "respec":
+        upd["respec_count"] = state.respec_count + 1
+    elif verdict == "replan":
+        upd["replan_count"] = state.replan_count + 1
+    elif verdict == "descope" and descope:
+        spec = state.spec
+        for c in spec.success_criteria:
+            if c.text == descope[0]:
+                c.status = "descoped"
+        upd["spec"] = spec
+        upd["descope_report"] = state.descope_report + [{
+            "criterion": descope[0], "attempts_made": state.fix_count + 1, "why_failed": descope[1],
+            "finish_path": "re-run with `refine` on a frontier `coder` endpoint, or finish by hand in OpenCode"}]
+
+    ctx.say(f"critic: verdict={verdict} ({reason}); degraded_critic={degraded}")
+    upd["log"] = state.log + [f"critic: {verdict} ({reason})"]
+    return upd
 
 
 # ── P5 docs ──────────────────────────────────────────────────────────────────
@@ -393,6 +486,7 @@ def p7_emit(state, ctx: Ctx) -> dict:
     from poc_foundry.artifact import (
         Budget,
         CleanroomResult,
+        DescopeItem,
         FinalVerdict,
         PoCBuildArtifact,
         SecurityInfo,
@@ -431,12 +525,18 @@ def p7_emit(state, ctx: Ctx) -> dict:
         cleanroom=CleanroomResult(**{k: bool(v) for k, v in state.cleanroom.items()}),
         demo_quality=state.demo_quality,
         final_verdict=FinalVerdict(demonstrates_core_value=demonstrates),
+        descope_report=[DescopeItem(criterion=d.get("criterion", ""),
+                                    attempts_made=int(d.get("attempts_made", 0)),
+                                    why_failed=d.get("why_failed", ""),
+                                    finish_path=d.get("finish_path", ""))
+                        for d in state.descope_report],
         stack=[StackItem(layer=s.get("layer", ""), choice=s.get("choice", ""),
                          pinned_version=s.get("pinned_version")) for s in ctx.template.stack],
         template=TemplateRef(name=ctx.template.name, version=ctx.template.version),
         licenses=[ctx.template.license] if ctx.template.license else [],
         security=SecurityInfo(sandbox="kata", egress_allowlist=allowlist,
-                              incidents=list(state.incidents)),
+                              incidents=list(state.incidents),
+                              degraded_critic=bool(state.degraded_critic)),
         budget=Budget(),
         caveats=state.caveats,
         status=status,
@@ -485,6 +585,16 @@ def _report_md(state, ctx: Ctx, pa) -> str:
               f"- red-first: {'OK' if state.red_first_ok else 'VIOLATION'}",
               f"- incidents: {len(pa.security.incidents)}"]
     lines += [f"  - {i}" for i in pa.security.incidents]
+    lines += ["", "## Critic gate (§5.4)", "",
+              f"- last verdict: {state.verdict or 'pass'}",
+              f"- degraded_critic: {pa.security.degraded_critic} "
+              f"(fix budget K={ctx.cfg.degraded_fix_limit_k if pa.security.degraded_critic else ctx.cfg.fix_limit_k}; "
+              f"fixes={state.fix_count}, respecs={state.respec_count}, replans={state.replan_count})"]
+    if pa.descope_report:
+        lines += ["", "## Descope report", ""]
+        for d in pa.descope_report:
+            lines.append(f"- **{d.criterion}** — {d.why_failed} (after {d.attempts_made} attempt(s)); "
+                         f"finish: {d.finish_path}")
     lines += ["", "## Clean-room", "",
               f"- install: {pa.cleanroom.quickstart_ok}",
               f"- suite: {pa.cleanroom.suite_ok}",

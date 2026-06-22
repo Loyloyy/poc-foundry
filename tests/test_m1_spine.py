@@ -147,16 +147,25 @@ class _FakeBroker:
         pass
 
 
-def _patch_models(monkeypatch, spec):
+def _patch_models(monkeypatch, spec, *, degraded=False):
     import poc_foundry.models as M
+    from poc_foundry.state import AdequacyReview
 
     class _Structured:
+        def __init__(self, value):
+            self._value = value
+
         def invoke(self, messages):
-            return spec
+            return self._value
 
     class _Chat:
         def with_structured_output(self, model):
-            return _Structured()
+            # the critic asks for AdequacyReview; everyone else (architect) gets the spec
+            if model is AdequacyReview:
+                return _Structured(AdequacyReview(adequate=True, reason="fake: adequate"))
+            return _Structured(spec)
+
+    monkeypatch.setattr(M, "same_family", lambda a, b: degraded)
 
     def _chat_text(role, prompt, system=None, **kw):
         if role == "tester":
@@ -175,7 +184,7 @@ def _patch_models(monkeypatch, spec):
 def _run_pipeline(tmp_path, monkeypatch, spec):
     from poc_foundry.coder import BespokeCoder
     from poc_foundry.phases import (Ctx, load_template, p0_ingest, p1_spec, p2_plan,
-                                     p3_scaffold, p4_iterate, p5_docs, p6_cleanroom, p7_emit)
+                                     p3_scaffold, p4_iterate, p_critic, p5_docs, p6_cleanroom, p7_emit)
 
     _patch_models(monkeypatch, spec)
     cfg = load_config(tmp_path / "builds")
@@ -187,7 +196,8 @@ def _run_pipeline(tmp_path, monkeypatch, spec):
               build_dir=cfg.builds_dir / bid, workspace_dir=ws, staging_dir=st,
               broker=_FakeBroker(ws), coder=BespokeCoder())
     state = BuildState(build_id=bid, build_dir=str(cfg.builds_dir / bid), workspace_dir=str(ws))
-    for fn in (p0_ingest, p1_spec, p2_plan, p3_scaffold, p4_iterate, p5_docs, p6_cleanroom, p7_emit):
+    for fn in (p0_ingest, p1_spec, p2_plan, p3_scaffold, p4_iterate, p_critic,
+               p5_docs, p6_cleanroom, p7_emit):
         state = state.model_copy(update=fn(state, ctx))
     return cfg.builds_dir / bid, state
 

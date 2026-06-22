@@ -84,6 +84,30 @@ def tester_prompt(criterion_text: str, goal: str, interface: str, core_module: s
     )
 
 
+CRITIC_SYSTEM = (
+    "You are a rigorous test-adequacy reviewer (the gate critic). You judge ONE thing: does PASSING "
+    "the given test actually demonstrate the stated success criterion, or is the test trivial / "
+    "gameable / not really exercising the criterion? You are NOT grading style or coverage breadth — "
+    "only whether a passing result is TRUSTWORTHY evidence for the criterion. Be lenient on form, "
+    "strict on substance. Default to adequate unless the test is clearly weak."
+)
+
+
+def critic_adequacy_prompt(criterion: str, test_src: str, interface: str) -> str:
+    return (
+        f"# Success criterion\n{criterion}\n\n"
+        f"# Interface under test\n{interface}\n\n"
+        f"# The staged test\n```python\n{test_src}\n```\n\n"
+        "# Task\n"
+        "Decide whether passing this test is trustworthy evidence FOR the criterion. Mark it "
+        "INADEQUATE (adequate=false) only if it is clearly gameable, e.g.: it asserts nothing "
+        "meaningful (`assert True`, only `is not None`, only checks the return type), it does not call "
+        "the interface with inputs relevant to the criterion, or a trivial/echo stub unrelated to the "
+        "criterion would satisfy it. Otherwise mark it adequate=true. Give a one-sentence `reason`; if "
+        "inadequate, add a concrete `suggestion` for a stronger assertion."
+    )
+
+
 SCRIBE_SYSTEM = (
     "You are a technical writer producing a short, accurate DEMO note for a runnable PoC. Be "
     "concrete and brief. No marketing. Output GitHub-flavoured markdown only."

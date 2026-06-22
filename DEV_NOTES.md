@@ -250,4 +250,29 @@ denials still pass). The same spike under runc resolves names fine.
   RED→GREEN in 1 attempt). If a *real* server run trips red-first on the normal fixture, that's a
   signal the architect/tester prompt produced a trivial criterion — a prompt issue, not a harness bug.
 
+## M2a S2 critic gate (2026-06-22)
+
+- **The graph has cycles now — guard termination two ways.** `critic → {iterate|spec|plan}` are back-
+  edges. Termination relies on (1) the critic capping its own counters (`fix_count`/`respec_count`/
+  `replan_count` vs the config caps) and (2) `recursion_limit=60` on `graph.invoke` (core.py). If you
+  add a verdict that loops, it MUST increment a capped counter or the run can hit the recursion limit
+  (which surfaces as a LangGraph `GraphRecursionError` → the forensic `failed` artifact). The fakes
+  test `test_critic_fixes_then_replans_then_descopes_a_failing_coder` pins the ladder exhaustion.
+- **Respec re-runs P1→P4 (expensive); fix re-runs P4.** A `respec` verdict routes back to spec (a
+  full architect call + re-scaffold + re-iterate) — capped at `respec_cap=1`. A `fix` re-runs P4 (a
+  fresh tester test + a fresh coder loop) — capped at K. Both spin fresh Kata VMs each pass. The caps
+  keep cost bounded; tune via `PF_RESPEC_CAP`/`PF_FIX_LIMIT_K`/`PF_DEGRADED_FIX_LIMIT_K`.
+- **Degraded adequacy is advisory (server reality).** All five roles point to one GLM here →
+  `same_family("critic","coder")` is True → degraded. In degraded mode an "inadequate" adequacy
+  verdict on a GREEN iteration becomes a CAVEAT, not a respec/descope (a same-family judge can't
+  independently certify). So the server happy path stays `done`; you'll see `degraded_critic: true`
+  and `critic verdict=pass` in the report. To make adequacy BLOCK, configure a distinct `CRITIC_MODEL`
+  (frontier) so `same_family → False`. The trivially-true-test gaming case is still caught by red-first
+  regardless of critic family.
+- **Fakes must patch BOTH `build_chat_model` and `same_family`.** `_patch_models` now: (a)
+  `with_structured_output(AdequacyReview)` returns an adequacy fake, everything else returns the spec;
+  (b) `same_family` is monkeypatched (default False = non-degraded). A critic test that wants the
+  degraded path patches it True. If you add a structured-output role, branch on the model class in the
+  fake (it's keyed on `model is AdequacyReview`).
+
 ## (sections appended as slices land)

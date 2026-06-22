@@ -20,6 +20,7 @@ from poc_foundry.phases import (
     p5_docs,
     p6_cleanroom,
     p7_emit,
+    p_critic,
 )
 
 _NODES = [
@@ -28,6 +29,7 @@ _NODES = [
     ("plan", p2_plan),
     ("scaffold", p3_scaffold),
     ("iterate", p4_iterate),
+    ("critic", p_critic),
     ("docs", p5_docs),
     ("cleanroom", p6_cleanroom),
     ("emit", p7_emit),
@@ -44,6 +46,14 @@ def _after_spec(state) -> str:
 
 def _after_scaffold(state) -> str:
     return "emit" if state.status == "failed" else "iterate"
+
+
+def _after_critic(state) -> str:
+    """Verdict ladder routing (design §5.4): fix → re-iterate; respec → re-spec; replan → re-plan;
+    pass/descope → continue to docs. Counters in ``BuildState`` (capped by the critic) guarantee the
+    cycles terminate; the graph also carries a recursion_limit (core.py)."""
+    return {"fix": "iterate", "respec": "spec", "replan": "plan",
+            "pass": "docs", "descope": "docs"}.get(state.verdict, "docs")
 
 
 def build_graph(ctx: Ctx, cfg):
@@ -67,7 +77,9 @@ def build_graph(ctx: Ctx, cfg):
     g.add_conditional_edges("spec", _after_spec, {"plan": "plan", "emit": "emit"})
     g.add_edge("plan", "scaffold")
     g.add_conditional_edges("scaffold", _after_scaffold, {"iterate": "iterate", "emit": "emit"})
-    g.add_edge("iterate", "docs")
+    g.add_edge("iterate", "critic")
+    g.add_conditional_edges("critic", _after_critic,
+                            {"iterate": "iterate", "spec": "spec", "plan": "plan", "docs": "docs"})
     g.add_edge("docs", "cleanroom")
     g.add_edge("cleanroom", "emit")
     g.add_edge("emit", END)

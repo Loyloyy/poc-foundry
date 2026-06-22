@@ -381,3 +381,50 @@ real Kata/vLLM path is the server happy-path re-run.
   cumulative regression suite → S2/S3; the on-SERVER adversarial demo (a planted gaming run end-to-
   end) lands with S2's verdict routing or a planted-mode flag — S1 proves the catch via fakes + keeps
   the server happy-path green with the walls in place.
+
+## #13 — M2a S2: critic gate + verdict ladder + degraded-critic mode (2026-06-22)
+
+Second M2a slice — the critic gate that sits around P4 and decides the iteration's fate, with a
+verdict ladder and honest degraded-mode handling. Authored locally; 32/32 fakes; server = the
+happy-path re-run.
+
+- **New `p_critic` node + `_after_critic` LangGraph routing.** The M1 graph was linear
+  (`iterate → docs`); now `iterate → critic → {fix:iterate, respec:spec, replan:plan,
+  pass/descope:docs}`. The graph has **real cycles** for the first time; termination is guaranteed by
+  state counters the critic caps (`fix_count` vs `fix_limit_k`/`degraded_fix_limit_k`, `respec_count`
+  vs `respec_cap`, `replan_count` vs `replan_cap`) plus a `recursion_limit=60` on `graph.invoke`
+  (core.py). This is an implementation/topology call (not a §10 ledger change — the verdict SET is in
+  the ledger); logged, no planning consult needed.
+- **Division of labor (kept P4 server-proven, added the critic on top).** P4 still does
+  tester→red-first→coder→ledger and sets the criterion met/descoped from the *mechanical* outcome. The
+  critic adds the JUDGMENT layer: on a green iteration it runs an **adequacy review** (is passing the
+  test trustworthy evidence, or is it gameable?); on a non-green outcome it runs the **failure ladder**
+  (fix → replan → descope). So a mechanically-green-but-weak test can be downgraded, and a coder
+  failure gets bounded retries before an honest descope. P4 exposes `pending_test_src`/
+  `pending_criterion` for the critic to review.
+- **Degraded-critic mode (design §5.4) — and a principled honesty call.** `models.same_family(a,b)`
+  compares the resolved served-model ids; on this server ALL roles are one GLM → **degraded=True**.
+  Degraded mode lowers the fix budget K (`degraded_fix_limit_k=2` vs `fix_limit_k=3`) and sets
+  `security.degraded_critic=true`. **Decision:** in degraded mode the critic's **adequacy verdict is
+  ADVISORY (recorded as a caveat), never blocking** — a critic sharing the coder's family cannot
+  *independently* certify the test, so it must not respec/descope on its own judgment. The hard walls
+  (inventory ledger / red-first / diff-scanner, S1) still gate; the trivially-true-test case is caught
+  by red-first regardless. Blocking adequacy returns automatically when a distinct frontier `critic`
+  endpoint is configured (`same_family → False`). Rationale: (a) preserves the M1/S1-proven server
+  happy path — a same-family GLM critic won't accidentally descope its own good 5-test suite; (b) is
+  honest about what a degraded critic can certify; (c) matches §5.4's "critic-independence is
+  contingent on frontier egress; until then degraded mode applies and is recorded."
+- **Critic adequacy never crashes the build.** `_critic_adequacy` defaults to `adequate=True` if the
+  critic endpoint is unreachable — the critic is an ADDED layer, never the sole gate.
+- **Config wiring.** `BuildConfig` gains `fix_limit_k`/`respec_cap`/`degraded_fix_limit_k`/`replan_cap`
+  from `pipeline.yaml critic:` (env-overridable `PF_FIX_LIMIT_K` etc.). `descope_report[]` +
+  `security.degraded_critic` populated in P7; report.md gains Critic + Descope sections.
+- **Verified locally (32/32 fakes):** adequate-green→pass; inadequate-green→respec then descope at
+  cap (+ `descope_report` + criterion descoped); coder-failure→fix×K→replan→descope; integrity
+  incident→descope (never rewards gaming, even with an "adequate" test); degraded→advisory caveat +
+  lower K; `_after_critic` maps every verdict. Spine 8/8 unchanged (happy path flows through the
+  critic to `done`). Contract 11/11; import hygiene clean.
+- **Deferred (logged):** the **cumulative regression suite** (every iteration runs all prior tests +
+  the new one) is meaningful only once P2 is multi-iteration → lands with **S3**; the architect-driven
+  multi-iteration plan + clean-room status GATES are S3; the respec prompt does not yet feed the
+  critic's `suggestion` back to the architect (refinement; the cap guarantees termination regardless).
