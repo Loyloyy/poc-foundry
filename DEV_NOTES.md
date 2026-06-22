@@ -117,12 +117,21 @@ the *why* behind architecture choices; this file is the *how* and the traps. Sta
   now fail-fasts with the squid logs if the proxy isn't Running, so this surfaces directly next time.
   `squid -k parse` did NOT catch it (it returned 0; the FATAL hit during real startup/store-init) —
   the running-state check in the spike is the reliable guard.
-- **squid FATAL writing `/dev/stdout` as the `proxy` user.** After the ACL fix, squid started but
-  hit "FATAL: Cannot open '/dev/stdout' for writing … must be writeable by 'proxy'". Debian's squid
-  drops to `cache_effective_user proxy`, which can't reopen the container's root-owned stdout (fd 1)
-  for the access_log. **Fix:** `cache_effective_user root` in squid.conf — fine for an ephemeral,
-  isolated, single-purpose per-build egress gateway (the boundary is Kata + the internal network,
-  not the proxy uid). Alternative if root is ever undesirable: log to a file + `tail -F` it to stdout.
+- **squid stdout logging in a container — the full saga (4 FATALs).** Getting the proxy to boot took
+  four independent squid-in-Docker fixes; the broker-managed proxy at M1 must carry all of them:
+  1. **ACL overlap → FATAL** (squid 5+): a wildcard `dstdomain` (`.docker.io`) listed alongside a
+     more-specific sibling (`registry-1.docker.io`) aborts startup. Keep only the broadest form.
+  2. **`/dev/stdout` perms → FATAL:** squid drops to the non-root `proxy` user, which can't reopen the
+     container's root-owned `/dev/stdout` for the access_log.
+  3. **`cache_effective_user root` → FATAL:** squid flatly refuses to run as root.
+  4. **`squid -z` → FATAL "already running":** the cache-init step writes `/run/squid.pid`, so the real
+     `squid -N` aborts. We have no cache_dir, so `squid -z` was dropped; `pid_filename none` too.
+  **Final working setup:** run squid as `proxy`; `access_log` → a proxy-owned file
+  (`/var/log/squid/access.log`); entrypoint (as root) `chown`s the log dir and **`tail -F`s the file
+  to the container stdout** for `docker logs` evidence; `cache_log /dev/null`; `-d1` sends squid's own
+  diagnostics to stderr; `visible_hostname` set; `pid_filename none`; no `squid -z`.
+  **Lesson:** authoring container services blind (no local Docker) — lean on known squid-in-Docker
+  patterns up front (non-root + file-log + tail) instead of discovering each FATAL on the server.
 - **App image needs `tests/`.** The contract check (`scripts/run_contract_checks.py`) reads
   `tests/fixtures/sample_artifact`, but the app Dockerfile didn't COPY `tests/` → `NotADirectoryError`
   in-container. Fixed: `COPY tests ./tests` in the Dockerfile + a `../tests:/app/tests` mount in

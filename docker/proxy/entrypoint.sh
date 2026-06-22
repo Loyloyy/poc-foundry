@@ -28,9 +28,18 @@ else
     echo "proxy: no vLLM exception (PF_VLLM_ALLOW_HOST unset)" >&2
 fi
 
+# squid runs as the non-root 'proxy' user (it FATALs as root) and so can't write the container's
+# root-owned /dev/stdout. So it logs the CONNECT line to a file it owns, and we stream that file to
+# the container's stdout with a background `tail` (this script runs as root) → `docker logs` evidence.
+mkdir -p /var/log/squid
+chown -R proxy:proxy /var/log/squid
+: > /var/log/squid/access.log
+chown proxy:proxy /var/log/squid/access.log
+tail -n +1 -F /var/log/squid/access.log &
+
 # Validate config, then run in the FOREGROUND. No `squid -z`: we have no cache_dir (cache is denied,
 # memory-only), and `squid -z` would spawn an instance that writes /run/squid.pid → the real
-# `squid -N` below then aborts with "Squid is already running". pid_filename=none in squid.conf keeps
-# it PID-file-free.
+# `squid -N` below then aborts with "Squid is already running". pid_filename=none keeps it PID-free.
+# -d1 sends squid's own diagnostics to stderr (captured by `docker logs` even before access.log fills).
 squid -k parse -f /etc/squid/squid.conf
 exec squid -N -d1 -f /etc/squid/squid.conf
