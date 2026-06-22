@@ -52,6 +52,8 @@ class BuildConfig:
     vllm_allow_host: str          # PF_VLLM_ALLOW_HOST — proxy's single private-host exception
     default_role: str             # PF_DEFAULT_ROLE — blank role triples fall back here
     llm_timeout_s: int
+    uv_cache_shared: bool         # PF_UV_CACHE_SHARED — reuse ONE uv-cache volume across builds
+    #                               (TRUSTED-INPUT dev loop only; default OFF = isolated per-build)
 
     # budgets / caps (pipeline.yaml, env-overridable)
     max_fix_attempts: int
@@ -89,6 +91,7 @@ def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
         vllm_allow_host=os.environ.get("PF_VLLM_ALLOW_HOST", "").strip(),
         default_role=os.environ.get("PF_DEFAULT_ROLE", "architect").strip() or "architect",
         llm_timeout_s=_int_env("PF_LLM_TIMEOUT_S", 300),
+        uv_cache_shared=os.environ.get("PF_UV_CACHE_SHARED", "").strip().lower() in ("1", "true", "yes"),
         max_fix_attempts=_int_env("PF_MAX_FIX_ATTEMPTS", int(budgets.get("max_fix_attempts", 3))),
         stuck_research_after=_int_env("PF_STUCK_RESEARCH_AFTER", int(budgets.get("stuck_research_after", 2))),
         max_iterations=_int_env("PF_MAX_ITERATIONS", int(budgets.get("max_iterations", 8))),

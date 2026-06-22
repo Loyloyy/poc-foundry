@@ -32,20 +32,32 @@ def resolve_source(source: str | Path, cfg) -> Path:
         f"cannot resolve source {source!r}: pass a run-folder path or set PF_ARTIFACTS_ROOT")
 
 
-def _prepare(cfg, build_id: str, run_dir: Path, template: str, runtime: str | None):
-    """Build the per-build ``Ctx`` + ``Broker`` (shared by build + resume)."""
-    from poc_foundry.coder import BespokeCoder
+def _make_broker(cfg, build_id: str, runtime: str | None):
+    """The per-build broker. ``PF_BROKER_SOCKET`` (set on the server compose) selects the
+    OUT-OF-PROCESS path (M2a S4): a thin ``RemoteBroker`` that forwards to the daemon holding
+    docker.sock, so the orchestrator never mounts the socket. Unset → the in-process ``Broker``
+    (the default; unchanged proven path)."""
+    allowed = {cfg.sandbox_image, cfg.proxy_image}
+    vllm_key = os.environ.get("PF_SANDBOX_VLLM_KEY", "not-needed")
+    sock = os.environ.get("PF_BROKER_SOCKET", "").strip()
+    if sock:
+        from poc_foundry.sandbox.client import RemoteBroker
+        return RemoteBroker(build_id, cfg, allowed_images=allowed, runtime=runtime,
+                            vllm_key=vllm_key, socket_path=sock)
     from poc_foundry.sandbox import Broker
+    return Broker(build_id, cfg, allowed_images=allowed, runtime=runtime, vllm_key=vllm_key)
+
+
+def _prepare(cfg, build_id: str, run_dir: Path, template: str, runtime: str | None):
+    """Build the per-build ``Ctx`` + broker (shared by build + resume)."""
+    from poc_foundry.coder import BespokeCoder
 
     workspace_dir = cfg.workspace_dir / build_id / "workspace"
     staging_dir = cfg.workspace_dir / build_id / "staging"
     workspace_dir.mkdir(parents=True, exist_ok=True)
     staging_dir.mkdir(parents=True, exist_ok=True)
 
-    broker = Broker(build_id, cfg,
-                    allowed_images={cfg.sandbox_image, cfg.proxy_image},
-                    runtime=runtime,
-                    vllm_key=os.environ.get("PF_SANDBOX_VLLM_KEY", "not-needed"))
+    broker = _make_broker(cfg, build_id, runtime)
     ctx = Ctx(cfg=cfg, build_id=build_id, run_dir=run_dir, template=load_template(template),
               build_dir=cfg.builds_dir / build_id, workspace_dir=workspace_dir,
               staging_dir=staging_dir, broker=broker, coder=BespokeCoder())

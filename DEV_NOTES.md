@@ -304,4 +304,55 @@ denials still pass). The same spike under runc resolves names fine.
   `test_iter_0.py::name`; junit gives `classname="test_iter_0"` — but confirm the real junit classname
   format on the server first, since rootdir affects it).
 
+## Build wall-clock: where the time goes + the one safe speed-up (2026-06-23)
+
+- **The full gate build is minutes because it does REAL multi-iteration work, not because of redundant
+  testing.** Dominant cost = the GLM round-trips × iterations (each iteration: 1 tester + 1–3 coder +
+  1 critic call) + a fresh Kata VM boot per iteration + the clean-room VM. For the 5-criterion fixture
+  that's ~15–25 GLM calls + ~6 VM boots. The clean-room `uv pip install gradio` happens ONCE per build
+  (only P6 installs; iterations + scaffold are stdlib-only). So the build can't be made much faster
+  without removing the actual verification work.
+- **Rigor lives in the local fakes, NOT in re-running the full build.** `run_spine_tests.py` (35/35,
+  seconds) covers ALL gate logic; the full build's unique value is confirming the real Kata/GLM/network/
+  clean-room ENVIRONMENT still behaves. So: fakes are the dev inner-loop; run the full build ONCE per
+  slice that touches the heavy path. Re-running it more often re-confirms the environment, not logic.
+- **The one thoroughness-neutral speed-up: `PF_UV_CACHE_SHARED=1`.** Reuses a single `pf-uvcache-shared`
+  docker volume across builds (gradio + huggingface_hub download once, then cached). Networks / proxy /
+  sandbox VMs are STILL fresh-per-build (isolation unchanged); only the dep cache persists. **Default
+  OFF** — a shared cache is a cross-build channel (a build could poison a wheel a later build installs),
+  so it is a TRUSTED-INPUT dev-loop convenience ONLY; never enable it for untrusted artifacts. The
+  integrity-preserving version (a devpi/verdaccio depot proxy) is the roadmapped M4 way. The default
+  isolated per-build cache is untouched, so the gate's security posture is unchanged.
+- **Speed-ups deliberately NOT taken (they trade thoroughness):** a 1-iteration "smoke" as the routine
+  gate (loses multi-iteration coverage) and a minimal 1-criterion fixture (loses criteria breadth). Kept
+  the full 5-criterion multi-iteration build as the per-slice gate.
+
+## M2a S4a out-of-process broker (2026-06-23)
+
+- **Enable it with the override + `PF_BROKER_SOCKET`.** `cp docker/docker-compose.override.yml.example
+  docker/docker-compose.override.yml`; it defines a `broker` service (holds docker.sock, runs
+  `python -m poc_foundry.sandbox.daemon`) and removes docker.sock from `app` (which gains
+  `PF_BROKER_SOCKET=/var/run/pf-broker/broker.sock` + the `/var/run/pf-broker` mount). Pre-create the
+  socket dir on the host: `mkdir -p /var/run/pf-broker && chmod 777 /var/run/pf-broker`. Unset
+  `PF_BROKER_SOCKET` → the in-process `Broker` (default) — so this is a safe opt-in cutover.
+- **The daemon must be LISTENING before the app connects.** `depends_on` only waits for 'started', so
+  `rpc.call` retries the connect for ~15s to ride out the race. If you bring it up manually:
+  `docker compose ... up -d broker` then check `logs broker` for `[pf-broker] listening on …`.
+- **Same-path workspace mount now spans app→daemon→host.** Only the APP mounts PF_WORKSPACE_DIR
+  (same-path) and writes workspace files; the daemon does NOT mount it — it passes the HOST path to
+  `docker run -v <hostpath>:/work`, resolved by the host daemon. So the app keeps doing all
+  workspace writes + git (orchestrator-writes); the daemon only runs docker (sandbox-executes). If you
+  ever see an empty `/work` in the kata VM under the out-of-process broker, the app's PF_WORKSPACE_DIR
+  mount isn't same-path.
+- **The invariant is enforced DAEMON-side only.** `RemoteBroker` forwards raw create-params; the
+  daemon's real `Broker` runs the allowlist guards and raises `BrokerInvariantError`, which the rpc
+  layer re-raises as the same type client-side (via `error_type`). Don't add a client-side guard — it
+  would be bypassable and is not the security boundary.
+- **Proving the boundary on the server:** the build reaching `done` via the override is the functional
+  proof; the SECURITY proof is that `app` has no docker.sock — check with
+  `... run --rm app sh -c 'test -S /var/run/docker.sock && echo BAD || echo GOOD'`.
+- **Single-threaded daemon, connection-per-call.** No locking, no request multiplexing — suits one
+  build at a time. If multi-build concurrency is ever needed, the daemon already keys brokers by
+  `build_id`, but the accept loop would need threading + per-broker locks.
+
 ## (sections appended as slices land)

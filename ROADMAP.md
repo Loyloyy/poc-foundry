@@ -132,9 +132,20 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       in-process multi-iteration build → `done`) + contract 11/11 + import-hygiene clean. *Server: the
       fixture's 5 criteria → ~5 iterations; expect `done` with iter0 RED→GREEN + later iters
       met-existing, clean-room running the published tests.*
-- [ ] S4 out-of-process broker (orchestrator drops the docker socket) + real sibling services.
+- [~] **S4a out-of-process broker (2026-06-23, local):** the orchestrator no longer drives docker —
+      a `BrokerDaemon` (`sandbox/daemon.py`) holds docker.sock and is the only enforcer of the
+      create-param invariant (rule #8); the orchestrator uses a thin `RemoteBroker`/`RemoteSandbox`
+      (`sandbox/client.py`) that forwards the same `provision/create/create_service/exec/destroy`
+      interface over a Unix-socket JSON-RPC (`sandbox/rpc.py`). Selected by `PF_BROKER_SOCKET` (unset →
+      in-process `Broker`, unchanged default). Compose override gains a `broker` service (holds
+      docker.sock) and drops docker.sock from `app`. Local: **38/38 fakes** (+3 broker-RPC: real
+      socket round-trip + invariant re-raises same type client-side + interface parity) + contract
+      11/11 + hygiene clean. *Server: run via the override; prove `app` has NO docker.sock + the build
+      still reaches `done` + zero leaks.*
+- [ ] S4b real sibling services (`create_service` pins a vetted tag, reached BY IP) + a service-using
+      template (proves the path end-to-end).
 - **Acceptance:** a planted test-gaming attempt is caught by the ledger/scanner; clean-room gates
-      a known-bad build red; broker runs out-of-process.
+      a known-bad build red; broker runs out-of-process (orchestrator has no docker.sock).
       *(S1 proves the gaming-caught half via fakes; the on-server adversarial demo lands with S2's
       routing / a planted-mode flag.)*
 

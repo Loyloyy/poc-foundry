@@ -482,3 +482,41 @@ here was a **structural finding surfaced by slice-and-validate**, logged for the
   Replan re-plans ALL criteria fresh (not just unmet ones) — a valid simplification bounded by
   `replan_cap`. `tests_total` is an approximate file-count + 1 (the real count is the clean-room pytest
   output).
+
+## #15 — M2a S4a: out-of-process broker (orchestrator drops docker.sock) (2026-06-23)
+
+Closes the M1 residual (the orchestrator held the host docker socket). Authored locally; the RPC path
+is fully fakes-tested over a real Unix socket; the real Kata path is the server run via the override.
+
+- **Topology.** A `BrokerDaemon` (`sandbox/daemon.py`) is the ONLY process mounting `/var/run/docker.sock`;
+  it wraps the real `Broker` (one per `build_id`) and is the sole enforcer of the create-param
+  invariant (rule #8). The orchestrator holds a thin `RemoteBroker`/`RemoteSandbox` (`sandbox/client.py`)
+  that implements the SAME `provision/create/create_service/exec/service_ip/proxy_log/destroy` surface
+  but forwards every call over a newline-delimited-JSON RPC on a Unix socket (`sandbox/rpc.py`). The
+  phases use `ctx.broker` unchanged — they don't know which broker they hold.
+- **Why the guard stays daemon-side (load-bearing).** The invariant is authoritative in the daemon's
+  `Broker`, NOT re-checked in the client — a client-side check would be bypassable by a compromised
+  orchestrator. A violation raises `BrokerInvariantError` daemon-side; the rpc layer carries an
+  `error_type` so the client re-raises the SAME type. Fakes-proven
+  (`test_broker_rpc_invariant_raises_same_type_client_side`).
+- **Transport choices.** Unix socket (not TCP) so access is filesystem-gated (a shared dir bind-mounted
+  into app + daemon), `0o660`. **Connection-per-call** + a **single-threaded** daemon accept loop:
+  the pipeline is sequential and Ops runs one build at a time, so serializing every docker op + guard
+  needs no locking and has no races. `rpc.call` retries the connect for ~15s (rides out the
+  depends_on/startup race) and uses a generous read timeout (> the longest `exec`, ~1800s uv install).
+- **What the daemon does NOT need.** Only the daemon mounts docker.sock. It does NOT mount the
+  workspace — bind sources passed to `docker run -v <hostpath>:/work` are resolved by the HOST daemon,
+  and the orchestrator already writes those files at the same host path (the same-path-mount invariant,
+  now spanning app→daemon→host). So the orchestrator keeps doing all workspace writes + git
+  (orchestrator-writes); the daemon only does docker ops (sandbox-executes). Clean split.
+- **Opt-in, default-unchanged.** `PF_BROKER_SOCKET` selects the remote path; unset → the in-process
+  `Broker` (the M1-proven default). So the existing path is untouched and the new boundary is enabled
+  by the compose override (a `broker` service holding docker.sock; `app` drops docker.sock + gains the
+  broker-socket dir + `depends_on: broker`). De-risks the cutover.
+- **Verified locally (38/38):** the RPC fakes start the real daemon (with a fake docker engine via the
+  `broker_factory` seam) on a real Unix socket and drive provision→create→exec→service_ip→proxy_log→
+  create_service→destroy, assert the invariant re-raise, and assert `RemoteBroker` exposes the same
+  surface as `Broker`. Contract 11/11; import hygiene clean (no docker SDK — CLI only).
+- **Deferred to S4b:** `create_service` made REAL (a vetted sibling, pinned tag, reached BY IP) + a
+  service-using template that proves the path end-to-end. The seam (`create_service` RPC method) is
+  already wired through the daemon/client; S4b fills in the template + the by-IP wiring in a phase.

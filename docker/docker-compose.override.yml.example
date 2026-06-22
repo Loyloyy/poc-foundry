@@ -1,17 +1,49 @@
 # Copy to docker-compose.override.yml (gitignored, rule #1) on the server for HOST-SPECIFIC bits that
-# must never be tracked: local-disk paths, the docker socket (M1), GPU reservations, model paths.
+# must never be tracked: local-disk paths, the docker socket, GPU reservations, model paths.
 # Compose auto-merges an override sitting next to the base file. Example only — adjust to the host.
+#
+# ── M2a S4: the broker runs OUT-OF-PROCESS ───────────────────────────────────────────────────────
+# A `broker` daemon (reusing the app image) is the ONLY container that mounts /var/run/docker.sock.
+# The orchestrator (`app`) mounts ONLY the broker RPC socket dir — never docker.sock — and reaches the
+# daemon via PF_BROKER_SOCKET. This closes the M1 residual (the orchestrator held the socket).
+# Bring the daemon up first (or rely on depends_on):  docker compose ... up -d broker
+# Pre-create the shared dirs on the host:
+#   mkdir -p /var/tmp/pf-workspaces /var/run/pf-broker && chmod 777 /var/tmp/pf-workspaces /var/run/pf-broker
 
 services:
   app:
+    depends_on:
+      - broker
+    environment:
+      # Selects the out-of-process broker; UNSET → the in-process Broker (the default, M1 path).
+      - PF_BROKER_SOCKET=/var/run/pf-broker/broker.sock
     volumes:
       # Sandbox workspaces + uv cache on LOCAL disk (design §2; never NFS). Mount PF_WORKSPACE_DIR at
-      # the SAME path it has on the host — the M1 broker bind-mounts workspaces into Kata VMs by HOST
-      # path (sibling-container semantics), so host-path must equal container-path. Pre-create +
-      # chmod on the host first:  mkdir -p /var/tmp/pf-workspaces && chmod 777 /var/tmp/pf-workspaces
+      # the SAME path it has on the host — the broker bind-mounts workspaces into Kata VMs by HOST path
+      # (sibling-container semantics), so host-path must equal container-path.
       - /var/tmp/pf-workspaces:/var/tmp/pf-workspaces
-      # M1 ONLY — the in-process broker drives the host Docker (via the `docker` CLI baked into the
-      # app image) to spin Kata VMs + the egress proxy. Mounting the socket is the risk-accepted M1
-      # residual (DECISIONS; moves out-of-process at M2a). The orchestrator itself runs
-      # egress-isolated; only the sacrificial vLLM key reaches the sandbox.
+      # The broker RPC socket dir (NOT docker.sock). This is all the orchestrator gets.
+      - /var/run/pf-broker:/var/run/pf-broker
+      # NOTE: NO /var/run/docker.sock here anymore — the daemon below holds it (M2a S4).
+
+  # ---- Out-of-process broker daemon. The ONLY holder of the host docker socket; enforces the
+  #      create-param invariant (rule #8) broker-side. Reuses the app image (has the docker CLI). ----
+  broker:
+    image: poc-foundry-app
+    container_name: pf-broker
+    command: python -m poc_foundry.sandbox.daemon
+    env_file:
+      - ../.env
+    environment:
+      - PF_BROKER_SOCKET=/var/run/pf-broker/broker.sock
+    volumes:
+      - ../src:/app/src
+      - ../config:/app/config
+      # The daemon ALONE mounts the docker socket (it spins Kata VMs + the egress proxy on the host).
       - /var/run/docker.sock:/var/run/docker.sock
+      # The shared RPC socket dir (the orchestrator connects here).
+      - /var/run/pf-broker:/var/run/pf-broker
+      # The daemon does NOT need the workspace mounted — it passes HOST paths to `docker run`, which the
+      # host daemon resolves; only the app writes workspace files.
+    networks:
+      - depot-net

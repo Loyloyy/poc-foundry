@@ -164,6 +164,7 @@ def main(argv: list[str]) -> int:
     targets = [Path(a) for a in argv[1:]] or [
         _REPO / "tests" / "test_m1_spine.py",
         _REPO / "tests" / "test_m2a_gates.py",
+        _REPO / "tests" / "test_m2a_broker_rpc.py",
     ]
     tp = tf = 0
     for t in targets:

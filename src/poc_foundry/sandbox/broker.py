@@ -140,7 +140,12 @@ class Broker:
         self.net_internal = f"pf-{short}-int"
         self.net_egress = f"pf-{short}-egr"
         self.proxy_name = f"pf-{short}-proxy"
-        self.uv_volume = f"pf-{short}-uvcache"
+        # The networks/proxy/sandboxes are ALWAYS fresh-per-build (isolation, no leaks). The uv-cache
+        # is the one thing that can be persisted: when PF_UV_CACHE_SHARED is set it reuses ONE stable
+        # volume across builds (a TRUSTED-INPUT dev-loop speed-up — a shared cache is a cross-build
+        # channel, so it is OFF by default and must NEVER be used with untrusted artifacts).
+        self._uv_shared = bool(getattr(cfg, "uv_cache_shared", False))
+        self.uv_volume = "pf-uvcache-shared" if self._uv_shared else f"pf-{short}-uvcache"
         self.proxy_url: str | None = None
 
         self._sandboxes: dict[str, Sandbox] = {}
@@ -312,7 +317,8 @@ class Broker:
         # proxy → networks → volume (a network can't be removed while a container is attached).
         _run(["docker", "rm", "-f", self.proxy_name], check=False)
         _run(["docker", "network", "rm", self.net_internal, self.net_egress], check=False)
-        _run(["docker", "volume", "rm", self.uv_volume], check=False)
+        if not self._uv_shared:                       # a shared uv-cache PERSISTS across builds (the speed-up)
+            _run(["docker", "volume", "rm", self.uv_volume], check=False)
         if self._provisioned:
             self._log("destroyed build environment")
         self._provisioned = False
