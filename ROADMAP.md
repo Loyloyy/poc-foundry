@@ -48,6 +48,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
 - [x] Contract tests (`tests/test_contract.py` + `scripts/run_contract_checks.py` no-pytest runner) —
       **11/11 GREEN locally** (vendored schema in sync; invariants hold; import is heavy-stack-free)
 - [x] `m0_ingest_probe.py`: load a run folder + validate + capability sketch + `--freshness` (detect-only)
+- [x] **in-container contract check GREEN on server** (2026-06-22): `11 passed, 0 failed`
 - [ ] **(needs server)** run the probe against a REAL sanitized Stage-2 run folder (+ `--freshness`)
 - [ ] **(gated on P1, lands early M1)** P1 spec generation on the fixture → user grades; spec lint
       — needs the architect LLM + the P1 phase (would be pipeline code; M0 is code-free). Sequencing

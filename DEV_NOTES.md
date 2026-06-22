@@ -117,6 +117,12 @@ the *why* behind architecture choices; this file is the *how* and the traps. Sta
   now fail-fasts with the squid logs if the proxy isn't Running, so this surfaces directly next time.
   `squid -k parse` did NOT catch it (it returned 0; the FATAL hit during real startup/store-init) —
   the running-state check in the spike is the reliable guard.
+- **squid FATAL writing `/dev/stdout` as the `proxy` user.** After the ACL fix, squid started but
+  hit "FATAL: Cannot open '/dev/stdout' for writing … must be writeable by 'proxy'". Debian's squid
+  drops to `cache_effective_user proxy`, which can't reopen the container's root-owned stdout (fd 1)
+  for the access_log. **Fix:** `cache_effective_user root` in squid.conf — fine for an ephemeral,
+  isolated, single-purpose per-build egress gateway (the boundary is Kata + the internal network,
+  not the proxy uid). Alternative if root is ever undesirable: log to a file + `tail -F` it to stdout.
 - **App image needs `tests/`.** The contract check (`scripts/run_contract_checks.py`) reads
   `tests/fixtures/sample_artifact`, but the app Dockerfile didn't COPY `tests/` → `NotADirectoryError`
   in-container. Fixed: `COPY tests ./tests` in the Dockerfile + a `../tests:/app/tests` mount in

@@ -28,7 +28,9 @@ else
     echo "proxy: no vLLM exception (PF_VLLM_ALLOW_HOST unset)" >&2
 fi
 
-# Validate config, init (cacheless, but squid still wants the call), then run foreground.
+# Validate config, then run in the FOREGROUND. No `squid -z`: we have no cache_dir (cache is denied,
+# memory-only), and `squid -z` would spawn an instance that writes /run/squid.pid → the real
+# `squid -N` below then aborts with "Squid is already running". pid_filename=none in squid.conf keeps
+# it PID-file-free.
 squid -k parse -f /etc/squid/squid.conf
-squid -z -f /etc/squid/squid.conf 2>/dev/null || true
 exec squid -N -d1 -f /etc/squid/squid.conf
