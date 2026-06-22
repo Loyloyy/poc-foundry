@@ -49,11 +49,12 @@ def _after_scaffold(state) -> str:
 
 
 def _after_critic(state) -> str:
-    """Verdict ladder routing (design §5.4): fix → re-iterate; respec → re-spec; replan → re-plan;
-    pass/descope → continue to docs. Counters in ``BuildState`` (capped by the critic) guarantee the
-    cycles terminate; the graph also carries a recursion_limit (core.py)."""
-    return {"fix": "iterate", "respec": "spec", "replan": "plan",
-            "pass": "docs", "descope": "docs"}.get(state.verdict, "docs")
+    """Verdict ladder + loop routing (design §5.3/§5.4): ``fix`` re-runs the SAME iteration; ``next``
+    advances to the next iteration; ``respec``/``replan`` reset back to P1/P2; ``proceed`` continues
+    to docs (plan exhausted). Counters in ``BuildState`` (capped by the critic) + a recursion_limit
+    (core.py) guarantee the cycles terminate."""
+    return {"fix": "iterate", "next": "iterate", "respec": "spec", "replan": "plan",
+            "proceed": "docs"}.get(state.verdict, "docs")
 
 
 def build_graph(ctx: Ctx, cfg):

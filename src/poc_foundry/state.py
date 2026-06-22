@@ -94,6 +94,7 @@ class BuildState(BaseModel):
     pending_test_src: str = ""       # transient: the staged test the critic reviews for adequacy
     pending_criterion: str = ""      # transient: the criterion text under review
     descope_report: list[dict] = Field(default_factory=list)    # → PoCBuildArtifact.descope_report[]
+    green_test_files: list[str] = Field(default_factory=list)   # staged tests of MET iterations → published to clean-room
     demo_quality: str = ""
     demonstrates_core_value: str = "no"
 

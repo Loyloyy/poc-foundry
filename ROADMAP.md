@@ -119,7 +119,19 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       24 gates incl. the full verdict ladder + routing) + contract 11/11 + import-hygiene clean.
       *Server: re-run the gate — happy path still `done`, now showing degraded_critic=true + critic
       verdict=pass.* Cumulative suite deferred to S3 (meaningful only with multi-iteration).
-- [ ] S3 architect-driven multi-iteration P2 + clean-room GATES (red clean-room suite → never `done`).
+- [~] **S3 multi-iteration loop + clean-room GATES (2026-06-23, local):** P2 now a deterministic
+      **core-first multi-iteration** plan (one small iteration per testable criterion; architect-driven
+      decomposition deferred — DEV_NOTES weak-self-planner evidence). The graph **loops P4** via the
+      critic's `next`/`fix` verdicts (`iterate→critic→iterate`), each iteration with its own staged
+      `test_iter_i.py` under a **cumulative regression gate** (`pytest /staged` = new + all prior).
+      **Red-first is strict only at iteration 0** (against the scaffold); a later iteration green-pre-
+      coder = "met by existing implementation" (legit, not a violation). Met iterations' tests are
+      **published into `workspace/tests/`** so the clean-room re-runs the cumulative criterion suite
+      (was: template smoke only) — and `_final_status` already gates `done` on `cleanroom.suite_ok`, so
+      a red clean-room can never be `done`. Local: **35/35 fakes** (8 spine + 27 gates incl. a faithful
+      in-process multi-iteration build → `done`) + contract 11/11 + import-hygiene clean. *Server: the
+      fixture's 5 criteria → ~5 iterations; expect `done` with iter0 RED→GREEN + later iters
+      met-existing, clean-room running the published tests.*
 - [ ] S4 out-of-process broker (orchestrator drops the docker socket) + real sibling services.
 - **Acceptance:** a planted test-gaming attempt is caught by the ledger/scanner; clean-room gates
       a known-bad build red; broker runs out-of-process.

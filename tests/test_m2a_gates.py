@@ -273,24 +273,37 @@ def _critic_ctx(monkeypatch, tmp_path, *, adequate=True, degraded=False, reason=
                build_dir=tmp_path, workspace_dir=tmp_path, staging_dir=tmp_path, broker=None, coder=None)
 
 
-def _critic_state(status, *, core_text="reply starts with 'ECHO:'", incidents=(), **kw):
+def _critic_state(status, *, criteria=("reply starts with 'ECHO:'",), iteration=0, incidents=(), **kw):
     from poc_foundry.artifact import IterationRecord
-    base = dict(build_id="poc-x",
-                spec=Spec(goal="g", success_criteria=[SuccessCriterion(text=core_text, core=True,
-                                                                       status=("met" if status == "green" else "pending"))]),
+    from poc_foundry.state import IterationPlan, Plan
+    crits = [SuccessCriterion(text=t, core=(idx == 0)) for idx, t in enumerate(criteria)]
+    plan = Plan(iterations=[IterationPlan(goal=t, acceptance=[t], interface="iface", files=["core.py"])
+                            for t in criteria])
+    base = dict(build_id="poc-x", spec=Spec(goal="g", success_criteria=crits),
+                plan=plan, iteration=iteration,
                 iteration_records=[IterationRecord(goal="g", status=status, attempts=1, tests_added=1)],
-                pending_criterion=core_text, pending_test_src="def test_x():\n    assert True\n",
+                pending_criterion=criteria[iteration], pending_test_src="def test_x():\n    assert True\n",
                 incidents=list(incidents))
     base.update(kw)
     return BuildState(**base)
 
 
-def test_critic_passes_an_adequate_green(tmp_path, monkeypatch):
+def test_critic_proceeds_on_an_adequate_green_last_iteration(tmp_path, monkeypatch):
     from poc_foundry.phases.pipeline import p_critic
     ctx = _critic_ctx(monkeypatch, tmp_path, adequate=True)
-    upd = p_critic(_critic_state("green"), ctx)
-    assert upd["verdict"] == "pass"
+    upd = p_critic(_critic_state("green"), ctx)               # single iteration → no more → proceed
+    assert upd["verdict"] == "proceed"
     assert upd["degraded_critic"] is False
+
+
+def test_critic_advances_to_next_iteration_with_fresh_fix_budget(tmp_path, monkeypatch):
+    from poc_foundry.phases.pipeline import p_critic
+    ctx = _critic_ctx(monkeypatch, tmp_path, adequate=True)
+    st = _critic_state("green", criteria=("core crit", "second crit"), iteration=0, fix_count=2)
+    upd = p_critic(st, ctx)
+    assert upd["verdict"] == "next"          # more iterations remain → advance
+    assert upd["iteration"] == 1
+    assert upd["fix_count"] == 0             # each iteration gets a fresh fix budget
 
 
 def test_critic_respecs_an_inadequate_green(tmp_path, monkeypatch):
@@ -305,7 +318,7 @@ def test_critic_descopes_inadequate_after_respec_cap(tmp_path, monkeypatch):
     from poc_foundry.phases.pipeline import p_critic
     ctx = _critic_ctx(monkeypatch, tmp_path, adequate=False)   # respec_cap defaults to 1
     upd = p_critic(_critic_state("green", respec_count=1), ctx)
-    assert upd["verdict"] == "descope"
+    assert upd["verdict"] == "proceed"                         # last iteration → proceed, criterion descoped
     assert upd["descope_report"] and upd["descope_report"][0]["criterion"] == "reply starts with 'ECHO:'"
     assert any(c.status == "descoped" for c in upd["spec"].success_criteria)
 
@@ -316,14 +329,15 @@ def test_critic_fixes_then_replans_then_descopes_a_failing_coder(tmp_path, monke
     assert p_critic(_critic_state("abandoned", fix_count=0), ctx)["verdict"] == "fix"
     assert p_critic(_critic_state("abandoned", fix_count=3), ctx)["verdict"] == "replan"   # K spent
     desc = p_critic(_critic_state("abandoned", fix_count=3, replan_count=1), ctx)          # replan spent
-    assert desc["verdict"] == "descope" and desc["descope_report"]
+    assert desc["verdict"] == "proceed" and desc["descope_report"]                         # honest descope
 
 
 def test_critic_descopes_an_integrity_incident_never_rewards_gaming(tmp_path, monkeypatch):
     from poc_foundry.phases.pipeline import p_critic
-    ctx = _critic_ctx(monkeypatch, tmp_path, adequate=True)    # even with an "adequate" test...
-    upd = p_critic(_critic_state("green", incidents=["[high] hard-exit: core.py: + sys.exit(0)"]), ctx)
-    assert upd["verdict"] == "descope"                        # ...a high-sev incident is never a pass
+    ctx = _critic_ctx(monkeypatch, tmp_path, adequate=True)    # even if a later test looks adequate...
+    upd = p_critic(_critic_state("incident"), ctx)             # ...an incident iteration is descoped
+    assert upd["verdict"] == "proceed"
+    assert upd["descope_report"] and "incident" in upd["descope_report"][0]["why_failed"]
 
 
 def test_degraded_critic_adequacy_is_advisory_not_blocking(tmp_path, monkeypatch):
@@ -332,8 +346,19 @@ def test_degraded_critic_adequacy_is_advisory_not_blocking(tmp_path, monkeypatch
     from poc_foundry.phases.pipeline import p_critic
     ctx = _critic_ctx(monkeypatch, tmp_path, adequate=False, degraded=True)
     upd = p_critic(_critic_state("green"), ctx)
-    assert upd["verdict"] == "pass"
+    assert upd["verdict"] == "proceed"                        # accepted (advisory), not respec/descope
     assert any("degraded" in c for c in upd.get("caveats", []))
+
+
+def test_met_existing_later_iteration_is_accepted(tmp_path, monkeypatch):
+    """A later iteration whose criterion the existing code already satisfies is ACCEPTED (met), not a
+    red-first violation — that strictness applies only to iteration 0 against the scaffold."""
+    from poc_foundry.phases.pipeline import p_critic
+    ctx = _critic_ctx(monkeypatch, tmp_path)
+    st = _critic_state("met-existing", criteria=("c0", "c1"), iteration=1)
+    upd = p_critic(st, ctx)
+    assert upd["verdict"] == "proceed"      # last iteration, accepted
+    assert "descope_report" not in upd
 
 
 def test_degraded_critic_lowers_the_fix_budget(tmp_path, monkeypatch):
@@ -346,6 +371,162 @@ def test_degraded_critic_lowers_the_fix_budget(tmp_path, monkeypatch):
 
 def test_after_critic_routing_maps_every_verdict():
     from poc_foundry.graph import _after_critic
-    cases = {"fix": "iterate", "respec": "spec", "replan": "plan", "pass": "docs", "descope": "docs"}
+    cases = {"fix": "iterate", "next": "iterate", "respec": "spec", "replan": "plan", "proceed": "docs"}
     for verdict, node in cases.items():
         assert _after_critic(BuildState(build_id="x", verdict=verdict)) == node
+
+
+# ── S3: multi-iteration loop + cumulative suite + clean-room publish ──────────
+class _FaithfulSbx:
+    """A faithful fake sandbox: actually RUNS the staged test functions in-process (importing `core`
+    from the workspace), so the cumulative regression gate + the ledger are evaluated for real — no
+    pytest needed. Models collect-only / junit / single-file / cumulative pytest invocations."""
+
+    def __init__(self, ws, staged):
+        self.ws, self.staged = ws, staged
+
+    def _run(self, files):
+        import importlib.util
+        passed, failed = set(), set()
+        sys.path.insert(0, str(self.ws))
+        try:
+            for f in files:
+                sys.modules.pop("core", None)
+                for m in [m for m in sys.modules if m.startswith("test_iter")]:
+                    sys.modules.pop(m, None)
+                try:
+                    spec = importlib.util.spec_from_file_location(f.stem, f)
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                except Exception:
+                    failed.add(f.stem)
+                    continue
+                for name, fn in vars(mod).items():
+                    if name.startswith("test_") and callable(fn):
+                        try:
+                            fn()
+                            passed.add(name)
+                        except Exception:
+                            failed.add(name)
+        finally:
+            sys.path.remove(str(self.ws))
+        return passed, failed
+
+    def _files(self, cmd):
+        import re as _re
+        m = _re.search(r"/staged/(test_iter_\d+\.py)", cmd)
+        if m:
+            return [self.staged / m.group(1)]
+        return sorted(self.staged.glob("test_iter_*.py"))
+
+    def exec(self, cmd, timeout_s=600):
+        if "/staged" in cmd:
+            files = self._files(cmd)
+            passed, failed = self._run(files)
+            if "--collect-only" in cmd:
+                names = passed | failed
+                return ExecResult(0, "\n".join(f"{f.stem}::{n}" for f in files for n in
+                                                sorted(passed | failed)) or "\n", "")
+            if "--junitxml" in cmd:
+                return ExecResult(0, _junit(passed, failed), "")
+            return ExecResult(0 if (passed and not failed) else 1, "ok" if not failed else "", "F" if failed else "")
+        return ExecResult(0, "ok", "")  # scaffold smoke / cleanroom blocks
+
+    def destroy(self):
+        pass
+
+
+class _FaithfulBroker:
+    def __init__(self, ws, staged):
+        self.ws, self.staged, self.proxy_url, self.events = ws, staged, "http://10.0.0.2:3128", []
+
+    def provision(self):
+        pass
+
+    def create(self, **kw):
+        return _FaithfulSbx(self.ws, self.staged / "tests")
+
+    def proxy_log(self, tail=200):
+        return ""
+
+    def destroy(self):
+        pass
+
+
+def test_multi_iteration_build_completes_with_cumulative_publish(tmp_path, monkeypatch):
+    """End-to-end (fakes): a 2-criterion spec → 2 iterations. Iteration 0 (core) is RED→GREEN via the
+    coder; iteration 1's criterion is satisfied by the same code → met-existing. The loop is driven by
+    following the critic's routing verdict (as the graph would). Build completes `done`; only met
+    iterations' tests are published into the clean-room workspace."""
+    import poc_foundry.models as M
+    from poc_foundry.coder import BespokeCoder
+    from poc_foundry.phases import (Ctx, load_template, p0_ingest, p1_spec, p2_plan, p3_scaffold,
+                                    p4_iterate, p_critic, p5_docs, p6_cleanroom, p7_emit)
+    from poc_foundry.artifact import load as load_artifact
+    from poc_foundry.state import AdequacyReview
+
+    spec = Spec(goal="Echo with ECHO: prefix",
+                success_criteria=[SuccessCriterion(text="reply starts with 'ECHO:'", core=True),
+                                  SuccessCriterion(text="reply is non-empty")],
+                buildable=True, demo_scenario="type hi")
+
+    class _Structured:
+        def invoke(self, m):
+            return AdequacyReview(adequate=True, reason="ok")
+
+    class _Chat:
+        def with_structured_output(self, model):
+            return _Structured() if model is AdequacyReview else type("S", (), {"invoke": lambda s, m: spec})()
+
+    def _chat_text(role, prompt, system=None, **kw):
+        if role == "tester":
+            if "non-empty" in prompt:
+                return "```python\nfrom core import generate_reply\ndef test_nonempty():\n    assert generate_reply('hi', [])\n```"
+            return "```python\nfrom core import generate_reply\ndef test_echo():\n    assert generate_reply('hi', []).startswith('ECHO:')\n```"
+        if role == "coder":
+            return ("*** FILE: core.py\n```python\n"
+                    "def generate_reply(message, history=None):\n    return 'ECHO: ' + (message or '').strip()\n```")
+        return "# Demo\n"
+
+    monkeypatch.setattr(M, "build_chat_model", lambda role, **k: _Chat())
+    monkeypatch.setattr(M, "chat_text", _chat_text)
+    monkeypatch.setattr(M, "same_family", lambda a, b: False)
+
+    cfg = load_config(tmp_path / "builds")
+    bid = "poc-multi-0001"
+    ws, st = tmp_path / "ws", tmp_path / "staging"
+    ws.mkdir(); st.mkdir()
+    ctx = Ctx(cfg=cfg, build_id=bid, run_dir=_FIXTURE, template=load_template("gradio-chatbot"),
+              build_dir=cfg.builds_dir / bid, workspace_dir=ws, staging_dir=st,
+              broker=_FaithfulBroker(ws, st), coder=BespokeCoder())
+    state = BuildState(build_id=bid, build_dir=str(cfg.builds_dir / bid), workspace_dir=str(ws))
+
+    # P0..P3
+    for fn in (p0_ingest, p1_spec, p2_plan, p3_scaffold):
+        state = state.model_copy(update=fn(state, ctx))
+    assert len(state.plan.iterations) == 2          # multi-iteration plan
+
+    # drive the iterate↔critic loop exactly as the graph would, following the verdict
+    guard = 0
+    while guard < 20:
+        guard += 1
+        state = state.model_copy(update=p4_iterate(state, ctx))
+        state = state.model_copy(update=p_critic(state, ctx))
+        v = state.verdict
+        if v in ("next", "fix"):
+            continue
+        if v == "proceed":
+            break
+        raise AssertionError(f"unexpected verdict in fake loop: {v}")
+
+    for fn in (p5_docs, p6_cleanroom, p7_emit):
+        state = state.model_copy(update=fn(state, ctx))
+
+    pa = load_artifact(cfg.builds_dir / bid)
+    assert pa.status == "done"
+    assert len(state.iteration_records) == 2                       # both iterations ran
+    assert all(c.status == "met" for c in pa.success_criteria)     # core (coder) + second (met-existing)
+    assert state.inventory_ok and state.red_first_ok
+    # both iterations' tests published into the clean-room workspace
+    published = sorted((ws / "tests").glob("test_iter_*.py"))
+    assert len(published) == 2

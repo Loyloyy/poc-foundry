@@ -70,17 +70,21 @@ TESTER_SYSTEM = (
 )
 
 
-def tester_prompt(criterion_text: str, goal: str, interface: str, core_module: str = "core") -> str:
+def tester_prompt(criteria, goal: str, interface: str, core_module: str = "core") -> str:
+    if isinstance(criteria, str):
+        criteria = [criteria]
+    crit_block = "\n".join(f"{i}. {c}" for i, c in enumerate(criteria, 1))
+    plural = "these criteria" if len(criteria) > 1 else "this criterion"
     return (
         f"# PoC goal\n{goal}\n\n"
         f"# Interface under test (fixed)\n{interface}\n"
         f"(import it as `from {core_module} import generate_reply`)\n\n"
-        f"# Success criterion to encode as a test\n{criterion_text}\n\n"
+        f"# Success criteria to encode as tests\n{crit_block}\n\n"
         "# Task\n"
-        "Write ONE pytest file (functions named `test_*`) that asserts this criterion against "
-        f"`generate_reply`. Make the assertions specific and deterministic so a naive echo stub "
-        "would FAIL them. Use only the stdlib + pytest. Do not import gradio or open any network "
-        "connection. Output only the file in a single ```python block."
+        f"Write ONE pytest file (functions named `test_*`, one or more per criterion) that asserts "
+        f"{plural} against `generate_reply`. Make the assertions specific and deterministic so a "
+        "naive echo stub would FAIL them. Use only the stdlib + pytest. Do not import gradio or open "
+        "any network connection. Output only the file in a single ```python block."
     )
 
 

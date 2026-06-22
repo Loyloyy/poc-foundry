@@ -130,22 +130,39 @@ def p1_spec(state, ctx: Ctx) -> dict:
             "log": state.log + [f"P1 spec: {len(spec.success_criteria)} criteria"]}
 
 
-# ── P2 plan (deterministic single iteration for M1) ──────────────────────────
+# ── P2 plan (deterministic multi-iteration, core-first) ──────────────────────
+# M2a S3: one small iteration per testable criterion, the CORE criterion first (it gates `done`).
+# Deterministic rather than architect-decomposed by design (DEV_NOTES: the on-prem model is a weak
+# self-planner — classifying given criteria into ordered iterations is reliable; open decomposition is
+# not). The graph loops P4 over these iterations under a cumulative regression gate; later iterations
+# whose criterion the earlier code already satisfies resolve as "met by existing implementation".
 def p2_plan(state, ctx: Ctx) -> dict:
     from poc_foundry.state import IterationPlan, Plan
 
     spec = state.spec
-    core = next((c for c in spec.success_criteria if c.core), None)
-    acceptance = [c.text for c in spec.success_criteria if c.type == "met-by-test"]
-    it = IterationPlan(
-        goal=(core.text if core else spec.goal),
-        acceptance=acceptance,
-        interface=ctx.template.interface,
-        files=list(ctx.template.editable_files),
-    )
-    ctx.say(f"P2 plan: 1 iteration (M1); interface pinned to {ctx.template.interface}")
-    return {"phase": "plan", "plan": Plan(iterations=[it]),
-            "log": state.log + ["P2 plan: 1 iteration"]}
+    testable = [c for c in spec.success_criteria if c.type == "met-by-test"] or list(spec.success_criteria)
+    core = next((c for c in testable if c.core), testable[0] if testable else None)
+    ordered = ([core] + [c for c in testable if c is not core]) if core else testable
+    cap = max(1, int(getattr(ctx.cfg, "max_iterations", 8)))
+    ordered = ordered[:cap]
+
+    iterations = [IterationPlan(goal=(spec.goal if i == 0 else c.text), acceptance=[c.text],
+                                interface=ctx.template.interface,
+                                files=list(ctx.template.editable_files))
+                  for i, c in enumerate(ordered)]
+
+    # Reset the iteration loop (first pass OR a replan re-entry) + clear staged tests on disk.
+    staging_tests = ctx.staging_dir / "tests"
+    if staging_tests.exists():
+        shutil.rmtree(staging_tests)
+    for c in spec.success_criteria:
+        c.status = "pending"
+
+    ctx.say(f"P2 plan: {len(iterations)} iteration(s) (core-first); interface pinned to {ctx.template.interface}")
+    return {"phase": "plan", "plan": Plan(iterations=iterations), "spec": spec,
+            "iteration": 0, "fix_count": 0, "staged_tests": [], "green_test_files": [],
+            "authored_test_ids": [], "inventory_ok": True, "red_first_ok": True,
+            "log": state.log + [f"P2 plan: {len(iterations)} iteration(s)"]}
 
 
 # ── P3 scaffold ──────────────────────────────────────────────────────────────
@@ -171,12 +188,19 @@ def p3_scaffold(state, ctx: Ctx) -> dict:
             "log": state.log + [f"P3 scaffold: GREEN @ {sha}"]}
 
 
-# ── P4 iterate (red-first tester + CoderEngine + staged VERIFY) ──────────────
-def _tester_write(ctx: Ctx, criterion_text: str, goal: str, interface: str) -> str:
+# ── P4 iterate (red-first tester + CoderEngine + cumulative staged VERIFY) ───
+def _tester_write(ctx: Ctx, criteria, goal: str, interface: str) -> str:
     from poc_foundry.models import chat_text
-    resp = chat_text("tester", prompts.tester_prompt(criterion_text, goal, interface),
+    resp = chat_text("tester", prompts.tester_prompt(criteria, goal, interface),
                      system=prompts.TESTER_SYSTEM)
     return _extract_code(resp)
+
+
+def _verify_file(sbx, rel: str) -> bool:
+    """Run ONE staged test file (red-first check on the iteration's NEW test)."""
+    r = sbx.exec(f"cd /work && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/work "
+                 f"python -m pytest /staged/{rel} -q", timeout_s=300)
+    return r.ok
 
 
 def _ledger_collect(sbx) -> set[str]:
@@ -201,103 +225,108 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     from poc_foundry.artifact import IterationRecord
 
     spec, plan = state.spec, state.plan
-    it = plan.iterations[0]
-    core = next((c for c in spec.success_criteria if c.core), spec.success_criteria[0])
+    i = state.iteration
+    it = plan.iterations[i]
+    targets = [c for c in spec.success_criteria if c.text in it.acceptance]   # this iteration's criteria
+    test_file = f"test_iter_{i}.py"
+    strict_red_first = (i == 0)   # iteration 0 runs against the scaffold echo-stub — a real test MUST be red
 
-    test_src = _tester_write(ctx, core.text, it.goal, it.interface)
+    test_src = _tester_write(ctx, it.acceptance, it.goal, it.interface)
     staging_tests = ctx.staging_dir / "tests"
-    if staging_tests.exists():
-        shutil.rmtree(staging_tests)
-    staging_tests.mkdir(parents=True, exist_ok=True)
-    (staging_tests / "test_criterion.py").write_text(test_src)
+    staging_tests.mkdir(parents=True, exist_ok=True)     # ACCUMULATE: prior iterations' tests stay (cumulative suite)
+    (staging_tests / test_file).write_text(test_src)
     chown_to_builder(staging_tests)
 
     base_sha = state.commit_sha or state.scaffold_sha or "HEAD"
+    staged_names = set(state.staged_tests) | {test_file}
     incidents: list = []
     authored: set[str] = set()
     red_first_ok, inv_ok = True, True
     crit_status, it_status, attempts, note = "pending", "pending", 0, ""
 
     sbx = ctx.broker.create(
-        mounts=[ws_mount(ctx.workspace_dir), staged_tests_mount(staging_tests)], name="iterate")
+        mounts=[ws_mount(ctx.workspace_dir), staged_tests_mount(staging_tests)], name=f"iter{i}")
     try:
-        authored = _ledger_collect(sbx)
+        authored = _ledger_collect(sbx)                  # cumulative authored set (all /staged)
 
         def verify():
             # DIFF SCANNER (per-attempt): a tampering edit fails the attempt BEFORE the test runs, so
             # a repeat trips the coder's forced-strategy-change (error-signature) path.
-            incs = integrity.scan_diff(git_diff(ctx.workspace_dir, base_sha), {"test_criterion.py"})
+            incs = integrity.scan_diff(git_diff(ctx.workspace_dir, base_sha), staged_names)
             if integrity.blocking(incs):
-                for i in incs:
-                    if str(i) not in [str(x) for x in incidents]:
-                        incidents.append(i)
-                return False, "INTEGRITY: " + "; ".join(str(i) for i in incs if i.severity == "high")
-            # /staged is RO → don't write bytecode there; import the workspace core from /work.
+                for inc in incs:
+                    if str(inc) not in [str(x) for x in incidents]:
+                        incidents.append(inc)
+                return False, "INTEGRITY: " + "; ".join(str(x) for x in incs if x.severity == "high")
+            # CUMULATIVE regression gate: ALL staged tests must pass (the new one + every prior one).
             r = sbx.exec("cd /work && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/work "
                          "python -m pytest /staged -q", timeout_s=300)
             return r.ok, r.combined
 
-        ok0, _ = verify()
-        if ok0:
-            # RED-FIRST ENFORCEMENT (M2a flips M1's best-effort): a staged test that is already green
-            # against the scaffold is a tester-inadequacy signal, NOT a pass.
+        new_is_green = _verify_file(sbx, test_file)       # red-first probe on THIS iteration's new test
+        if new_is_green and strict_red_first:
+            # iteration 0 against the scaffold: a green test is tester-inadequacy, NOT a pass.
             red_first_ok = False
             note = "staged test passed against the scaffold (not red-first) — tester inadequacy"
             incidents.append(integrity.Incident("red-first", note, severity="high"))
             it_status, crit_status = "red-first-failed", "descoped"
-            ctx.say("P4 iterate: RED-FIRST VIOLATION — staged test green against scaffold (flagged)")
+            ctx.say(f"P4 iter{i}: RED-FIRST VIOLATION — staged test green against scaffold (flagged)")
+        elif new_is_green:
+            # later iteration: the criterion is already satisfied by prior code → met, no coder needed.
+            it_status, crit_status = "met-existing", "met"
+            note = "criterion already met by a prior iteration's implementation"
+            ctx.say(f"P4 iter{i}: criterion already met by existing implementation (no code change)")
         else:
             res = ctx.coder.run(
                 workspace=ctx.workspace_dir, goal=it.goal, editable_files=it.files,
-                test_sources={"test_criterion.py": test_src}, verify=verify,
+                test_sources={test_file: test_src}, verify=verify,
                 edit_format="whole", max_attempts=getattr(ctx.cfg, "max_fix_attempts", 3))
             attempts = res.attempts
             if integrity.blocking(incidents):
-                it_status, crit_status = "abandoned", "descoped"
-                note = "; ".join(str(i) for i in incidents if i.severity == "high")[:300]
-                ctx.say(f"P4 iterate: INTEGRITY INCIDENT — {note}")
+                it_status, crit_status = "incident", "descoped"
+                note = "; ".join(str(x) for x in incidents if x.severity == "high")[:300]
+                ctx.say(f"P4 iter{i}: INTEGRITY INCIDENT — {note}")
             elif res.passed:
-                # INVENTORY LEDGER (verify): collected ∧ passed must cover the recorded ids.
-                passed = _ledger_junit(sbx)
+                passed = _ledger_junit(sbx)               # cumulative collected ∧ passed ⊇ recorded
                 inv_ok = integrity.inventory_ok(authored, passed) if authored else True
                 if inv_ok:
                     it_status, crit_status = "green", "met"
-                    ctx.say(f"P4 iterate: RED→GREEN in {attempts} attempt(s); edited {res.edited}; "
+                    ctx.say(f"P4 iter{i}: RED→GREEN in {attempts} attempt(s); edited {res.edited}; "
                             f"ledger OK ({len(authored)} test(s))")
                 else:
                     gap = sorted(integrity.inventory_gap(authored, passed))
                     note = f"inventory ledger gap: {gap} recorded but not passed"
                     incidents.append(integrity.Incident("ledger-gap", note, severity="high"))
-                    it_status, crit_status = "abandoned", "descoped"
-                    ctx.say(f"P4 iterate: LEDGER FAIL — {note}")
+                    it_status, crit_status = "incident", "descoped"
+                    ctx.say(f"P4 iter{i}: LEDGER FAIL — {note}")
             else:
                 it_status, crit_status = "abandoned", "descoped"
                 note = res.note or "coder did not reach green"
-                ctx.say(f"P4 iterate: criterion DESCOPED after {attempts} attempt(s) ({note})")
+                ctx.say(f"P4 iter{i}: criterion DESCOPED after {attempts} attempt(s) ({note})")
     finally:
         sbx.destroy()
 
+    met = crit_status == "met"
     sha = state.commit_sha
     if it_status == "green":
-        sha = git_commit(ctx.workspace_dir, f"iterate: {it.goal[:60]}")
+        sha = git_commit(ctx.workspace_dir, f"iterate {i}: {it.goal[:56]}")
 
-    # reflect the outcome on the core criterion
-    for c in spec.success_criteria:
-        if c.core:
-            c.status = crit_status
+    for c in targets:                                    # reflect the outcome on THIS iteration's criteria
+        c.status = crit_status
 
-    rec = IterationRecord(goal=it.goal, status=it_status, attempts=attempts, tests_added=1)
+    rec = IterationRecord(goal=it.goal, status=it_status, attempts=attempts,
+                          tests_added=len(authored - set(state.authored_test_ids)))
     return {"phase": "iterate", "spec": spec, "commit_sha": sha,
             "iteration_records": state.iteration_records + [rec],
-            "staged_tests": state.staged_tests + ["test_criterion.py"],
-            "pending_test_src": test_src, "pending_criterion": core.text,
-            "authored_test_ids": state.authored_test_ids + sorted(authored),
+            "staged_tests": sorted(staged_names),
+            "green_test_files": state.green_test_files + ([test_file] if met else []),
+            "pending_test_src": test_src, "pending_criterion": it.goal,
+            "authored_test_ids": sorted(set(state.authored_test_ids) | authored),
             "inventory_ok": state.inventory_ok and inv_ok,
             "red_first_ok": state.red_first_ok and red_first_ok,
-            "incidents": state.incidents + [str(i) for i in incidents],
-            "iteration": state.iteration + 1,
+            "incidents": state.incidents + [str(inc) for inc in incidents],
             "caveats": state.caveats + ([note] if note else []),
-            "log": state.log + [f"P4 iterate: {it_status} (attempts={attempts})"]}
+            "log": state.log + [f"P4 iter{i}: {it_status} (attempts={attempts})"]}
 
 
 # ── critic gate + verdict ladder (design §5.4, §5.8) ─────────────────────────
@@ -317,78 +346,94 @@ def _critic_adequacy(ctx: Ctx, criterion: str, test_src: str):
 
 
 def p_critic(state, ctx: Ctx) -> dict:
-    """Adequacy review + the verdict ladder (pass / fix / descope / replan / respec). Wired as
-    conditional routing around P4 in ``graph.py``. Verdicts are gated by ``fix_limit_k`` (or
-    ``degraded_fix_limit_k`` when critic.family == coder.family) / ``replan_cap`` / ``respec_cap``;
-    on exhaustion the criterion is descoped honestly (recorded in ``descope_report[]``)."""
+    """Per-iteration adequacy review + the verdict ladder, then LOOP CONTROL. The disposition for the
+    current iteration is one of accept / fix / respec / replan / descope (gated by ``fix_limit_k`` —
+    or ``degraded_fix_limit_k`` in degraded mode — / ``replan_cap`` / ``respec_cap``); it is then
+    mapped to a routing verdict: ``fix`` re-runs the SAME iteration; ``respec``/``replan`` reset and
+    go back to P1/P2; ``accept``/``descope`` resolve the criterion and ADVANCE — ``next`` to the next
+    iteration (fresh fix budget) or ``proceed`` to docs when the plan is exhausted. Cycles terminate
+    via the capped counters (+ a graph recursion_limit)."""
     from poc_foundry.models import same_family
 
     cfg = ctx.cfg
     degraded = same_family("critic", "coder")
     K = cfg.degraded_fix_limit_k if degraded else cfg.fix_limit_k
+    i = state.iteration
+    it = state.plan.iterations[i] if state.plan else None
+    plan_len = len(state.plan.iterations) if state.plan else 1
 
     last = state.iteration_records[-1] if state.iteration_records else None
     status = last.status if last else "abandoned"
-    has_incident = any(s.startswith("[high]") for s in state.incidents)
-    crit_text = state.pending_criterion
 
     upd: dict = {"phase": "critic", "degraded_critic": degraded}
-    descope: tuple | None = None
+    advisory: str | None = None
 
-    if status == "green" and not has_incident:
-        review = _critic_adequacy(ctx, crit_text, state.pending_test_src)
-        if review.adequate:
-            verdict, reason = "pass", review.reason or "adequate"
-        elif degraded:
-            # A same-family critic can't INDEPENDENTLY certify adequacy (design §5.4) — so in degraded
-            # mode its adequacy concern is ADVISORY (recorded, non-blocking), never a respec/descope.
-            # The hard walls (ledger / red-first / diff-scanner) still gate. Blocking adequacy returns
-            # when a distinct frontier critic lands.
-            verdict, reason = "pass", "adequacy concern recorded (degraded critic, non-blocking)"
-            upd["caveats"] = state.caveats + [f"critic (degraded, advisory): {review.reason}"]
-        elif state.respec_count < cfg.respec_cap:
-            verdict, reason = "respec", review.reason or "test inadequate / gameable"
+    # ── disposition for THIS iteration ──
+    if status in ("green", "met-existing"):
+        if status == "met-existing":
+            disposition, reason = "accept", "criterion met by existing implementation"
         else:
-            verdict, reason = "descope", review.reason or "test inadequate; respec cap reached"
-            descope = (crit_text, reason)
-    elif has_incident:
-        verdict, reason = "descope", "integrity incident — gamed iteration not rewarded"
-        descope = (crit_text, reason)
+            review = _critic_adequacy(ctx, state.pending_criterion, state.pending_test_src)
+            if review.adequate:
+                disposition, reason = "accept", review.reason or "adequate"
+            elif degraded:
+                # A same-family critic can't INDEPENDENTLY certify adequacy (design §5.4) → ADVISORY
+                # (recorded, non-blocking). The hard walls still gate; blocking adequacy returns with a
+                # distinct frontier critic.
+                disposition, reason = "accept", "adequacy concern recorded (degraded critic, non-blocking)"
+                advisory = review.reason
+            elif state.respec_count < cfg.respec_cap:
+                disposition, reason = "respec", review.reason or "test inadequate / gameable"
+            else:
+                disposition, reason = "descope", review.reason or "test inadequate; respec cap reached"
+    elif status == "incident":
+        disposition, reason = "descope", "integrity incident — gamed iteration not rewarded"
     elif status == "red-first-failed":
-        # the tester wrote a non-red test; a re-author may help, gated like a fix
+        disposition, reason = (("fix", "red-first failure — re-author the test")
+                               if state.fix_count < K else
+                               ("descope", "red-first failures exhausted fix budget"))
+    else:  # abandoned — coder did not reach green
         if state.fix_count < K:
-            verdict, reason = "fix", "red-first failure — re-author the test"
-        else:
-            verdict, reason = "descope", "red-first failures exhausted fix budget"
-            descope = (crit_text, reason)
-    else:  # coder did not reach green
-        if state.fix_count < K:
-            verdict, reason = "fix", "coder did not reach green — another iteration"
+            disposition, reason = "fix", "coder did not reach green — another iteration"
         elif state.replan_count < cfg.replan_cap:
-            verdict, reason = "replan", "fix budget exhausted — replan remaining"
+            disposition, reason = "replan", "fix budget exhausted — replan remaining"
         else:
-            verdict, reason = "descope", "fix + replan budgets exhausted"
-            descope = (crit_text, reason)
+            disposition, reason = "descope", "fix + replan budgets exhausted"
+
+    # ── map disposition → routing verdict (+ counters / advancement / records) ──
+    if advisory is not None:
+        upd["caveats"] = state.caveats + [f"critic (degraded, advisory): {advisory}"]
+
+    if disposition == "fix":
+        verdict = "fix"
+        upd["fix_count"] = state.fix_count + 1
+    elif disposition == "respec":
+        verdict = "respec"
+        upd["respec_count"] = state.respec_count + 1
+    elif disposition == "replan":
+        verdict = "replan"
+        upd["replan_count"] = state.replan_count + 1
+    else:  # accept | descope → criterion resolved; advance the loop
+        if disposition == "descope":
+            spec = state.spec
+            for c in (spec.success_criteria if it is None else
+                      [c for c in spec.success_criteria if c.text in it.acceptance]):
+                c.status = "descoped"
+            upd["spec"] = spec
+            upd["descope_report"] = state.descope_report + [{
+                "criterion": (it.acceptance[0] if it and it.acceptance else state.pending_criterion),
+                "attempts_made": state.fix_count + 1, "why_failed": reason,
+                "finish_path": "re-run with `refine` on a frontier `coder` endpoint, or finish by hand in OpenCode"}]
+        if i + 1 < plan_len:
+            verdict = "next"
+            upd["iteration"] = i + 1
+            upd["fix_count"] = 0          # each iteration gets a fresh fix budget
+        else:
+            verdict = "proceed"
 
     upd["verdict"] = verdict
-    if verdict == "fix":
-        upd["fix_count"] = state.fix_count + 1
-    elif verdict == "respec":
-        upd["respec_count"] = state.respec_count + 1
-    elif verdict == "replan":
-        upd["replan_count"] = state.replan_count + 1
-    elif verdict == "descope" and descope:
-        spec = state.spec
-        for c in spec.success_criteria:
-            if c.text == descope[0]:
-                c.status = "descoped"
-        upd["spec"] = spec
-        upd["descope_report"] = state.descope_report + [{
-            "criterion": descope[0], "attempts_made": state.fix_count + 1, "why_failed": descope[1],
-            "finish_path": "re-run with `refine` on a frontier `coder` endpoint, or finish by hand in OpenCode"}]
-
-    ctx.say(f"critic: verdict={verdict} ({reason}); degraded_critic={degraded}")
-    upd["log"] = state.log + [f"critic: {verdict} ({reason})"]
+    ctx.say(f"critic: iter{i} {disposition}→{verdict} ({reason}); degraded_critic={degraded}")
+    upd["log"] = state.log + [f"critic iter{i}: {disposition}→{verdict} ({reason})"]
     return upd
 
 
@@ -409,12 +454,32 @@ def _scribe_demo(ctx: Ctx, spec) -> str:
             f"{spec.demo_scenario}\n\n## Success criteria\n{crit}\n")
 
 
+def _publish_tests(state, ctx: Ctx) -> int:
+    """Publish the staged tests of MET iterations into the workspace ``tests/`` so the PoC ships with
+    its verification AND the clean-room re-runs the cumulative criterion suite (not just the template
+    smoke). Descoped/abandoned iterations' tests are NOT published — the clean-room must not fail on a
+    criterion we honestly descoped. The coder never saw these as workspace files (staged RO during
+    iteration); they are added only now, after the gates have run."""
+    src = ctx.staging_dir / "tests"
+    dest = ctx.workspace_dir / "tests"
+    dest.mkdir(parents=True, exist_ok=True)
+    published = 0
+    for name in state.green_test_files:
+        f = src / name
+        if f.exists():
+            shutil.copy2(f, dest / name)
+            published += 1
+    return published
+
+
 def p5_docs(state, ctx: Ctx) -> dict:
+    published = _publish_tests(state, ctx)
     (ctx.workspace_dir / "DEMO.md").write_text(_scribe_demo(ctx, state.spec))
-    sha = git_commit(ctx.workspace_dir, "docs: add DEMO.md")
-    ctx.say("P5 docs: RUN.md/README/AGENTS (seeded) + DEMO.md")
+    chown_to_builder(ctx.workspace_dir)   # published tests + DEMO must be writable/readable by uid 1000
+    sha = git_commit(ctx.workspace_dir, f"docs: DEMO.md + publish {published} criterion test file(s)")
+    ctx.say(f"P5 docs: DEMO.md + published {published} criterion test file(s) into tests/")
     return {"phase": "docs", "commit_sha": sha, "demo_quality": "thin",
-            "log": state.log + ["P5 docs: DEMO.md written"]}
+            "log": state.log + [f"P5 docs: DEMO.md + {published} test file(s) published"]}
 
 
 # ── P6 cleanroom (fresh VM + fresh clone) ────────────────────────────────────

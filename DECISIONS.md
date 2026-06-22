@@ -428,3 +428,57 @@ happy-path re-run.
   the new one) is meaningful only once P2 is multi-iteration → lands with **S3**; the architect-driven
   multi-iteration plan + clean-room status GATES are S3; the respec prompt does not yet feed the
   critic's `suggestion` back to the architect (refinement; the cap guarantees termination regardless).
+
+## #14 — M2a S3: multi-iteration loop, cumulative suite, clean-room publish/GATE (2026-06-23)
+
+Third M2a slice — the graph loops P4 over a multi-iteration plan under a cumulative regression gate,
+and the clean-room finally runs the criterion tests (not just the template smoke). The biggest call
+here was a **structural finding surfaced by slice-and-validate**, logged for the planning chat.
+
+- **P2 = deterministic core-first multi-iteration (architect decomposition DEFERRED).** P2 emits one
+  small iteration per testable criterion, the CORE criterion first (it gates `done`), capped at
+  `max_iterations`. **Decision: NOT architect-LLM-decomposed**, despite the handover's "architect-
+  driven" wording — DEV_NOTES/Stage-2 evidence is explicit that the on-prem model is a *weak self-
+  planner*; classifying given criteria into an ordered iteration list is reliable and deterministic,
+  open decomposition is not. This is a handover-instruction deviation (not a §10 ledger item) made on
+  recorded evidence; flagged to the user for a planning-chat call on whether architect-grouping is
+  worth adding later. The IterationPlan/loop machinery is fully multi-iteration-capable, so swapping in
+  an architect grouping later is additive.
+- **The loop.** `iterate → critic → {next:iterate(advance), fix:iterate(same i), respec:spec,
+  replan:plan, proceed:docs}`. The critic now owns iteration advancement: `accept`/`descope` resolve
+  the criterion and emit `next` (i+1, fresh fix budget) or `proceed` (plan exhausted). P4 no longer
+  bumps `iteration`. fix budget K is **per-iteration** (reset on `next` and on P2/replan). Termination:
+  capped counters + recursion_limit=60.
+- **STRUCTURAL FINDING (the load-bearing one): naive multi-iteration trips red-first on a one-shot
+  PoC.** The chatbot fixture's criteria are facets of one `core.py`; splitting them into iterations
+  means later iterations' tests pass against earlier iterations' code. Strict red-first would flag those
+  as tester-inadequacy and (via the trust gate) block `done` → a REGRESSION of the proven happy path.
+  **Resolution: red-first is strict ONLY at iteration 0 (against the scaffold echo-stub).** For i>0, a
+  green-pre-coder test means "criterion already met by prior iterations' implementation" → status
+  `met-existing` (a real pass, no coder run), not a violation. This yields a genuine incremental build
+  (iter0 builds the core RED→GREEN; later iters either extend RED→coder, or are already satisfied) and
+  preserves the happy path. The gaming-catch for later iterations is still covered by the diff-scanner,
+  the cumulative ledger, and the critic. Logged for the planning chat as the multi-iteration semantics.
+- **Cumulative regression gate.** Per iteration the tester's test is staged as `test_iter_i.py`
+  (ACCUMULATED, not overwritten); the coder's `verify()` runs the WHOLE `/staged` suite, so a later
+  iteration that breaks an earlier criterion fails and the coder must fix it. The inventory ledger
+  collects/junit over all of `/staged` (cumulative authored ⊆ passed).
+- **Clean-room publish + GATE.** After the loop, P5 copies MET iterations' staged tests into
+  `workspace/tests/` (descoped/abandoned tests are NOT published — the clean-room must not fail on a
+  criterion we honestly descoped). The clean-room's `python -m pytest -q` (CWD on path → `import core`
+  works) then re-runs the template smoke + the published criterion suite. `_final_status` already
+  required `cleanroom.suite_ok` for `done`, so a red clean-room can never be `done` — the
+  "clean-room gates a known-bad build red" acceptance, now with the REAL criterion tests in the clone
+  (previously only the trivial smoke ran there).
+- **Verified locally (35/35 fakes):** a faithful in-process fake sandbox (actually RUNS the staged
+  test functions, no pytest needed) drives a 2-iteration build to `done` — iter0 core RED→GREEN via the
+  coder, iter1 met-existing, both tests published; plus unit tests for `next` advancement (+ fresh fix
+  budget), met-existing acceptance, the full verdict ladder under the new `proceed`/`next` vocabulary.
+  Spine 8/8; contract 11/11; import hygiene clean.
+- **Known caveats (logged):** the inventory ledger compares by test-function NAME (S1, server-proven on
+  a single 6-test file); across multiple `test_iter_*.py` files a NAME collision (the tester reusing a
+  generic `test_basic`) could mask a deletion — node-id (`stem::name`) hardening is a candidate if the
+  multi-iteration server run shows name reuse (kept name-based for now to not perturb the proven path).
+  Replan re-plans ALL criteria fresh (not just unmet ones) — a valid simplification bounded by
+  `replan_cap`. `tests_total` is an approximate file-count + 1 (the real count is the clean-room pytest
+  output).

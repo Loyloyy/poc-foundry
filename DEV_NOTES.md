@@ -275,4 +275,33 @@ denials still pass). The same spike under runc resolves names fine.
   degraded path patches it True. If you add a structured-output role, branch on the model class in the
   fake (it's keyed on `model is AdequacyReview`).
 
+## M2a S3 multi-iteration loop (2026-06-23)
+
+- **Red-first is strict ONLY at iteration 0.** Iteration 0 runs against the scaffold echo-stub, so a
+  green staged test there = tester inadequacy (VIOLATION, blocks `done`). For iteration i>0 the code
+  already exists, so a green-pre-coder test legitimately means "criterion already met by prior code" →
+  status `met-existing` (a pass, no coder). If you ever change the scaffold or the decomposition,
+  re-check this boundary — making ALL iterations strict would regress any one-shot PoC (the chatbot
+  fixture: its 5 criteria are facets of one core.py, so iters 1–4 are typically met-existing).
+- **Staged tests ACCUMULATE; the verify is cumulative.** P4 writes `test_iter_{i}.py` into the staging
+  tests dir without clearing it (P2 clears it once per plan). The coder's `verify()` runs the whole
+  `/staged` dir, so a later iteration that breaks an earlier criterion fails → the coder must fix it
+  (regression gate). The red-first probe runs the NEW file alone (`pytest /staged/test_iter_i.py`).
+- **Only MET iterations' tests are published to the clean-room** (`workspace/tests/`, in P5). Descoped
+  tests are withheld so the clean-room doesn't fail on a criterion we honestly descoped. The clean-room
+  `python -m pytest -q` runs from the clone root → CWD on `sys.path` → `import core` resolves even for
+  tests under `tests/` (this is WHY the `-m` matters; bare `pytest` would not put CWD on the path).
+- **The loop is driven by the critic's verdict, not by P4.** P4 no longer increments `iteration`; the
+  critic emits `next` (advance, reset fix budget) / `fix` (same iteration) / `proceed` (done iterating).
+  When writing a fakes test that exercises the loop, DRIVE IT like the graph: call `p4_iterate` then
+  `p_critic`, branch on `state.verdict` (`next`/`fix`→loop, `proceed`→break), with a guard counter.
+  `test_multi_iteration_build_completes_with_cumulative_publish` shows the pattern + a faithful fake
+  sandbox that actually runs the staged test functions in-process (no pytest on the 3.10 box).
+- **Ledger is name-based across files (caveat).** `collected_names`/`junit_passed_names` key on the
+  test-function name. Across multiple `test_iter_*.py`, a reused generic name (`test_basic`) collapses
+  in the ledger. Server-proven fine on a single file (S2: 6 unique names). If the multi-iteration server
+  run shows name reuse masking a deletion, upgrade the ledger key to `stem::name` (collect-only gives
+  `test_iter_0.py::name`; junit gives `classname="test_iter_0"` — but confirm the real junit classname
+  format on the server first, since rootdir affects it).
+
 ## (sections appended as slices land)
