@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from poc_foundry.artifact import DeepResearchArtifact
+from poc_foundry.stage2_artifact import DeepResearchArtifact
 
 _REPRO_OK = {"HIGH", "MED", "LOW"}
 _ORIGIN_OK = {"web", "vault", "code"}

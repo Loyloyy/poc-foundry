@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from poc_foundry.artifact import DeepResearchArtifact
+from poc_foundry.stage2_artifact import DeepResearchArtifact
 
 
 @dataclass

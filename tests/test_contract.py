@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from poc_foundry.artifact import DeepResearchArtifact, validate_citations
+from poc_foundry.stage2_artifact import DeepResearchArtifact, validate_citations
 from poc_foundry.ingest import clamp_confidence, load_run, validate_semantics
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_artifact"
@@ -71,9 +71,9 @@ def test_confidence_clamp_defensive():
 
 def test_artifact_import_is_lightweight():
     """Reading artifacts must NOT drag in the heavy agent stack (the extras-split guarantee)."""
-    import poc_foundry.artifact  # noqa: F401
+    import poc_foundry.stage2_artifact  # noqa: F401
     for heavy in ("langchain", "langgraph", "deepagents"):
-        assert heavy not in sys.modules, f"{heavy} imported by poc_foundry.artifact (should be schema-only)"
+        assert heavy not in sys.modules, f"{heavy} imported by poc_foundry.stage2_artifact (should be schema-only)"
 
 
 if __name__ == "__main__":  # no-pytest fallback for the bare dev box

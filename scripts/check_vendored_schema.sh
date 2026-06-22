@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Drift check for the vendored Stage-2 schema (DECISIONS #2). Diffs the byte-identical mirror files
 # against the local Stage-2 source. Non-zero exit = drift → re-copy + bump the SHA in
-# src/poc_foundry/artifact/_VENDORED.md (or retire the mirror for the git dep).
+# src/poc_foundry/stage2_artifact/_VENDORED.md (or retire the mirror for the git dep).
 #
 #   bash scripts/check_vendored_schema.sh [path-to-ai-engineer-research]
 set -u
@@ -10,7 +10,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 SRC_REPO="${1:-$REPO/../ai-engineer-research}"
 SRC_DIR="$SRC_REPO/src/ai_engineer_research/artifact"
-VEND_DIR="$REPO/src/poc_foundry/artifact"
+VEND_DIR="$REPO/src/poc_foundry/stage2_artifact"
 
 if [ ! -d "$SRC_DIR" ]; then
   echo "SKIP: Stage-2 source not found at $SRC_DIR"

@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))  # import poc_foundry without installing (no host pip)
 
-from poc_foundry.artifact import DeepResearchArtifact, validate_citations  # noqa: E402
+from poc_foundry.stage2_artifact import DeepResearchArtifact, validate_citations  # noqa: E402
 from poc_foundry.ingest import clamp_confidence, load_run, validate_semantics  # noqa: E402
 
 FIXTURE = ROOT / "tests" / "fixtures" / "sample_artifact"
@@ -64,7 +64,7 @@ check("all confidences in [0,1] after clamp",
       all(0.0 <= f.confidence <= 1.0 for f in rf.artifact.findings))
 
 # Lightweight import guarantee.
-check("poc_foundry.artifact pulls no heavy agent stack",
+check("poc_foundry.stage2_artifact pulls no heavy agent stack",
       not any(m in sys.modules for m in ("langchain", "langgraph", "deepagents")))
 
 print(f"\nSUMMARY: {passed} passed, {failed} failed")

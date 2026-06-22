@@ -1,4 +1,4 @@
-# Vendored mirror — `poc_foundry.artifact`
+# Vendored mirror — `poc_foundry.stage2_artifact`
 
 **Mirror of:** `ai-engineer-research` → `src/ai_engineer_research/artifact/`
 **Copied from:** working tree at commit `2710e7ec677c225398bf76b4eeee66ee7f964d8f` (2026-06-15).
@@ -23,5 +23,5 @@ The three byte-identical files let `scripts/check_vendored_schema.sh` detect dri
   `../ai-engineer-research` source; non-zero exit = drift → re-copy + bump the SHA above).
 - **Retire (migration trigger):** when the user confirms Stage 2 is pushed to GitHub at a known SHA,
   replace this package with the one-line SHA-pinned dep in `pyproject.toml` (the commented block is
-  already there) and delete this directory. Imports change from `poc_foundry.artifact` to
+  already there) and delete this directory. Imports change from `poc_foundry.stage2_artifact` to
   `ai_engineer_research.artifact` (or re-export). No other rework.

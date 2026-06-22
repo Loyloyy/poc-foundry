@@ -214,3 +214,26 @@ the broker injects the proxy's internal-network IP, not its name** — `HTTPS_PR
 Extends to sandbox↔sibling-service hops (Milvus/pgvector by IP from a Kata VM) — note for M2a. Full
 detail in DEV_NOTES "Kata networking". Rerun pending to confirm 7/7 (the fix is verified by-design;
 the runc 8/8 already proved the proxy logic).
+
+## #10 — M1 S1: package relocate + the typed spine (2026-06-22)
+
+Started M1 (walking skeleton) with the foundation, sliced so each piece stays testable.
+
+- **Package relocate (clean layout before building on it):** the vendored Stage-2 INPUT schema moved
+  `src/poc_foundry/artifact/` → `src/poc_foundry/stage2_artifact/`, freeing `artifact/` for the
+  Stage-3 OUTPUT `PoCBuildArtifact` (design §4.3 reserves `artifact/` for the output). Updated the few
+  importers (`ingest/`, contract test, `run_contract_checks.py`, `check_vendored_schema.sh`). Two
+  distinct schemas no longer share a package name. Contract tests still 11/11; drift check still works.
+- **Output contract `PoCBuildArtifact`** (`artifact/schema.py` + `store.py`): the FULL flat schema per
+  design §4.3 defined now (additive-only), even though M1 only populates a subset — it's the contract.
+  `new_build_id()` mints `poc-<ts>-<rand6>`; versioned `vNN.json` under `builds/<id>/`.
+- **`BuildState`** (`state.py`): the typed, checkpointable LangGraph state + `Spec`/`Plan`/
+  `IterationPlan` sub-models. Flat + serializable (paths as str) so the SQLite saver round-trips it.
+- **`BuildConfig`** (`config.py`): pipeline.yaml budgets/templates + env (PF_*, gitignored .env); env
+  wins; pyyaml tolerated-absent. **`models.py`**: `build_chat_model(role)` (lazy ChatOpenAI, for
+  architect/critic/scribe structured calls) + `chat_text(role,…)` (stdlib raw, for the coder's tight
+  loop); role-triple + PF_DEFAULT_ROLE fallback; no model names in code (rule #4).
+- **Verified on 3.10:** artifact + state pydantic round-trip; config loads; `import poc_foundry.models`
+  pulls no langchain. **Remaining M1 (S2–S5):** broker, CoderEngine, phases+graph+core, gradio
+  template — deferred to a fresh chat (handover) to keep a clean token budget for the broker (~300–500
+  lines) + the orchestration wiring.

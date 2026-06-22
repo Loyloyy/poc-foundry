@@ -22,12 +22,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
 ### M0(a) — Kata spike  *(server, PuTTY; runbook `scripts/m0a_kata_register_smoke.md`, probe `scripts/m0a_kata_probe.sh`)*
 - [x] Runtime already registered (from poc-builder-prework Phase 3) — `"kata":{}` in docker info.
 - [x] Smoke GREEN (2026-06-22): kata guest kernel **6.18.28** ≠ host **6.8** → real VM proven.
-- [x] Probe 6/7 GREEN (2026-06-22): virtio-fs uid/gid (uid 1000) · nested RO `tests/` (Read-only FS) ·
-      writable junit · named-volume uv cache · memory cap had effect. Item 6 (VM→proxy→vLLM under
-      kata) failed ONLY on a `Permission denied` exec-bit issue calling the sub-script — fixed to
-      invoke via `bash`; **rerun → 7/7 expected** (`chmod +x scripts/*.sh; bash scripts/m0a_kata_probe.sh`).
-- **Acceptance:** smoke kernel ≠ host ✅; probe ends `GREEN` after the exec-bit fix. WARN/INFO
-  (`sandbox_cgroup_only` on cgroup v2) documented; host-side cgroups authoritative. Result → DECISIONS.
+- [x] **Probe 7/7 GREEN (2026-06-22):** virtio-fs uid/gid (uid 1000) · nested RO `tests/` (Read-only
+      FS) · writable junit · named-volume uv cache · memory cap had effect · **item 6 VM→proxy→vLLM
+      under kata GREEN** (proxy reached by IP `172.x:3128`; allowlist + denials + CONNECT log all hold).
+      Finding: Kata guests have no Docker name-DNS → broker injects the proxy IP, not name (DECISIONS #9).
+- **Acceptance:** ✅ smoke kernel ≠ host; ✅ probe 7/7 GREEN. `sandbox_cgroup_only` on cgroup v2 stays
+  an INFO caveat (host-side cgroups authoritative). Result → DECISIONS #9.
 
 ### M0(b) — Coder bake-off  *(server; `scripts/m0b_bakeoff/`)*
 - [x] **DECIDED (2026-06-22): bespoke loop wins the `CoderEngine` seat** — bespoke 4/4 (whole) +
@@ -61,8 +61,19 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
 - **Acceptance:** ✅ `M0(d): GREEN`; CONNECT log shows allowed + denied attempts.
 
 ## M1 — walking skeleton (thin everywhere)
-- [ ] artifact → spec → 1-iter plan → scaffold → code → staged VERIFY → minimal docs → thin
-      clean-room → artifact emitted; in-process broker stub; egress-isolated from day one
+- [x] **S1 spine (2026-06-22):** package relocate (vendored Stage-2 schema → `stage2_artifact/`, freeing
+      `artifact/` for the OUTPUT); `PoCBuildArtifact` schema+store (`artifact/`); `BuildState`/`Spec`/
+      `Plan` (`state.py`); `BuildConfig` + pipeline.yaml/env load (`config.py`); `build_chat_model` +
+      `chat_text` role factory (`models.py`). All pydantic/stdlib — round-trips + config load verified
+      on the 3.10 box; contract tests still 11/11; models.py stays langchain-free at import.
+- [ ] **S2 broker** — in-process stub behind the real interface (`create/create_service/exec/destroy`;
+      create* params harness-fixed, only exec carries LLM content); per-build internal net + egress
+      proxy (proxy-by-IP, from M0(a)); kata sandbox lifecycle (promote `m0b_bakeoff/sandbox.py`).
+- [ ] **S3 CoderEngine** — promote `m0b_bakeoff` BespokeEngine (won the seat) behind the seam.
+- [ ] **S4 phases + graph** — P0 ingest (have it) → P1 spec → P2 plan → P3 scaffold (gradio template
+      + green smoke) → P4 code+staged VERIFY → P5 min docs → P6 thin clean-room → P7 emit; LangGraph
+      wiring + checkpointer; `build_poc(...)` contract (`core.py`); CLI.
+- [ ] **S5 gradio template** (`templates/gradio-chatbot/`) + end-to-end run on server.
 - **Acceptance:** one fixture artifact runs end-to-end on the server; emits a `builds/<id>/` with a
       valid `PoCBuildArtifact`; claim proven = orchestrator-writes / sandbox-executes.
 
