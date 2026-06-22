@@ -141,4 +141,23 @@ the *why* behind architecture choices; this file is the *how* and the traps. Sta
   on the server before the git round-trip, hand-edit the file there + rebuild; before the next
   `git pull`, `git checkout <file>` (or stash) so the pull applies cleanly.
 
+## Kata networking: reach the proxy by IP, not name (M0(a) finding, 2026-06-22)
+
+**Key finding:** a Kata sandbox VM does NOT get Docker's embedded name-DNS. Under `--runtime kata`,
+`127.0.0.11` in the guest is the guest's own loopback (nothing listens there), so resolving a Docker
+container *name* like `pf-spike-proxy` fails ("Could not resolve proxy" / "Temporary failure in name
+resolution") — even though the VM is correctly on the `internal:true` network (direct-egress + RFC1918
+denials still pass). The same spike under runc resolves names fine.
+
+- **Fix / M1 pattern:** the VM reaches the proxy by its **internal-network IP**, not its name. The
+  broker resolves the proxy container's IP on the per-build internal network (`docker inspect -f
+  '{{(index .NetworkSettings.Networks "<net>").IPAddress}}'`) and injects
+  `HTTPS_PROXY=http://<proxy-ip>:3128` into the sandbox. This is the concrete form of the design's
+  "the VM reaches the proxy on the internal network (no host.docker.internal)".
+- The vLLM exception still works the same: the VM → proxy (by IP) → vLLM (the proxy's egress leg
+  resolves/reaches the vLLM host). Only the VM→proxy hop must avoid Docker name-DNS.
+- `m0d_egress_spike.sh` now derives `PROXY_URL` from the proxy's internal IP, so it passes under BOTH
+  runc and kata. Applies to every sandbox↔sibling-service hop too (use IPs / pass them in), since the
+  same DNS limitation hits Milvus/pgvector/etc. by name from a Kata VM — note for M2a sibling services.
+
 ## (sections appended as slices land)

@@ -20,24 +20,20 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
 ## M0 — independent de-risk spikes (NO pipeline code). Gate: (a)(c)(d) green + (b) decided → M1.
 
 ### M0(a) — Kata spike  *(server, PuTTY; runbook `scripts/m0a_kata_register_smoke.md`, probe `scripts/m0a_kata_probe.sh`)*
-- [ ] Register runtime (daemon.json runtimeType + `systemctl reload docker`, scheduled window)
-- [ ] Smoke: `docker run --runtime kata --rm ubuntu:24.04 uname -r` (guest kernel ≠ host)
-- [~] Probe script authored: virtio-fs uid/gid; nested RO `tests/` in RW workspace; writable junit;
-      named-volume uv cache; caps + `sandbox_cgroup_only` note; VM→proxy→vLLM via the egress spike
-      under `--runtime kata`. **Run pending** (`bash scripts/m0a_kata_probe.sh`).
-- **Acceptance:** smoke prints a guest kernel ≠ host; `m0a_kata_probe.sh` ends `GREEN` (0 FAIL) —
-  WARN/INFO items (in-guest mem cap, sandbox_cgroup_only) documented as caveats; fallbacks if needed
-  (host-side cgroups authoritative / tar-based exec bridge). Result → DECISIONS.
+- [x] Runtime already registered (from poc-builder-prework Phase 3) — `"kata":{}` in docker info.
+- [x] Smoke GREEN (2026-06-22): kata guest kernel **6.18.28** ≠ host **6.8** → real VM proven.
+- [x] Probe 6/7 GREEN (2026-06-22): virtio-fs uid/gid (uid 1000) · nested RO `tests/` (Read-only FS) ·
+      writable junit · named-volume uv cache · memory cap had effect. Item 6 (VM→proxy→vLLM under
+      kata) failed ONLY on a `Permission denied` exec-bit issue calling the sub-script — fixed to
+      invoke via `bash`; **rerun → 7/7 expected** (`chmod +x scripts/*.sh; bash scripts/m0a_kata_probe.sh`).
+- **Acceptance:** smoke kernel ≠ host ✅; probe ends `GREEN` after the exec-bit fix. WARN/INFO
+  (`sandbox_cgroup_only` on cgroup v2) documented; host-side cgroups authoritative. Result → DECISIONS.
 
 ### M0(b) — Coder bake-off  *(server; `scripts/m0b_bakeoff/`)*
-- [~] Harness authored: `BespokeEngine` (bounded loop, whole-file/diff edit formats, error-signature
-      tracking + forced strategy change) + `OpenCodeEngine` (scripted `opencode run`) behind a common
-      `CoderEngine` seam; 4 tasks (syntax / wrong-api / failing-test breaks + red-first feature);
-      `run.py` matrix + attribution. **Pure parts verified locally** (parsers, diff-apply, attribution,
-      task solvability). **Run pending** (`python3 -m scripts.m0b_bakeoff.run`).
-- **Acceptance:** a recorded **decision** in DECISIONS (winner takes the `CoderEngine` seat, loser =
-      fallback) + the attribution matrix (model-weak vs loop-weak) + edit-format recommendation. The
-      runner prints all three + saves a JSON trace. (Decision required, not "green".)
+- [x] **DECIDED (2026-06-22): bespoke loop wins the `CoderEngine` seat** — bespoke 4/4 (whole) +
+      4/4 (diff) vs OpenCode 1/4; NO loop-weak signal (no bespoke-fail/OpenCode-pass). Edit format:
+      whole-file default, diff available. OpenCode = fallback (its 1/4 likely an adapter artifact —
+      DECISIONS #8). Trace saved under `scripts/m0b_bakeoff/traces/`.
 - **Prereqs:** poc-foundry-sandbox image; `.env` CODER_*/PF_DEFAULT_ROLE; for the control arm the
       `opencode` binary + opencode.json provider config with bash/webfetch DENIED (reuse prework's
       `docker/opencode.example.json`). Without opencode the bespoke arm still runs (control = skip).
@@ -57,11 +53,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       graded spec + green spec lint. Result → DECISIONS.
 
 ### M0(d) — Egress proxy spike  *(server; `scripts/m0d_egress_spike.sh`)*
-- [~] Script authored: `internal:true` net + dual-homed proxy; ALLOW (PyPI/git/uv/vLLM) + DENY
-      (non-allowlisted host, non-vLLM RFC1918, direct egress, direct RFC1918); CONNECT-log evidence;
-      domain-fronting residual noted. **Run pending** (`bash scripts/m0d_egress_spike.sh`).
-- **Acceptance:** `m0d_egress_spike.sh` prints `M0(d): GREEN` (exit 0 = all allow/deny asserts hold);
-      CONNECT log shows the allowed + denied attempts. Result → DECISIONS.
+- [x] **GREEN on server (2026-06-22): 8/8 passed.** ALLOW (PyPI/git/uv/vLLM through the proxy) +
+      DENY (google `TCP_DENIED/403`, RFC1918, direct egress, direct RFC1918). CONNECT log shows
+      `TCP_TUNNEL/200` for allowlisted hosts, `TCP_MISS/200` for the vLLM exception, `TCP_DENIED/403`
+      for google — the deterministic security evidence. Proxy boot required 4 squid-in-Docker fixes
+      (see DEV_NOTES "full saga").
+- **Acceptance:** ✅ `M0(d): GREEN`; CONNECT log shows allowed + denied attempts.
 
 ## M1 — walking skeleton (thin everywhere)
 - [ ] artifact → spec → 1-iter plan → scaffold → code → staged VERIFY → minimal docs → thin

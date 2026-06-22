@@ -145,3 +145,72 @@ Self-contained diagnostic under `scripts/m0b_bakeoff/`, reusing patterns validat
   matrix + saves a trace; the human logs the engine decision here after the server run.
 - **Verified locally (pure parts):** edit parsers, refuse-to-edit-test guard, diff apply, signature
   stability, attribution branches, task solvability. Model + Docker arms are server-only.
+
+## #7 — M0(c) + M0(d) GREEN on the server (first on-hardware run) (2026-06-22)
+
+First on-server M0 run validated two of the three gate spikes.
+
+- **M0(c) ingest GREEN:** the in-container contract check (`run_contract_checks.py`) passed `11/11`
+  on the server — vendored schema loads, semantic invariants hold, the import stays heavy-stack-free.
+  (Real-fixture probe + the P1 spec half still pending; P1 overlaps M1.) One packaging fix: the app
+  image now COPYs `tests/` (+ a compose mount) — it was missing → `NotADirectoryError` in-container.
+- **M0(d) egress GREEN: 8/8.** `internal:true` network + dual-homed allowlisting CONNECT proxy.
+  ALLOW: PyPI / GitHub clone / uv / the vLLM endpoint — all THROUGH the proxy. DENY: a non-allowlisted
+  host (`TCP_DENIED/403`), non-vLLM RFC1918, direct egress (no route), direct RFC1918. The CONNECT log
+  is the deterministic security evidence (`TCP_TUNNEL/200` allowed, `TCP_MISS/200` vLLM exception,
+  `TCP_DENIED/403` denied). The whole egress trust model (default-deny, single named private-host
+  exception, sole-exit proxy, logged) is validated on real hardware.
+- **Proxy boot took 4 squid-in-Docker fixes** (DEV_NOTES "full saga"): ACL subdomain-overlap is FATAL
+  in squid 5+; squid refuses root AND a non-root user can't reopen the container's `/dev/stdout`
+  (→ run as `proxy`, log to a file, `tail -F` it to stdout); `squid -z` wrote a PID file that aborted
+  the real `squid -N` (→ drop `squid -z`, `pid_filename none`). All in `docker/proxy/`.
+- **Gate status:** (c)✅ (d)✅ ; (a) Kata + (b) bake-off still to run. (a)(b) → then M1.
+
+## #8 — M0(b) DECISION: bespoke loop takes the CoderEngine seat (2026-06-22)
+
+First on-server bake-off (GLM-5.1-NVFP4 via the `coder` role, runc). Results — tasks passed:
+**bespoke 4/4 (whole-file) · bespoke 4/4 (unified diff) · OpenCode 1/4.**
+
+| task | kind | bespoke whole | bespoke diff | OpenCode |
+|---|---|---|---|---|
+| fix_syntax | syntax | P(1) | P(1) | F(4) |
+| fix_wrong_api | wrong-api | P(1) | P(1) | F(4) |
+| fix_logic | failing-test | P(1) | P(2) | P(1) |
+| feature_slug | red-first feature | P(1) | P(1) | F(4) |
+
+**Decision (the fixed rule applied): the bespoke bounded loop takes the M1 `CoderEngine` seat; OpenCode
+is the fallback.** Rationale via the attribution matrix: NO task showed "bespoke-fails / OpenCode-passes"
+(the only "loop-weak" signal). Bespoke solved every break type + the red-first feature, mostly
+single-attempt → the loop is strong AND the model is a strong coder (no model-weak signal either). This
+is the result M0(b) was designed to surface, and it clears the confound the OpenCode control arm exists
+to resolve.
+
+**Edit format: whole-file is the default; diff stays available.** whole=4/4 all single-attempt; diff=4/4
+but fix_logic needed 2 attempts → whole-file is marginally more reliable on this model, while diff is
+clearly usable (the model handles unified diffs). M1 keeps the edit-format-adaptive seam (whole for
+weaker models, diff for stronger), defaulting to whole.
+
+**Honest caveat on OpenCode's 1/4 (do NOT over-read it):** OpenCode passed fix_logic but capped out on
+the three *easier* tasks — inconsistent with `poc-builder-prework`'s finding that OpenCode+GLM one-shots
+single-component tasks. That points to an artifact in THIS M0(b) OpenCode adapter (the scripted
+`opencode run` invocation / model binding), NOT a real OpenCode weakness. It doesn't change the decision
+(bespoke won outright; OpenCode was only the diagnostic control). Flag: revisit the OpenCode adapter when
+the continuation bundle / `refine` flow needs OpenCode for real (M4) — don't debug it now.
+
+## #9 — M0(a) Kata: probe results + the Kata-DNS finding (2026-06-22)
+
+Kata already registered (poc-builder-prework Phase 3). Smoke: kata guest kernel **6.18.28** ≠ host
+**6.8** → real VM proven. Probe items 1–5 GREEN: virtio-fs uid/gid (uid 1000 maps correctly), nested
+**RO `tests/`** enforced ("Read-only file system"), writable junit, named-volume uv cache persists,
+memory cap has effect. `sandbox_cgroup_only` on cgroup v2 stays an INFO caveat (host-side cgroup
+authoritative; never claim hard in-guest isolation — #12203).
+
+**Load-bearing finding (item 6):** a **Kata guest VM does not get Docker's embedded name-DNS**.
+`HTTPS_PROXY=http://pf-spike-proxy:3128` (by container *name*) fails inside the Kata sandbox
+("Could not resolve proxy"), though the VM is correctly on the `internal:true` net (direct-egress +
+RFC1918 denials still hold). Under runc the same name resolves. **Resolution (also the M1 pattern):
+the broker injects the proxy's internal-network IP, not its name** — `HTTPS_PROXY=http://<proxy-ip>:3128`.
+`m0d_egress_spike.sh` now derives the proxy IP via `docker inspect` and passes under both runtimes.
+Extends to sandbox↔sibling-service hops (Milvus/pgvector by IP from a Kata VM) — note for M2a. Full
+detail in DEV_NOTES "Kata networking". Rerun pending to confirm 7/7 (the fix is verified by-design;
+the runc 8/8 already proved the proxy logic).

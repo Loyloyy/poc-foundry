@@ -23,7 +23,11 @@ RUNTIME="${PF_SPIKE_RUNTIME:-runc}"           # runc for M0(d); M0(a) overrides 
 NET_INT="pf-spike-internal"
 NET_EGR="pf-spike-egress"
 PROXY="pf-spike-proxy"
-PROXY_URL="http://${PROXY}:3128"
+# PROXY_URL is set to the proxy's INTERNAL-NETWORK IP once it's up (see below) — NOT its container
+# name. Kata guest VMs don't get Docker's embedded name-DNS (127.0.0.11 is the guest's own loopback),
+# so name resolution of `pf-spike-proxy` fails inside a Kata sandbox. An IP works under both runtimes.
+# This is the M1 pattern: the broker injects HTTPS_PROXY=http://<proxy-ip>:3128 into the sandbox.
+PROXY_URL=""
 
 [ -f "$ENV_FILE" ] && { set -a; . "$ENV_FILE"; set +a; }
 VLLM_KEY="${PF_SANDBOX_VLLM_KEY:-}"
@@ -71,6 +75,14 @@ if [ "$(docker inspect -f '{{.State.Running}}' "$PROXY" 2>/dev/null)" != "true" 
   exit 3
 fi
 docker logs "$PROXY" 2>&1 | grep -qi 'ready to serve\|Accepting\|listening' || true
+
+# Reach the proxy by its INTERNAL-NETWORK IP (Kata-safe — see the PROXY_URL note above).
+PROXY_IP="$(docker inspect -f "{{(index .NetworkSettings.Networks \"$NET_INT\").IPAddress}}" "$PROXY" 2>/dev/null)"
+if [ -z "$PROXY_IP" ]; then
+  echo "ERROR: could not determine the proxy's IP on $NET_INT"; exit 3
+fi
+PROXY_URL="http://${PROXY_IP}:3128"
+echo "proxy reachable at $PROXY_URL (by IP; Kata guests can't resolve Docker container names)"
 
 echo "── ALLOW checks (should succeed THROUGH the proxy) ──"
 c_proxy 'curl -fsS -o /dev/null --max-time 40 https://pypi.org/simple/' \

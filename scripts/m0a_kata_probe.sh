@@ -81,7 +81,7 @@ echo "    'docker inspect --format {{.HostConfig.Memory}} <ctr>' limits are enfo
 
 echo "── 6. VM→proxy→vLLM reachability on internal:true (reusing the egress spike under kata) ──"
 echo "    delegating to m0d_egress_spike.sh with PF_SPIKE_RUNTIME=kata ..."
-if PF_SPIKE_RUNTIME=kata "$HERE/m0d_egress_spike.sh"; then
+if PF_SPIKE_RUNTIME=kata bash "$HERE/m0d_egress_spike.sh"; then   # bash: don't depend on the exec bit
   ok "egress spike GREEN under kata (VM reaches proxy on internal net; no host.docker.internal)"
 else
   bad "egress spike had failures under kata — see its output above"
