@@ -38,6 +38,12 @@ test = ["pytest>=8"]
 # STOPGAP for M0/M1: a vendored copy lives under src/poc_foundry/artifact/ (mirror; see DECISIONS #2).
 # Swap the vendored copy for the line above once the user confirms Stage 2 is pushed at a known SHA.
 
+[tool.pytest.ini_options]
+# Only the repo's own suite — never collect a stamped template's tests (they import `core` from a
+# PoC workspace, not from here) or the fixtures.
+testpaths = ["tests"]
+norecursedirs = ["templates", "builds", "tests/fixtures"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

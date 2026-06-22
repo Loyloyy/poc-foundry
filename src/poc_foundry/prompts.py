@@ -1,0 +1,102 @@
+"""Phase prompts for the structured-call roles (architect / tester / scribe; design §5.3, §5.4).
+
+Kept as plain string builders (no model binding here). The on-prem model is a reliable tool-caller
+but a weak self-planner (DEV_NOTES) — so the prompts SPELL OUT the constraints. All instructions
+steer toward a small, **verifiable** walking-skeleton PoC: stdlib-only, unit-testable core, no
+external services or network in the gated path (M1).
+"""
+from __future__ import annotations
+
+
+def summarize_artifact(art) -> str:
+    """Compact, hygiene-safe digest of a DeepResearchArtifact for the architect."""
+    lines = [f"Topic: {art.topic}"]
+    if art.brief:
+        lines.append(f"Brief: {art.brief}")
+    if art.findings:
+        lines.append("Key findings:")
+        for f in art.findings[:6]:
+            lines.append(f"  - ({f.confidence:.2f}) {f.claim}")
+    if art.tech_stack:
+        lines.append("Tech stack:")
+        for t in art.tech_stack[:8]:
+            lines.append(f"  - {t.layer}: {t.choice} — {t.rationale}")
+    if art.recommended_architectures:
+        a = art.recommended_architectures[0]
+        lines.append(f"Architecture: {a.name} — {a.summary} (components: {', '.join(a.components)})")
+    if art.implementation_steps:
+        lines.append("Implementation steps:")
+        for s in sorted(art.implementation_steps, key=lambda x: x.order)[:6]:
+            lines.append(f"  {s.order}. {s.action}")
+    if art.open_questions:
+        lines.append("Open questions: " + "; ".join(art.open_questions[:4]))
+    return "\n".join(lines)
+
+
+SPEC_SYSTEM = (
+    "You are a pragmatic solutions architect scoping a TINY, runnable proof-of-concept from a "
+    "research artifact. The PoC is a single Gradio chatbot whose logic lives in a pure, importable "
+    "`core.generate_reply(message, history) -> str`. Your spec must be buildable in ONE small "
+    "iteration and VERIFIABLE by unit tests against `core.py` — no external services, no network, "
+    "stdlib only. Be honest: if the artifact cannot yield such a PoC, say so."
+)
+
+
+def spec_prompt(art, interface: str) -> str:
+    return (
+        f"{summarize_artifact(art)}\n\n"
+        f"Target interface (fixed): {interface}\n\n"
+        "Produce a PoC spec with:\n"
+        "- goal: one sentence describing what the chatbot demonstrates.\n"
+        "- success_criteria: 3 to 6 criteria. EXACTLY ONE has core=true (the single thing that, if it "
+        "works, the PoC demonstrates its core value). Each criterion text must be checkable by a "
+        "pytest unit test calling `core.generate_reply` directly — concrete and deterministic "
+        "(e.g. 'replies that mention a known corpus keyword include a citation marker'). Set "
+        "type='met-by-test' for all of them. Do NOT require networks, GPUs, databases, or services.\n"
+        "- non_goals: 2 to 4 things explicitly out of scope for this PoC.\n"
+        "- demo_scenario: one or two sentences a human could follow to see it work.\n"
+        "- template: 'gradio-chatbot'.\n"
+        "- buildable: true normally; false ONLY if no stdlib-testable chatbot PoC can represent this "
+        "artifact — then give not_buildable_reasons.\n"
+        "Keep every criterion small enough to satisfy with a few lines of stdlib Python."
+    )
+
+
+TESTER_SYSTEM = (
+    "You are a meticulous test engineer practising RED-FIRST development. You write a SINGLE pytest "
+    "file that encodes a success criterion as executable assertions BEFORE the implementation "
+    "exists. Tests import the pure core and call it directly — no network, no services, no gradio. "
+    "Output ONLY the test file content in one fenced ```python block; no prose."
+)
+
+
+def tester_prompt(criterion_text: str, goal: str, interface: str, core_module: str = "core") -> str:
+    return (
+        f"# PoC goal\n{goal}\n\n"
+        f"# Interface under test (fixed)\n{interface}\n"
+        f"(import it as `from {core_module} import generate_reply`)\n\n"
+        f"# Success criterion to encode as a test\n{criterion_text}\n\n"
+        "# Task\n"
+        "Write ONE pytest file (functions named `test_*`) that asserts this criterion against "
+        f"`generate_reply`. Make the assertions specific and deterministic so a naive echo stub "
+        "would FAIL them. Use only the stdlib + pytest. Do not import gradio or open any network "
+        "connection. Output only the file in a single ```python block."
+    )
+
+
+SCRIBE_SYSTEM = (
+    "You are a technical writer producing a short, accurate DEMO note for a runnable PoC. Be "
+    "concrete and brief. No marketing. Output GitHub-flavoured markdown only."
+)
+
+
+def scribe_demo_prompt(goal: str, demo_scenario: str, criteria: list[str]) -> str:
+    crit = "\n".join(f"- {c}" for c in criteria)
+    return (
+        f"Write a `DEMO.md` (<= 25 lines) for this PoC.\n\n"
+        f"Goal: {goal}\n"
+        f"Demo scenario: {demo_scenario}\n"
+        f"Success criteria:\n{crit}\n\n"
+        "Include: a one-line what-this-is, the exact steps to launch (refer to RUN.md), and what to "
+        "type to see the core criterion succeed. Markdown only."
+    )

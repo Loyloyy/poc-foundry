@@ -5,9 +5,13 @@
 services:
   app:
     volumes:
-      # Sandbox workspaces + uv cache on LOCAL disk (design §2; never NFS). Match PF_WORKSPACE_DIR in
-      # .env. Pre-create + chmod on the host first.
-      - /path/to/local-disk/workspaces:/workspaces
-      # M1 ONLY — the in-process broker stub drives host Docker to spin Kata VMs. Mounting the socket
-      # is the risk-accepted M1 residual (record it in DECISIONS at M1 wiring; runs egress-isolated).
-      # - /var/run/docker.sock:/var/run/docker.sock
+      # Sandbox workspaces + uv cache on LOCAL disk (design §2; never NFS). Mount PF_WORKSPACE_DIR at
+      # the SAME path it has on the host — the M1 broker bind-mounts workspaces into Kata VMs by HOST
+      # path (sibling-container semantics), so host-path must equal container-path. Pre-create +
+      # chmod on the host first:  mkdir -p /var/tmp/pf-workspaces && chmod 777 /var/tmp/pf-workspaces
+      - /var/tmp/pf-workspaces:/var/tmp/pf-workspaces
+      # M1 ONLY — the in-process broker drives the host Docker (via the `docker` CLI baked into the
+      # app image) to spin Kata VMs + the egress proxy. Mounting the socket is the risk-accepted M1
+      # residual (DECISIONS; moves out-of-process at M2a). The orchestrator itself runs
+      # egress-isolated; only the sacrificial vLLM key reaches the sandbox.
+      - /var/run/docker.sock:/var/run/docker.sock

@@ -66,16 +66,27 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       `Plan` (`state.py`); `BuildConfig` + pipeline.yaml/env load (`config.py`); `build_chat_model` +
       `chat_text` role factory (`models.py`). All pydantic/stdlib — round-trips + config load verified
       on the 3.10 box; contract tests still 11/11; models.py stays langchain-free at import.
-- [ ] **S2 broker** — in-process stub behind the real interface (`create/create_service/exec/destroy`;
-      create* params harness-fixed, only exec carries LLM content); per-build internal net + egress
-      proxy (proxy-by-IP, from M0(a)); kata sandbox lifecycle (promote `m0b_bakeoff/sandbox.py`).
-- [ ] **S3 CoderEngine** — promote `m0b_bakeoff` BespokeEngine (won the seat) behind the seam.
-- [ ] **S4 phases + graph** — P0 ingest (have it) → P1 spec → P2 plan → P3 scaffold (gradio template
-      + green smoke) → P4 code+staged VERIFY → P5 min docs → P6 thin clean-room → P7 emit; LangGraph
-      wiring + checkpointer; `build_poc(...)` contract (`core.py`); CLI.
-- [ ] **S5 gradio template** (`templates/gradio-chatbot/`) + end-to-end run on server.
+- [x] **S2 broker built (2026-06-22)** — `sandbox/broker.py`: in-process Docker stub behind
+      `provision/create/create_service/exec/destroy`; per-build internal net + dual-homed egress proxy
+      (by IP, M0(a)) + uv-cache vol; fresh Kata VM lifecycle (promoted `m0b_bakeoff/sandbox.py`).
+      **Invariant enforced in code** (image/caps/mounts/name allowlists RAISE `BrokerInvariantError`;
+      only `exec` carries LLM content). Guards unit-tested (no Docker). App image gains the `docker`
+      CLI + socket mount (risk-accepted M1 residual). *Server: create→exec→destroy a kata VM still to run.*
+- [x] **S3 CoderEngine built (2026-06-22)** — `coder.py`: `BespokeCoder` behind a `CoderEngine` seam;
+      whole-file default, error-signature + forced strategy change; broker-decoupled via an injected
+      `verify()`; edits orchestrator-side. RED→GREEN + refuse-to-edit-test unit-tested with fakes.
+- [x] **S4 phases + graph + core + cli built (2026-06-22)** — `phases/` (context + pipeline P0…P7),
+      `graph.py` (LangGraph + SQLite checkpointer; NOT_BUILDABLE/scaffold-failed short-circuits),
+      `core.build_poc/resume_build/list/clean` (headless contract), `cli.py`. Full P0→P7 dry-run with
+      fakes → `status=done`; NOT_BUILDABLE path verified; routers verified. *P2 plan deterministic for
+      M1; red-first best-effort (DECISIONS #11).*
+- [x] **S5 gradio template built (2026-06-22)** — `templates/gradio-chatbot/` (start-green core/UI
+      split, pinned gradio, smoke suite, seeded RUN/README/AGENTS, manifest, pf:-tagged RUN blocks).
+- [ ] **(needs server)** end-to-end run on real Kata: one fixture → `builds/<id>/` (the M1 gate).
 - **Acceptance:** one fixture artifact runs end-to-end on the server; emits a `builds/<id>/` with a
       valid `PoCBuildArtifact`; claim proven = orchestrator-writes / sandbox-executes.
+      Local: `py_compile` clean, no heavy stack at import, `tests/test_m1_spine.py` 7/7 (fakes),
+      contract 11/11. **Server run is the remaining gate.**
 
 ## M2a — gates
 - [ ] tester + adequacy review + critic verdict set + fix/descope/replan/respec + cumulative suite +

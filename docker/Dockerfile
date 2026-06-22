@@ -11,25 +11,28 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# git: needed for the SHA-pinned Stage-2 dep (end-state; see DECISIONS #2) and is generally useful.
-# build-essential/curl: some wheels need a compiler at install time.
+# git: workspace commits + clean-room clone (+ the SHA-pinned Stage-2 dep end-state, DECISIONS #2).
+# build-essential/curl: some wheels need a compiler at install time. patch: the coder's diff
+# edit-format (whole-file is the default, but keep diff usable). docker.io: the M1 in-process broker
+# drives the HOST docker socket via the `docker` CLI to spin Kata VMs (risk-accepted M1 residual —
+# the socket is mounted in docker-compose.override.yml; the daemon is NOT started in this image).
+# Installed from Debian mirrors (build-time apt is reachable on the server — same path the proxy
+# image uses for squid).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential git curl ca-certificates \
+        build-essential git curl ca-certificates patch docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 # Deps first for layer caching. The base install is schema-light; the [runtime] extra is REQUIRED
 # here or the image silently lacks langgraph/langchain/deepagents (mirrors Stage 2's extras lesson).
 COPY pyproject.toml ./
 COPY src ./src
-RUN pip install --upgrade pip && pip install -e ".[runtime,obs]"
+RUN pip install --upgrade pip && pip install -e ".[runtime,obs,test]"
 
-# NOTE (M1): the in-process broker stub drives the host Docker via a mounted socket to spin Kata VMs.
-# Add the docker SDK + mount /var/run/docker.sock THEN (risk-accepted in DECISIONS at M1 wiring).
-# Not installed now — M0 spikes don't use this image.
-
-# Runtime assets (config/scripts exist; playbooks/templates COPY in when they land).
+# Runtime assets. templates/ is stamped into PoC workspaces by P3 scaffold (compose also mounts it
+# for live edits). config/scripts as before.
 COPY config ./config
 COPY scripts ./scripts
+COPY templates ./templates
 # tests/ carries the committed contract fixtures + suite — needed for the in-container M0(c) check
 # (`run_contract_checks.py`) and the pytest suite. compose also mounts it for live edits.
 COPY tests ./tests

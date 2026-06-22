@@ -237,3 +237,64 @@ Started M1 (walking skeleton) with the foundation, sliced so each piece stays te
   pulls no langchain. **Remaining M1 (S2–S5):** broker, CoderEngine, phases+graph+core, gradio
   template — deferred to a fresh chat (handover) to keep a clean token budget for the broker (~300–500
   lines) + the orchestration wiring.
+
+## #11 — M1 S2–S5: broker, CoderEngine, phases+graph+core, gradio template (2026-06-22)
+
+The walking skeleton end-to-end. All authored locally; verified by `py_compile` + pure-Python
+dry-runs with fakes (no Docker/LLM locally); the real Kata/vLLM path is the server run. Built thin
+per the slice discipline; structural calls stayed inside M1 scope (no §10 ledger items reopened).
+
+- **S2 broker (`sandbox/broker.py`).** In-process Docker stub behind the stable interface
+  `provision / create / create_service / exec / destroy`, promoting `m0b_bakeoff/sandbox.py` (subprocess
+  `docker` CLI — the validated path). Per build it provisions the `internal:true` net + a normal egress
+  bridge + the dual-homed squid proxy (reached **by IP**, M0(a)/DECISIONS #9) + a uv-cache volume, then
+  spins **fresh Kata VMs** on demand. **Invariant (rule #8) is enforced in code:** `create*` validates
+  image∈allowlist, caps⊆`ALLOWED_CAPS` (empty at M1), mounts = tame abs paths, names = tame tokens —
+  each RAISES `BrokerInvariantError`. Only `Sandbox.exec(cmd)` carries LLM content. **M1 residual
+  (risk-accepted):** in-process, driving the host docker socket → the app image now installs the
+  `docker` CLI (Debian `docker.io`, build-time apt) + the socket is mounted in the override; M2a moves
+  it out-of-process.
+- **S3 CoderEngine (`coder.py`).** Promoted `BespokeEngine` → `BespokeCoder` behind a `CoderEngine`
+  Protocol seam. Bounded loop, whole-file default (diff available, needs `patch`), error-signature
+  tracking + forced strategy change on repeats. **Decoupled from the broker** via an injected
+  `verify()` callable (the phase wires it to a sandbox) → unit-testable without Docker, and the edits
+  are written ORCHESTRATOR-side (the design's orchestrator-writes / sandbox-executes claim). LLM via
+  `models.chat_text("coder", …)`; an injectable `llm=` makes it testable.
+- **S4 phases+graph+core+cli.** `phases/` = `context.py` (Ctx, Template loader, git/mount/run-block
+  helpers, `chown_to_builder`) + `pipeline.py` (P0…P7). `graph.py` wires them with **LangGraph**
+  (linear + two short-circuits: ingest-failed and NOT_BUILDABLE → emit, scaffold-failed → emit) and a
+  **SQLite checkpointer** keyed by `thread_id == build_id`. `core.build_poc(source, …) ->
+  (report_md, PoCBuildArtifact)` is the stable headless contract (+ `resume_build`, `list_builds`,
+  `clean_build`); a `build_meta.json` records the source/template so resume can reconstruct ctx and
+  invoke with `None` (LangGraph resume). Thin argparse `cli.py` (build/list/resume/clean).
+- **S5 template (`templates/gradio-chatbot/`).** Start-GREEN: pure `core.generate_reply` + a thin
+  `gr.ChatInterface` `app.py` (analytics off, import doesn't launch), pinned `gradio==4.44.1`, a smoke
+  suite, seeded RUN/README/AGENTS/.gitignore, `template.json` manifest (editable_files, interface,
+  stack). RUN.md uses `<!-- pf:install|test|demo|run -->`-marked bash blocks the clean-room extracts.
+
+**Decisions taken inside M1 (logged, not ledger deviations):**
+1. **P2 plan is DETERMINISTIC for M1** (one iteration synthesized from the spec's core criterion;
+   interface pinned from the template) rather than an architect LLM call. Fewer failure points for the
+   skeleton; architect-driven multi-iteration planning lands when iterations matter (M2a). Honest note
+   surfaced; revisit at M2a.
+2. **Red-first is best-effort at M1.** P4 runs the staged test ONCE before the coder; if it's already
+   green against the scaffold stub, the iteration is recorded green with a caveat
+   ("met by scaffold (not red-first)"). The integrity walls that *enforce* tester/coder separation +
+   the inventory ledger are M2a.
+3. **uid mapping:** the orchestrator runs as root in-container but the Kata sandbox is uid 1000 →
+   `chown_to_builder` (best-effort, root-only) makes workspaces/clones/staged-tests writable by 1000
+   so virtio-fs maps cleanly (M0(a)); root keeps write access regardless. Staged VERIFY runs with
+   `PYTHONDONTWRITEBYTECODE=1` (the `/staged` mount is RO).
+4. **Workspace path = same-path mount.** Sibling-container bind sources are HOST paths, so
+   `PF_WORKSPACE_DIR` must be mounted at the identical path in the app container (override updated).
+   Build workspaces live under `PF_WORKSPACE_DIR/<id>/` (local disk, kata-mountable); P7 copies the
+   finished `workspace/` (with `.git`) into `builds/<id>/`.
+5. **Clean-room install uses `uv pip install --target .deps` + `PYTHONPATH`** (not `--system`): the
+   sandbox is non-root (the M0(b) `--system`-needs-root gotcha) — the validated egress-spike pattern.
+
+**Verified locally (3.10, no Docker/LLM):** `py_compile` clean across the package; importing
+core/graph/cli/phases pulls **no** langchain/langgraph; the template stamps + its core is start-green;
+a fakes dry-run runs P0→P7 to `status=done` (RED→GREEN coder fired, clean-room green, artifact +
+workspace emitted); NOT_BUILDABLE short-circuits to `not-buildable`; broker invariant guards raise;
+`tests/test_m1_spine.py` 7/7 (via a pytest shim). Contract tests still 11/11. **Server run pending**
+(the M1 gate): one fixture → `builds/<id>/` end-to-end on real Kata.

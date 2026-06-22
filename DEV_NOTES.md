@@ -160,4 +160,38 @@ denials still pass). The same spike under runc resolves names fine.
   runc and kata. Applies to every sandbox↔sibling-service hop too (use IPs / pass them in), since the
   same DNS limitation hits Milvus/pgvector/etc. by name from a Kata VM — note for M2a sibling services.
 
+## M1 broker + pipeline (S2–S5, 2026-06-22)
+
+- **Same-path workspace mount (load-bearing).** The M1 broker runs IN the app container and drives
+  the host docker socket, so `docker run -v <src>:/work` takes a HOST path. The orchestrator writes
+  workspace files to `PF_WORKSPACE_DIR/<id>/…`; that dir must be mounted at the **identical** path in
+  the app container (override: `- /var/tmp/pf-workspaces:/var/tmp/pf-workspaces`). If you mount it at a
+  *different* container path, the broker passes a host path the kata VM can't see → empty `/work`.
+- **uid 1000 vs root-written workspaces.** The orchestrator is root in-container; the sandbox is uid
+  1000 (builder). pytest caches + `uv pip install --target .deps` need to WRITE into `/work`, so the
+  phase `chown -R 1000:1000`s the workspace/clone/staged-tests before each `create()`
+  (`chown_to_builder`, best-effort, root-only — no-ops in local dev). Root keeps write access, so the
+  orchestrator can still edit files afterwards (they land root-owned but world-readable → uid 1000
+  reads them fine). Staged VERIFY also sets `PYTHONDONTWRITEBYTECODE=1` because `/staged` is RO.
+- **Clean-room install = `--target .deps` + PYTHONPATH, NOT `--system`.** `uv pip install --system`
+  needs root; the sandbox is uid 1000 (the M0(b) gotcha). RUN.md's `pf:install` installs into a
+  local `.deps/` and `pf:test`/`pf:demo`/`pf:run` prefix `PYTHONPATH=.deps` — the validated egress-spike
+  pattern, and human-copy-pasteable.
+- **App image needs the docker CLI.** The in-process broker shells out to `docker`. The app Dockerfile
+  installs `docker.io` from Debian mirrors (build-time apt is reachable; same path the proxy uses for
+  squid) and the socket is mounted in the override. No daemon starts in the image — only the client +
+  the host socket. (If `docker.io` ever won't install, fall back to the Docker apt repo's
+  `docker-ce-cli`, but that needs `download.docker.com` egress at build, which is NOT confirmed.)
+- **Broker reaches the proxy by IP** (Kata has no Docker name-DNS, DECISIONS #9): `provision()`
+  inspects the proxy's internal-net IP and injects `HTTPS_PROXY=http://<ip>:3128`. Sibling services
+  (M2a) are reached by IP the same way (`broker.service_ip`).
+- **Import hygiene held.** `import poc_foundry.core/graph/cli/phases` pulls **no** langchain/langgraph
+  (verified) — heavy deps are lazy inside the phases/graph. So the spine stays `py_compile`-able and
+  the pure logic is dry-runnable on the 3.10 box with fakes (`tests/test_m1_spine.py`).
+- **Local proof without Docker/LLM.** `tests/test_m1_spine.py` fakes the broker (returns canned
+  `ExecResult`s; the staged-verify fake checks the workspace for the expected edit) and the LLM roles
+  (architect→`Spec`, tester→a red test, coder→a whole-file fix). It drives P0→P7 to `status=done`,
+  proving the wiring + the RED→GREEN loop + NOT_BUILDABLE short-circuit. The REAL Kata/vLLM path is the
+  server run only.
+
 ## (sections appended as slices land)

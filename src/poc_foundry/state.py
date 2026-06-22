@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from poc_foundry.artifact import SuccessCriterion
+from poc_foundry.artifact import IterationRecord, SuccessCriterion
 
 
 class Spec(BaseModel):
@@ -46,6 +46,7 @@ class BuildState(BaseModel):
     brief: str = ""
     driver: str = "tech-scout"
     version: int | None = None
+    source_dir: str = ""          # the Stage-2 run folder (recorded for resume)
 
     # paths (str for serialization)
     build_dir: str = ""           # builds/<build_id>/
@@ -59,6 +60,17 @@ class BuildState(BaseModel):
     # phase products
     spec: Spec | None = None
     plan: Plan | None = None
+
+    # results carried from P3–P6 → assembled into PoCBuildArtifact at P7
+    scaffold_sha: str = ""
+    commit_sha: str = ""
+    iteration_records: list[IterationRecord] = Field(default_factory=list)
+    staged_tests: list[str] = Field(default_factory=list)
+    tests_total: int = 0
+    tests_passing: int = 0
+    cleanroom: dict = Field(default_factory=dict)   # quickstart_ok / suite_ok / demo_ok
+    demo_quality: str = ""
+    demonstrates_core_value: str = "no"
 
     # bookkeeping
     log: list[str] = Field(default_factory=list)   # human-readable phase trace

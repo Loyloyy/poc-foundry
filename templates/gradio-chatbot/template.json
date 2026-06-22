@@ -1,0 +1,17 @@
+{
+  "name": "gradio-chatbot",
+  "version": "0.1.0",
+  "description": "A minimal, start-GREEN Gradio chatbot PoC: a pure importable core (generate_reply) behind a gr.ChatInterface UI. Core/UI split so the logic is unit-testable without launching the UI or touching the network. Analytics + CDN fonts disabled (design §5.3).",
+  "stamp_dir": "files",
+  "editable_files": ["core.py"],
+  "smoke_test": "tests/test_smoke.py",
+  "suite": "tests",
+  "run_cmd": "python app.py",
+  "interface": "core.generate_reply(message: str, history: list | None = None) -> str",
+  "stack": [
+    {"layer": "ui", "choice": "gradio", "pinned_version": "4.44.1"},
+    {"layer": "language", "choice": "python", "pinned_version": "3.12"}
+  ],
+  "template_repo": null,
+  "license": "MIT"
+}

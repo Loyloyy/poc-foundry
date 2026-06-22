@@ -32,12 +32,15 @@ services:
       - ../config:/app/config            # edit pipeline.yaml without rebuilding
       - ../src:/app/src                  # code changes need no image rebuild
       - ../scripts:/app/scripts
+      - ../templates:/app/templates      # PoC templates (P3 stamps from here; live edits)
       - ../tests:/app/tests              # contract fixtures + suite (live; also COPYd into the image)
       # builds/ = emitted PoCs (server-local, gitignored). On NFS PRE-CREATE first (root-squash blocks
       # mkdir): `mkdir -p ../builds && chmod 777 ../builds`.
       - ../builds:/app/builds
       # Sandbox workspaces + uv cache live on LOCAL disk via PF_WORKSPACE_DIR — mount that host path
-      # in docker-compose.override.yml (it's host-specific, gitignored).
+      # in docker-compose.override.yml AT THE SAME PATH (sibling-container bind sources are HOST paths:
+      # the broker's `docker run -v <PF_WORKSPACE_DIR>/...:/work` only resolves if the orchestrator
+      # sees that dir at the identical path). M1 broker also needs the docker socket (override).
     networks:
       - depot-net
 
