@@ -73,8 +73,11 @@ class Ctx:
 
 
 # ── workspace git (the sanctioned deterministic commits, AGENTS rule #2) ─────
+# The orchestrator runs git as root over workspaces it has chown'd to the sandbox builder (uid 1000),
+# so every call disables git's "dubious ownership" guard for these harness-owned repos — otherwise
+# `git add`/`commit`/`clone` abort with exit 128 (in-container only; locally chown no-ops as non-root).
 def git(workspace: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(workspace), *args],
+    return subprocess.run(["git", "-c", "safe.directory=*", "-C", str(workspace), *args],
                           capture_output=True, text=True, check=check)
 
 

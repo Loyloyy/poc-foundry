@@ -22,6 +22,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential git curl ca-certificates patch docker.io \
     && rm -rf /var/lib/apt/lists/*
 
+# The orchestrator (root) runs git over workspaces chown'd to the sandbox builder (uid 1000); trust
+# them globally so git's dubious-ownership guard doesn't abort commits/clone (belt; the code also
+# passes `-c safe.directory=*` per call).
+RUN git config --global --add safe.directory '*'
+
 # Deps first for layer caching. The base install is schema-light; the [runtime] extra is REQUIRED
 # here or the image silently lacks langgraph/langchain/deepagents (mirrors Stage 2's extras lesson).
 COPY pyproject.toml ./

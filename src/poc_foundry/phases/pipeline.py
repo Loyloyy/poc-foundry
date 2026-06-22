@@ -264,7 +264,8 @@ def p6_cleanroom(state, ctx: Ctx) -> dict:
     clone = ctx.staging_dir / "cleanroom"
     if clone.exists():
         shutil.rmtree(clone)
-    subprocess.run(["git", "clone", "-q", str(ctx.workspace_dir), str(clone)], check=True)
+    subprocess.run(["git", "-c", "safe.directory=*", "clone", "-q",
+                    str(ctx.workspace_dir), str(clone)], check=True)
     chown_to_builder(clone)   # the clean-room VM (uid 1000) installs deps + writes caches here
 
     blocks = parse_run_blocks((clone / "RUN.md").read_text())
