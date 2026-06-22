@@ -111,6 +111,21 @@ def chown_to_builder(path: Path, uid: int = 1000, gid: int = 1000) -> None:
     subprocess.run(["chown", "-R", f"{uid}:{gid}", str(path)], capture_output=True, check=False)
 
 
+def git_diff(workspace: Path, base: str | None = None) -> str:
+    """Unified diff of the working tree vs ``base`` (a commit-ish; HEAD if None). Used by the
+    integrity diff-scanner to inspect the coder's per-iteration edits. Never raises (a fresh repo
+    with no commits yet returns ''); includes untracked files via ``--no-index`` is overkill, so we
+    add then diff --cached as a fallback for new files."""
+    ref = base or "HEAD"
+    r = git(workspace, "diff", ref, check=False)
+    out = r.stdout
+    # `git diff <ref>` misses brand-new untracked files; surface them too (staged against the ref).
+    git(workspace, "add", "-A", check=False)
+    staged = git(workspace, "diff", "--cached", ref, check=False)
+    git(workspace, "reset", "-q", check=False)   # unstage; leave the working tree as the coder left it
+    return staged.stdout or out
+
+
 def git_commit(workspace: Path, message: str) -> str:
     git(workspace, "add", "-A")
     r = git(workspace, "commit", "-q", "-m", message, check=False)

@@ -117,6 +117,12 @@ class _FakeSandbox:
     def exec(self, cmd, timeout_s=600):
         if "/staged" in cmd:
             ok = "ECHO:" in (self.ws / "core.py").read_text()
+            if "--collect-only" in cmd:                       # inventory ledger: record
+                return ExecResult(0, "test_criterion.py::test_echo\n\n1 test collected\n", "")
+            if "--junitxml" in cmd:                           # inventory ledger: verify (junit cat)
+                inner = ('<testcase name="test_echo" classname="test_criterion">'
+                         + ("" if ok else "<failure/>") + "</testcase>")
+                return ExecResult(0, f"<testsuite>{inner}</testsuite>", "")
             return ExecResult(0 if ok else 1, "1 passed" if ok else "", "" if ok else "E")
         return ExecResult(0, "ok", "")
 

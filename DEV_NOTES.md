@@ -214,4 +214,40 @@ denials still pass). The same spike under runc resolves names fine.
   proving the wiring + the RED→GREEN loop + NOT_BUILDABLE short-circuit. The REAL Kata/vLLM path is the
   server run only.
 
+## M2a S1 integrity walls (2026-06-22)
+
+- **Local fakes without pytest:** the 3.10 box has no pytest, so `scripts/run_spine_tests.py` is a
+  tiny shim (`raises` + `monkeypatch` + `tmp_path`) that discovers + runs `test_*` in
+  `tests/test_m1_spine.py` and `tests/test_m2a_gates.py`. Run it for any gate-logic change BEFORE the
+  server round-trip: `python3 scripts/run_spine_tests.py` (expect `24 passed`). In-container, real
+  pytest runs the same files. **A fakes test that drives P4 must model the new sandbox queries** — the
+  fake `exec` now branches on `--collect-only` (return node ids) and `--junitxml` (return a junit xml
+  string), not just the plain verify. If you add a sandbox query, update BOTH fakes.
+- **Ledger identity = test-function NAME, not the full node id.** collect-only prints
+  `test_x.py::test_foo`; junit records `classname="test_x" name="test_foo"`. Matching on the final
+  `::` segment (`test_foo`) avoids rootdir/path/classname normalization headaches and still catches a
+  deleted/renamed/skipped test. The tester writes module-level `test_*` functions (TESTER_SYSTEM), so
+  names are unique within the one staged file — safe key. Revisit if a future tester emits test
+  classes (junit classname becomes `module.Class`).
+- **Junit is cat'd back through `exec`, not read from the host fs.** The junit file lands in writable
+  `/work`, but the ledger parses `exec("pytest --junitxml=/work/.pf-junit.xml >/dev/null 2>&1; cat
+  /work/.pf-junit.xml").stdout`. Routing it through the sandbox stdout keeps the gate decoupled from
+  host-side fs/uid coupling and **fake-testable** (the fake just returns a canned xml). Same reason
+  collect-only is parsed from `exec` output.
+- **The diff scanner rides `verify()`.** Rather than touch the `CoderEngine` seam, the per-attempt
+  scan is injected into the `verify` callable the phase passes the coder: it runs `git diff <base>`,
+  and if `blocking()` returns a high-sev incident it returns `(False, "INTEGRITY: …")` BEFORE running
+  pytest. The coder treats that as a normal failure → its error-signature path forces a strategy
+  change on a repeat. Net: per-attempt enforcement with the coder still test-agnostic.
+- **`git_diff(workspace, base)` surfaces untracked files too** (the coder may create a new file): it
+  `git add -A` → `git diff --cached <base>` → `git reset` (leaving the working tree as the coder left
+  it). Without the add/diff-cached, a brand-new gaming file (e.g. a new `conftest.py`) wouldn't appear
+  in `git diff <base>`. (The coder is already host-blocked from non-allowlisted paths, but the scanner
+  is defense-in-depth and auditable.)
+- **Red-first now BLOCKS (M2a) where M1 only caveated.** A staged test that passes against the
+  scaffold is a tester-inadequacy incident, not a pass — the criterion is not met and the build can't
+  be `done`. The happy path is unaffected (the fixture's tester writes a genuinely red test; M1 proved
+  RED→GREEN in 1 attempt). If a *real* server run trips red-first on the normal fixture, that's a
+  signal the architect/tester prompt produced a trivial criterion — a prompt issue, not a harness bug.
+
 ## (sections appended as slices land)

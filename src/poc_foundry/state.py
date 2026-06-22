@@ -69,6 +69,12 @@ class BuildState(BaseModel):
     tests_total: int = 0
     tests_passing: int = 0
     cleanroom: dict = Field(default_factory=dict)   # quickstart_ok / suite_ok / demo_ok
+
+    # M2a integrity walls (design §5.5) — additive
+    authored_test_ids: list[str] = Field(default_factory=list)  # the inventory ledger (tester's record)
+    inventory_ok: bool = True        # collected ∧ passed ⊇ recorded (False blocks `done`)
+    red_first_ok: bool = True        # every accepted iteration's staged test was RED pre-coder
+    incidents: list[str] = Field(default_factory=list)          # diff-scanner / ledger → security.incidents[]
     demo_quality: str = ""
     demonstrates_core_value: str = "no"
 

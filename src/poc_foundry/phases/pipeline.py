@@ -22,10 +22,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from poc_foundry import prompts
+from poc_foundry.phases import integrity
 from poc_foundry.phases.context import (
     Ctx,
     chown_to_builder,
     git_commit,
+    git_diff,
     git_init,
     parse_run_blocks,
     stamp_template,
@@ -177,6 +179,24 @@ def _tester_write(ctx: Ctx, criterion_text: str, goal: str, interface: str) -> s
     return _extract_code(resp)
 
 
+def _ledger_collect(sbx) -> set[str]:
+    """Inventory ledger (record): the test-function names the tester authored, collected in a
+    pristine pre-coder state. ``/staged`` is RO so write no bytecode there."""
+    r = sbx.exec("cd /work && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/work "
+                 "python -m pytest /staged --collect-only -q 2>/dev/null", timeout_s=120)
+    return integrity.collected_names(r.combined)
+
+
+def _ledger_junit(sbx) -> set[str]:
+    """Inventory ledger (verify): an authoritative junit run; returns the *passed* test names. The
+    junit file lands in writable /work; we ``cat`` it back so the gate needs no host-side fs coupling."""
+    r = sbx.exec("cd /work && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/work "
+                 "python -m pytest /staged -q --junitxml=/work/.pf-junit.xml >/dev/null 2>&1; "
+                 "cat /work/.pf-junit.xml 2>/dev/null", timeout_s=300)
+    passed, _nonpassed = integrity.junit_passed_names(r.stdout or r.combined)
+    return passed
+
+
 def p4_iterate(state, ctx: Ctx) -> dict:
     from poc_foundry.artifact import IterationRecord
 
@@ -190,13 +210,28 @@ def p4_iterate(state, ctx: Ctx) -> dict:
         shutil.rmtree(staging_tests)
     staging_tests.mkdir(parents=True, exist_ok=True)
     (staging_tests / "test_criterion.py").write_text(test_src)
-
     chown_to_builder(staging_tests)
+
+    base_sha = state.commit_sha or state.scaffold_sha or "HEAD"
+    incidents: list = []
+    authored: set[str] = set()
+    red_first_ok, inv_ok = True, True
+    crit_status, it_status, attempts, note = "pending", "pending", 0, ""
+
     sbx = ctx.broker.create(
         mounts=[ws_mount(ctx.workspace_dir), staged_tests_mount(staging_tests)], name="iterate")
-    crit_status, it_status, attempts, note = "pending", "pending", 0, ""
     try:
+        authored = _ledger_collect(sbx)
+
         def verify():
+            # DIFF SCANNER (per-attempt): a tampering edit fails the attempt BEFORE the test runs, so
+            # a repeat trips the coder's forced-strategy-change (error-signature) path.
+            incs = integrity.scan_diff(git_diff(ctx.workspace_dir, base_sha), {"test_criterion.py"})
+            if integrity.blocking(incs):
+                for i in incs:
+                    if str(i) not in [str(x) for x in incidents]:
+                        incidents.append(i)
+                return False, "INTEGRITY: " + "; ".join(str(i) for i in incs if i.severity == "high")
             # /staged is RO → don't write bytecode there; import the workspace core from /work.
             r = sbx.exec("cd /work && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/work "
                          "python -m pytest /staged -q", timeout_s=300)
@@ -204,18 +239,37 @@ def p4_iterate(state, ctx: Ctx) -> dict:
 
         ok0, _ = verify()
         if ok0:
-            it_status, crit_status = "green", "met"
-            note = "criterion already met by scaffold (not red-first)"
-            ctx.say("P4 iterate: staged test GREEN against scaffold (no code change needed)")
+            # RED-FIRST ENFORCEMENT (M2a flips M1's best-effort): a staged test that is already green
+            # against the scaffold is a tester-inadequacy signal, NOT a pass.
+            red_first_ok = False
+            note = "staged test passed against the scaffold (not red-first) — tester inadequacy"
+            incidents.append(integrity.Incident("red-first", note, severity="high"))
+            it_status, crit_status = "red-first-failed", "descoped"
+            ctx.say("P4 iterate: RED-FIRST VIOLATION — staged test green against scaffold (flagged)")
         else:
             res = ctx.coder.run(
                 workspace=ctx.workspace_dir, goal=it.goal, editable_files=it.files,
                 test_sources={"test_criterion.py": test_src}, verify=verify,
                 edit_format="whole", max_attempts=getattr(ctx.cfg, "max_fix_attempts", 3))
             attempts = res.attempts
-            if res.passed:
-                it_status, crit_status = "green", "met"
-                ctx.say(f"P4 iterate: RED→GREEN in {attempts} attempt(s); edited {res.edited}")
+            if integrity.blocking(incidents):
+                it_status, crit_status = "abandoned", "descoped"
+                note = "; ".join(str(i) for i in incidents if i.severity == "high")[:300]
+                ctx.say(f"P4 iterate: INTEGRITY INCIDENT — {note}")
+            elif res.passed:
+                # INVENTORY LEDGER (verify): collected ∧ passed must cover the recorded ids.
+                passed = _ledger_junit(sbx)
+                inv_ok = integrity.inventory_ok(authored, passed) if authored else True
+                if inv_ok:
+                    it_status, crit_status = "green", "met"
+                    ctx.say(f"P4 iterate: RED→GREEN in {attempts} attempt(s); edited {res.edited}; "
+                            f"ledger OK ({len(authored)} test(s))")
+                else:
+                    gap = sorted(integrity.inventory_gap(authored, passed))
+                    note = f"inventory ledger gap: {gap} recorded but not passed"
+                    incidents.append(integrity.Incident("ledger-gap", note, severity="high"))
+                    it_status, crit_status = "abandoned", "descoped"
+                    ctx.say(f"P4 iterate: LEDGER FAIL — {note}")
             else:
                 it_status, crit_status = "abandoned", "descoped"
                 note = res.note or "coder did not reach green"
@@ -236,6 +290,10 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     return {"phase": "iterate", "spec": spec, "commit_sha": sha,
             "iteration_records": state.iteration_records + [rec],
             "staged_tests": state.staged_tests + ["test_criterion.py"],
+            "authored_test_ids": state.authored_test_ids + sorted(authored),
+            "inventory_ok": state.inventory_ok and inv_ok,
+            "red_first_ok": state.red_first_ok and red_first_ok,
+            "incidents": state.incidents + [str(i) for i in incidents],
             "iteration": state.iteration + 1,
             "caveats": state.caveats + ([note] if note else []),
             "log": state.log + [f"P4 iterate: {it_status} (attempts={attempts})"]}
@@ -310,13 +368,23 @@ def p6_cleanroom(state, ctx: Ctx) -> dict:
 
 
 # ── P7 emit ──────────────────────────────────────────────────────────────────
+def _has_blocking_incident(state) -> bool:
+    return any(s.startswith("[high]") for s in state.incidents)
+
+
+def _trustworthy(state) -> bool:
+    """The M2a integrity gate: the build's success claim is only trustworthy if the inventory ledger
+    held, every accepted iteration was red-first, and no high-severity integrity incident fired."""
+    return bool(state.inventory_ok) and bool(state.red_first_ok) and not _has_blocking_incident(state)
+
+
 def _final_status(state) -> str:
     if state.spec and not state.spec.buildable:
         return "not-buildable"
     if state.status == "failed":
         return "failed"
     core_met = any(c.core and c.status == "met" for c in (state.spec.success_criteria if state.spec else []))
-    if core_met and state.cleanroom.get("suite_ok"):
+    if core_met and state.cleanroom.get("suite_ok") and _trustworthy(state):
         return "done"
     return "incomplete"
 
@@ -338,8 +406,8 @@ def p7_emit(state, ctx: Ctx) -> dict:
     art = ctx.run_folder.artifact if ctx.run_folder else None
     status = _final_status(state)
     core_met = bool(state.spec) and any(c.core and c.status == "met" for c in state.spec.success_criteria)
-    demonstrates = "yes" if (core_met and state.cleanroom.get("suite_ok")) else (
-        "partial" if core_met else "no")
+    demonstrates = ("yes" if (core_met and state.cleanroom.get("suite_ok") and _trustworthy(state))
+                    else ("partial" if core_met else "no"))
 
     allowlist = []
     try:
@@ -358,7 +426,8 @@ def p7_emit(state, ctx: Ctx) -> dict:
         spec_summary=(state.spec.goal if state.spec else ""),
         success_criteria=(state.spec.success_criteria if state.spec else []),
         iterations=state.iteration_records,
-        tests=TestsSummary(total=state.tests_total, passing=state.tests_passing),
+        tests=TestsSummary(total=state.tests_total, passing=state.tests_passing,
+                           inventory_ok=bool(state.inventory_ok)),
         cleanroom=CleanroomResult(**{k: bool(v) for k, v in state.cleanroom.items()}),
         demo_quality=state.demo_quality,
         final_verdict=FinalVerdict(demonstrates_core_value=demonstrates),
@@ -367,7 +436,7 @@ def p7_emit(state, ctx: Ctx) -> dict:
         template=TemplateRef(name=ctx.template.name, version=ctx.template.version),
         licenses=[ctx.template.license] if ctx.template.license else [],
         security=SecurityInfo(sandbox="kata", egress_allowlist=allowlist,
-                              incidents=[]),
+                              incidents=list(state.incidents)),
         budget=Budget(),
         caveats=state.caveats,
         status=status,
@@ -410,6 +479,12 @@ def _report_md(state, ctx: Ctx, pa) -> str:
     for c in pa.success_criteria:
         tag = " (core)" if c.core else ""
         lines.append(f"- [{c.status}] {c.text}{tag}")
+    lines += ["", "## Integrity walls (§5.5)", "",
+              f"- inventory ledger: {'OK' if pa.tests.inventory_ok else 'FAIL'} "
+              f"(recorded {len(state.authored_test_ids)} test id(s))",
+              f"- red-first: {'OK' if state.red_first_ok else 'VIOLATION'}",
+              f"- incidents: {len(pa.security.incidents)}"]
+    lines += [f"  - {i}" for i in pa.security.incidents]
     lines += ["", "## Clean-room", "",
               f"- install: {pa.cleanroom.quickstart_ok}",
               f"- suite: {pa.cleanroom.suite_ok}",

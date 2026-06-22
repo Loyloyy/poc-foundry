@@ -330,3 +330,54 @@ many iterations:
 
 **M1 COMPLETE → M2a (gates: tester/critic, ledger, scanner, clean-room GATES, out-of-process broker,
 sibling services).**
+
+## #12 — M2a S1: integrity walls + the local no-pytest test runner (2026-06-22)
+
+First M2a slice — the three integrity walls that make a build *trustworthy*, plus the tooling to
+prove gate logic locally. Authored on the 3.10 box; verified by `py_compile` + the fakes suite; the
+real Kata/vLLM path is the server happy-path re-run.
+
+- **Local test runner (the "shim", `scripts/run_spine_tests.py`).** The handover lists
+  `tests/test_m1_spine.py` as a *local* check, but the 3.10 box has no pytest (rule #3) and no shim
+  existed. Built a tiny pytest shim (a `raises` ctx-mgr + a `monkeypatch` fixture with undo + a
+  `tmp_path` fixture) + a `test_*` discovery runner — mirrors `run_contract_checks.py` for the spine.
+  NOT a pytest replacement (only the surface the fakes suites use); in-container real pytest runs the
+  same files. This makes the handover's "every new gate gets a fakes test, validate locally first"
+  workflow real.
+- **`phases/integrity.py` (pure).** Inventory-ledger parsers (`collected_names` from
+  `pytest --collect-only -q`; `junit_passed_names` from a junit xml; `inventory_ok`/`inventory_gap`),
+  the `scan_diff` diff-scanner, and `Incident`/`blocking`. Stdlib-only → `py_compile`-able + unit-
+  testable. **Ledger comparison is by test-function NAME** (the final `::` segment), which sidesteps
+  brittle rootdir/path/classname normalization between collect-only output and junit, and still
+  catches deleted/renamed/skipped tests.
+- **`p4_iterate` wiring.** (1) **Ledger record:** `--collect-only` in the pristine pre-coder VM →
+  authored test names. (2) **Red-first enforcement (flips M1's best-effort):** if the staged test is
+  GREEN against the scaffold, that's tester-inadequacy → `red_first_ok=False` + a high-sev incident +
+  the criterion is NOT met (M1 used to accept it with a caveat). (3) **Diff scanner runs INSIDE the
+  coder's `verify()`** (per-attempt): it scans `git diff <base>` before running pytest, so a tampering
+  edit fails the attempt → the coder's error-signature path forces a strategy change, and the incident
+  is recorded. (4) **Inventory ledger verify:** after the coder reaches green, an authoritative
+  `--junitxml` run (cat'd back through `exec`, so the gate needs no host-fs coupling — keeps it fake-
+  testable) must show collected∧passed ⊇ recorded, else `inventory_ok=False` + the criterion is
+  descoped.
+- **Status gating.** New `_trustworthy(state)` = `inventory_ok ∧ red_first_ok ∧ no high-sev incident`.
+  `_final_status` returns `done` only if (core met ∧ clean-room suite_ok ∧ trustworthy);
+  `demonstrates_core_value` likewise. So a gamed build reports `incomplete`, never `done` — the M2a
+  acceptance. `tests.inventory_ok` + `security.incidents[]` populated; report.md gains an Integrity
+  section.
+- **State additions (additive):** `authored_test_ids`, `inventory_ok`, `red_first_ok`, `incidents`.
+- **Why scan inside `verify()` (not just post-loop):** it gives per-attempt enforcement + the forced-
+  strategy-change for free (a repeated tamper = a repeated failure signature), matching the design's
+  "a positive hit fails the attempt + forces strategy change", with no change to the `CoderEngine`
+  seam (the coder stays test-agnostic; the scanner rides the injected verify callable).
+- **Verified locally:** `run_spine_tests.py` = **24/24** (8 spine unchanged + 16 gates: ledger/junit/
+  scanner parsers, the `_final_status` gate, and **3 planted-gaming pipeline tests** — a trivially-
+  green test, an inventory-ledger gap, and a hard-exit-gaming coder — each CAUGHT and blocked from
+  `done`). Contract still 11/11; import hygiene clean (no langchain/langgraph at load). Updated the
+  M1 fake `_FakeSandbox` to model the new collect-only/junit queries (a fake must track the real
+  sandbox's new interface).
+- **Deferred to later M2a slices (logged, not deviations):** the **adequacy review** (does the suite
+  actually exercise the criterion / is it gameable-trivial?) is the critic's job → S2; per-iteration
+  cumulative regression suite → S2/S3; the on-SERVER adversarial demo (a planted gaming run end-to-
+  end) lands with S2's verdict routing or a planted-mode flag — S1 proves the catch via fakes + keeps
+  the server happy-path green with the walls in place.

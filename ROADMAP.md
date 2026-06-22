@@ -95,11 +95,26 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       clean, no heavy stack at import, `tests/test_m1_spine.py` 7/7, contract 11/11. **M1 COMPLETE → M2a.**
 
 ## M2a — gates
-- [ ] tester + adequacy review + critic verdict set + fix/descope/replan/respec + cumulative suite +
-      inventory ledger + diff scanner + interface contracts + clean-room GATES + out-of-process
-      broker + sibling services
+- [~] **S1 integrity walls (2026-06-22, local):** `phases/integrity.py` (pure: inventory-ledger
+      parsers `collected_names`/`junit_passed_names`/`inventory_ok`; the diff `scan_diff`;
+      `Incident`/`blocking`). Wired into `p4_iterate`: records authored test ids (collect-only),
+      **enforces red-first** (green-against-scaffold = tester-inadequacy incident, not a pass), runs
+      an authoritative **junit ledger** after the coder reaches green (collected∧passed ⊇ recorded →
+      `tests.inventory_ok`), and **scans the coder's per-attempt diff** (a tampering edit fails the
+      attempt → forced strategy change → high-sev `security.incidents[]`). `_final_status`/
+      `demonstrates_core_value` now gated on `_trustworthy` (inventory_ok ∧ red_first_ok ∧ no
+      high-sev incident) — a gamed build can NOT report `done`. Report gains an Integrity section.
+      Local: **24/24 fakes** (`run_spine_tests.py`: 8 spine + 16 gates incl. 3 planted-gaming caught)
+      + contract 11/11 + import-hygiene clean. *Server: re-run the M1 gate to confirm the happy path
+      still `done` with inventory_ok=true.*
+- [ ] S2 critic gate + verdict ladder (pass/fix/descope/replan/respec) + adequacy review +
+      degraded-critic + cumulative suite (LangGraph conditional routing around P4).
+- [ ] S3 architect-driven multi-iteration P2 + clean-room GATES (red clean-room suite → never `done`).
+- [ ] S4 out-of-process broker (orchestrator drops the docker socket) + real sibling services.
 - **Acceptance:** a planted test-gaming attempt is caught by the ledger/scanner; clean-room gates
       a known-bad build red; broker runs out-of-process.
+      *(S1 proves the gaming-caught half via fakes; the on-server adversarial demo lands with S2's
+      routing / a planted-mode flag.)*
 
 ## M2b — resilience
 - [ ] budgets/caps/escalation · checkpoint/resume/stop · salvage + descope report · contention
