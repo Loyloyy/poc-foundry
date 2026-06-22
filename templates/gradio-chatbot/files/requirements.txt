@@ -1,3 +1,6 @@
 # Pinned deps for the Gradio chatbot PoC. Installed in the clean-room VM via `uv pip install`
 # THROUGH the allowlisting egress proxy (PyPI is allowlisted). Bump deliberately; keep it minimal.
 gradio==4.44.1
+# gradio 4.44.1's oauth.py does `from huggingface_hub import HfFolder` — removed in huggingface_hub
+# >=0.26, so uv's latest resolve breaks gradio at import. Pin a hub that still ships HfFolder.
+huggingface_hub==0.24.7
