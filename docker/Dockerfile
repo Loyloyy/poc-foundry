@@ -13,13 +13,14 @@ WORKDIR /app
 
 # git: workspace commits + clean-room clone (+ the SHA-pinned Stage-2 dep end-state, DECISIONS #2).
 # build-essential/curl: some wheels need a compiler at install time. patch: the coder's diff
-# edit-format (whole-file is the default, but keep diff usable). docker.io: the M1 in-process broker
+# edit-format (whole-file is the default, but keep diff usable). docker-cli: the M1 in-process broker
 # drives the HOST docker socket via the `docker` CLI to spin Kata VMs (risk-accepted M1 residual —
-# the socket is mounted in docker-compose.override.yml; the daemon is NOT started in this image).
-# Installed from Debian mirrors (build-time apt is reachable on the server — same path the proxy
-# image uses for squid).
+# the socket is mounted in docker-compose.override.yml). We install the CLIENT ONLY (`docker-cli`),
+# NOT the daemon: on Debian 13 the monolithic `docker.io` was split and ships /usr/bin/dockerd but
+# only RECOMMENDS the client, so `--no-install-recommends docker.io` gives no `/usr/bin/docker`.
+# Installed from Debian mirrors (build-time apt is reachable on the server — same path the proxy uses).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential git curl ca-certificates patch docker.io \
+        build-essential git curl ca-certificates patch docker-cli \
     && rm -rf /var/lib/apt/lists/*
 
 # The orchestrator (root) runs git over workspaces chown'd to the sandbox builder (uid 1000); trust

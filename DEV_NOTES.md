@@ -177,11 +177,15 @@ denials still pass). The same spike under runc resolves names fine.
   needs root; the sandbox is uid 1000 (the M0(b) gotcha). RUN.md's `pf:install` installs into a
   local `.deps/` and `pf:test`/`pf:demo`/`pf:run` prefix `PYTHONPATH=.deps` — the validated egress-spike
   pattern, and human-copy-pasteable.
-- **App image needs the docker CLI.** The in-process broker shells out to `docker`. The app Dockerfile
-  installs `docker.io` from Debian mirrors (build-time apt is reachable; same path the proxy uses for
-  squid) and the socket is mounted in the override. No daemon starts in the image — only the client +
-  the host socket. (If `docker.io` ever won't install, fall back to the Docker apt repo's
-  `docker-ce-cli`, but that needs `download.docker.com` egress at build, which is NOT confirmed.)
+- **App image needs the docker CLI — install `docker-cli`, NOT `docker.io` (Debian 13 split).** The
+  in-process broker shells out to `docker`. On Debian 13 (trixie, `26.1.5+dfsg1`) the monolithic
+  `docker.io` was split: it ships `/usr/bin/dockerd` + `docker-init` and only **Recommends** the
+  client, so `apt-get install --no-install-recommends docker.io` yields **no `/usr/bin/docker`**
+  (verified on the server: `command -v docker` empty, only `docker-init` present). Install
+  **`docker-cli`** (the client package) instead — lighter (no daemon/containerd) and all we need since
+  the daemon is the host's via the mounted socket. From Debian mirrors (build-time apt reachable). (If
+  `docker-cli` is ever absent, the Docker apt repo's `docker-ce-cli` works but needs
+  `download.docker.com` egress at build, which is NOT confirmed on this server.)
 - **Broker reaches the proxy by IP** (Kata has no Docker name-DNS, DECISIONS #9): `provision()`
   inspects the proxy's internal-net IP and injects `HTTPS_PROXY=http://<ip>:3128`. Sibling services
   (M2a) are reached by IP the same way (`broker.service_ip`).
