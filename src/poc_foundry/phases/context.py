@@ -7,6 +7,7 @@ it via a closure in ``graph.py``. Everything here is stdlib + pydantic-light so 
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -81,7 +82,21 @@ def git(workspace: Path, *args: str, check: bool = True) -> subprocess.Completed
                           capture_output=True, text=True, check=check)
 
 
+def ensure_git_global_safe() -> None:
+    """The orchestrator (root, in-container) git-operates on workspaces it chown'd to the sandbox
+    builder (uid 1000). Git ignores ``safe.directory`` set via ``-c``/local config (a security
+    measure) — local-path ``git clone`` in particular requires it in GLOBAL config. Set it there,
+    but ONLY when running as root, so a local dev box's gitconfig is never touched."""
+    try:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            subprocess.run(["git", "config", "--global", "safe.directory", "*"],
+                           capture_output=True, check=False)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def git_init(workspace: Path) -> None:
+    ensure_git_global_safe()
     git(workspace, "init", "-q")
     git(workspace, "config", "user.email", "harness@poc-foundry.local")
     git(workspace, "config", "user.name", "poc-foundry")
