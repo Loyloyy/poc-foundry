@@ -1,0 +1,31 @@
+# Standalone run of the emitted PoC (design §5.6: continuation/demo = `docker compose up` with the
+# REAL sibling service). pgvector + the Gradio app on one network; the app reaches the DB by the
+# compose service name `pg` (PF_SERVICE_PG_HOST). For the build harness the broker provides pgvector
+# and injects PF_SERVICE_PG_HOST by IP instead — this file is for a human running the bundle.
+
+services:
+  pg:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: pf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    image: python:3.12-slim
+    working_dir: /app
+    depends_on:
+      pg:
+        condition: service_healthy
+    environment:
+      PF_SERVICE_PG_HOST: pg
+      POSTGRES_PASSWORD: pf
+      GRADIO_ANALYTICS_ENABLED: "False"
+    volumes:
+      - .:/app
+    command: bash -lc "pip install -q -r requirements.txt && python app.py"
+    ports:
+      - "7860:7860"

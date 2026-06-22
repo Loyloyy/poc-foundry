@@ -165,6 +165,7 @@ def main(argv: list[str]) -> int:
         _REPO / "tests" / "test_m1_spine.py",
         _REPO / "tests" / "test_m2a_gates.py",
         _REPO / "tests" / "test_m2a_broker_rpc.py",
+        _REPO / "tests" / "test_m2a_services.py",
     ]
     tp = tf = 0
     for t in targets:

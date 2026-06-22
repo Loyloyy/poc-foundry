@@ -33,16 +33,33 @@ def summarize_artifact(art) -> str:
     return "\n".join(lines)
 
 
-SPEC_SYSTEM = (
-    "You are a pragmatic solutions architect scoping a TINY, runnable proof-of-concept from a "
-    "research artifact. The PoC is a single Gradio chatbot whose logic lives in a pure, importable "
-    "`core.generate_reply(message, history) -> str`. Your spec must be buildable in ONE small "
-    "iteration and VERIFIABLE by unit tests against `core.py` — no external services, no network, "
-    "stdlib only. Be honest: if the artifact cannot yield such a PoC, say so."
-)
+def spec_system(has_services: bool = False) -> str:
+    base = (
+        "You are a pragmatic solutions architect scoping a TINY, runnable proof-of-concept from a "
+        "research artifact. The PoC is a single Gradio chatbot whose logic lives in a pure, importable "
+        "`core.generate_reply(message, history) -> str`. Your spec must be buildable in a few small "
+        "iterations and VERIFIABLE by unit tests that call `core.generate_reply` directly. Be honest: "
+        "if the artifact cannot yield such a PoC, say so.")
+    if has_services:
+        return base + (" The PoC runs WITH a real provided sibling service (e.g. a vector database); "
+                       "the tests still verify behaviour only through `core.generate_reply`, which "
+                       "uses the service under the hood. No OTHER services or networks.")
+    return base + " No external services, no network, stdlib only."
 
 
-def spec_prompt(art, interface: str) -> str:
+# Back-compat alias (the default, service-less system prompt).
+SPEC_SYSTEM = spec_system(False)
+
+
+def spec_prompt(art, interface: str, services: list | None = None) -> str:
+    services = services or []
+    if services:
+        names = ", ".join(s.get("name", "") for s in services)
+        svc_line = (f"- The PoC uses a real provided sibling service ({names}); each criterion is still "
+                    "checked by a pytest test calling `core.generate_reply` directly (which uses the "
+                    "service). Do NOT require GPUs or any service beyond the provided one.\n")
+    else:
+        svc_line = "- Do NOT require networks, GPUs, databases, or services.\n"
     return (
         f"{summarize_artifact(art)}\n\n"
         f"Target interface (fixed): {interface}\n\n"
@@ -52,13 +69,13 @@ def spec_prompt(art, interface: str) -> str:
         "works, the PoC demonstrates its core value). Each criterion text must be checkable by a "
         "pytest unit test calling `core.generate_reply` directly — concrete and deterministic "
         "(e.g. 'replies that mention a known corpus keyword include a citation marker'). Set "
-        "type='met-by-test' for all of them. Do NOT require networks, GPUs, databases, or services.\n"
+        "type='met-by-test' for all of them.\n"
+        f"{svc_line}"
         "- non_goals: 2 to 4 things explicitly out of scope for this PoC.\n"
         "- demo_scenario: one or two sentences a human could follow to see it work.\n"
-        "- template: 'gradio-chatbot'.\n"
-        "- buildable: true normally; false ONLY if no stdlib-testable chatbot PoC can represent this "
+        "- buildable: true normally; false ONLY if no testable chatbot PoC can represent this "
         "artifact — then give not_buildable_reasons.\n"
-        "Keep every criterion small enough to satisfy with a few lines of stdlib Python."
+        "Keep every criterion small enough to satisfy with a few lines of Python."
     )
 
 

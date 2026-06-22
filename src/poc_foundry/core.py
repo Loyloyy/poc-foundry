@@ -37,7 +37,7 @@ def _make_broker(cfg, build_id: str, runtime: str | None):
     OUT-OF-PROCESS path (M2a S4): a thin ``RemoteBroker`` that forwards to the daemon holding
     docker.sock, so the orchestrator never mounts the socket. Unset → the in-process ``Broker``
     (the default; unchanged proven path)."""
-    allowed = {cfg.sandbox_image, cfg.proxy_image}
+    allowed = {cfg.sandbox_image, cfg.proxy_image} | cfg.service_refs()   # vetted siblings (image:tag)
     vllm_key = os.environ.get("PF_SANDBOX_VLLM_KEY", "not-needed")
     sock = os.environ.get("PF_BROKER_SOCKET", "").strip()
     if sock:

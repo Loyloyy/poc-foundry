@@ -103,9 +103,10 @@ def p1_spec(state, ctx: Ctx) -> dict:
     from poc_foundry.state import Spec
 
     art = ctx.run_folder.artifact
+    svcs = getattr(ctx.template, "services", [])
     llm = build_chat_model("architect").with_structured_output(Spec)
-    spec = llm.invoke([("system", prompts.SPEC_SYSTEM),
-                       ("human", prompts.spec_prompt(art, ctx.template.interface))])
+    spec = llm.invoke([("system", prompts.spec_system(bool(svcs))),
+                       ("human", prompts.spec_prompt(art, ctx.template.interface, svcs))])
     if isinstance(spec, dict):
         spec = Spec(**spec)
     spec = _normalize_spec(spec, ctx.template)
@@ -165,11 +166,38 @@ def p2_plan(state, ctx: Ctx) -> dict:
             "log": state.log + [f"P2 plan: {len(iterations)} iteration(s)"]}
 
 
-# ── P3 scaffold ──────────────────────────────────────────────────────────────
+# ── P3 scaffold (+ sibling services) ─────────────────────────────────────────
+def _spin_services(ctx: Ctx) -> None:
+    """Spin the template's declared sibling services (design §5.6) ONCE per build, on the per-build
+    internal net, and record each IP as ``PF_SERVICE_<NAME>_HOST`` (reached BY IP — Kata has no
+    name-DNS) for injection into every sandbox. The image/tag come from the HARNESS-FIXED vetted list
+    (rule #8), never from the template's arbitrary text. Idempotent within a build (a replan re-enters
+    P3 → skip if already up)."""
+    if ctx.service_env or not getattr(ctx.template, "services", None):
+        return
+    vetted = getattr(ctx.cfg, "vetted_services", {}) or {}
+    for decl in ctx.template.services:
+        name = decl["name"]
+        spec = vetted.get(decl.get("vetted", name))
+        if not spec or str(spec.get("pinned_tag", "")).startswith("<"):
+            raise RuntimeError(f"template service {name!r} → no pinned vetted service "
+                               f"{decl.get('vetted', name)!r} in pipeline.yaml")
+        svc = ctx.broker.create_service(image=spec["image"], name=name,
+                                        pinned_tag=str(spec.get("pinned_tag")),
+                                        env=spec.get("env"), ready_cmd=spec.get("ready_cmd"))
+        ip = ctx.broker.service_ip(svc)
+        ctx.services.append(svc)
+        up = name.upper()
+        ctx.service_env[f"PF_SERVICE_{up}_HOST"] = ip
+        for k, v in (spec.get("env") or {}).items():            # e.g. PF_SERVICE_PG_POSTGRES_PASSWORD
+            ctx.service_env[f"PF_SERVICE_{up}_{k}"] = str(v)
+        ctx.say(f"P3 services: {name} ({spec['image']}:{spec.get('pinned_tag')}) ready @ {ip}")
+
+
 def p3_scaffold(state, ctx: Ctx) -> dict:
     written = stamp_template(ctx.template, ctx.workspace_dir)
     git_init(ctx.workspace_dir)
-    sha = git_commit(ctx.workspace_dir, "scaffold: stamp gradio-chatbot template (start-green)")
+    sha = git_commit(ctx.workspace_dir, f"scaffold: stamp {ctx.template.name} template (start-green)")
     chown_to_builder(ctx.workspace_dir)   # sandbox (uid 1000) must write caches into /work
 
     sbx = ctx.broker.create(mounts=[ws_mount(ctx.workspace_dir)], name="scaffold")
@@ -183,6 +211,8 @@ def p3_scaffold(state, ctx: Ctx) -> dict:
         return {"phase": "scaffold", "status": "failed", "scaffold_sha": sha,
                 "error": "scaffold smoke failed:\n" + res.combined[-1500:],
                 "log": state.log + ["P3 scaffold: smoke RED"]}
+
+    _spin_services(ctx)   # sibling services (if any) up + IPs recorded for P4/P6 injection
     ctx.say(f"P3 scaffold: stamped {len(written)} files; smoke GREEN @ {sha}")
     return {"phase": "scaffold", "scaffold_sha": sha, "commit_sha": sha,
             "log": state.log + [f"P3 scaffold: GREEN @ {sha}"]}
@@ -245,7 +275,8 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     crit_status, it_status, attempts, note = "pending", "pending", 0, ""
 
     sbx = ctx.broker.create(
-        mounts=[ws_mount(ctx.workspace_dir), staged_tests_mount(staging_tests)], name=f"iter{i}")
+        mounts=[ws_mount(ctx.workspace_dir), staged_tests_mount(staging_tests)], name=f"iter{i}",
+        env_extra=dict(ctx.service_env))               # sibling-service IPs (by IP — Kata DNS)
     try:
         authored = _ledger_collect(sbx)                  # cumulative authored set (all /staged)
 
@@ -494,7 +525,8 @@ def p6_cleanroom(state, ctx: Ctx) -> dict:
     blocks = parse_run_blocks((clone / "RUN.md").read_text())
     result = {"quickstart_ok": False, "suite_ok": False, "demo_ok": False}
     fails: list[str] = []
-    sbx = ctx.broker.create(mounts=[ws_mount(clone)], name="cleanroom")
+    sbx = ctx.broker.create(mounts=[ws_mount(clone)], name="cleanroom",
+                            env_extra=dict(ctx.service_env))   # clean-room reaches the same sibling(s)
     try:
         if "install" in blocks:
             r = sbx.exec(f"cd /work && {blocks['install']}", timeout_s=1800)
@@ -555,12 +587,19 @@ def p7_emit(state, ctx: Ctx) -> dict:
         FinalVerdict,
         PoCBuildArtifact,
         SecurityInfo,
+        ServiceRef,
         SourceArtifact,
         StackItem,
         TemplateRef,
         TestsSummary,
         save,
     )
+
+    vetted = getattr(ctx.cfg, "vetted_services", {}) or {}
+    services = [ServiceRef(name=d["name"],
+                           image=(vetted.get(d.get("vetted", d["name"]), {}) or {}).get("image", ""),
+                           pinned_tag=(vetted.get(d.get("vetted", d["name"]), {}) or {}).get("pinned_tag"))
+                for d in getattr(ctx.template, "services", [])]
 
     art = ctx.run_folder.artifact if ctx.run_folder else None
     status = _final_status(state)
@@ -598,6 +637,7 @@ def p7_emit(state, ctx: Ctx) -> dict:
         stack=[StackItem(layer=s.get("layer", ""), choice=s.get("choice", ""),
                          pinned_version=s.get("pinned_version")) for s in ctx.template.stack],
         template=TemplateRef(name=ctx.template.name, version=ctx.template.version),
+        services=services,
         licenses=[ctx.template.license] if ctx.template.license else [],
         security=SecurityInfo(sandbox="kata", egress_allowlist=allowlist,
                               incidents=list(state.incidents),

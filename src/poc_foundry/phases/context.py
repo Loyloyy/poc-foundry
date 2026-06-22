@@ -34,6 +34,7 @@ class Template:
     run_cmd: str
     stack: list[dict]
     license: str | None = None
+    services: list[dict] = field(default_factory=list)   # [{name, vetted}] — sibling services this PoC needs
 
 
 def load_template(name: str, templates_root: Path | None = None) -> Template:
@@ -51,6 +52,7 @@ def load_template(name: str, templates_root: Path | None = None) -> Template:
         run_cmd=manifest.get("run_cmd", "python app.py"),
         stack=list(manifest.get("stack", [])),
         license=manifest.get("license"),
+        services=list(manifest.get("services", [])),
     )
 
 
@@ -68,6 +70,8 @@ class Ctx:
     coder: object               # CoderEngine
     report: list[str] = field(default_factory=list)
     run_folder: object | None = None   # ingest.RunFolder (loaded at P0)
+    service_env: dict = field(default_factory=dict)    # PF_SERVICE_<NAME>_HOST=<ip> injected into sandboxes
+    services: list = field(default_factory=list)       # live sibling-service handles (reaped at build end)
 
     def say(self, line: str) -> None:
         self.report.append(line)

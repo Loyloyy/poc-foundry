@@ -47,7 +47,8 @@ class BrokerDaemon:
             return {"name": sbx.name}
         if method == "create_service":
             sbx = broker.create_service(image=params["image"], name=params["name"],
-                                        env=params.get("env"), pinned_tag=params.get("pinned_tag"))
+                                        env=params.get("env"), pinned_tag=params.get("pinned_tag"),
+                                        ready_cmd=params.get("ready_cmd"))
             return {"name": sbx.name}
         if method == "exec":
             sbx = self._sandbox(broker, params["sandbox"])

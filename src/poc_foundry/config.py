@@ -70,9 +70,23 @@ class BuildConfig:
     # templates
     default_template: str
 
+    # vetted sibling services (pipeline.yaml `vetted_services`) — name → {image, pinned_tag, role,
+    # ready_cmd, env}. The image+tag are HARNESS-FIXED here (rule #8): a template names which vetted
+    # service it wants; the broker resolves image/tag from THIS list, never from artifact/model output.
+    vetted_services: dict
+
     @property
     def kata_runtime(self) -> str:
         return os.environ.get("PF_SANDBOX_RUNTIME", "kata")
+
+    def service_refs(self) -> set[str]:
+        """`image:pinned_tag` for every fully-pinned vetted service — added to the broker allowlist."""
+        out = set()
+        for s in self.vetted_services.values():
+            tag = str(s.get("pinned_tag", "") or "")
+            if s.get("image") and tag and not tag.startswith("<"):
+                out.add(f"{s['image']}:{tag}")
+        return out
 
 
 def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
@@ -81,6 +95,7 @@ def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
     budgets = y.get("budgets", {})
     templates = y.get("templates", {})
     critic = y.get("critic", {})
+    vetted = {s["name"]: s for s in (y.get("vetted_services", []) or []) if s.get("name")}
 
     ws = os.environ.get("PF_WORKSPACE_DIR", "").strip() or "/var/tmp/pf-workspaces"
     return BuildConfig(
@@ -101,4 +116,5 @@ def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
         degraded_fix_limit_k=_int_env("PF_DEGRADED_FIX_LIMIT_K", int(critic.get("degraded_fix_limit_k", 2))),
         replan_cap=_int_env("PF_REPLAN_CAP", int(critic.get("replan_cap", 1))),
         default_template=str(templates.get("default", "gradio-chatbot")),
+        vetted_services=vetted,
     )

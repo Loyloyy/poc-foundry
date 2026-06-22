@@ -1,0 +1,22 @@
+{
+  "name": "gradio-rag-pgvector",
+  "version": "0.1.0",
+  "description": "A start-GREEN Gradio chatbot that does retrieval-augmented generation over a REAL pgvector sibling service (Postgres + the vector extension). Deterministic stdlib embeddings (no model/network) so retrieval is reproducible + unit-testable; similarity search runs in pgvector. Proves the sibling-service path (design §5.6).",
+  "stamp_dir": "files",
+  "editable_files": ["core.py"],
+  "smoke_test": "tests/test_smoke.py",
+  "suite": "tests",
+  "interface": "core.generate_reply(message: str, history: list | None = None) -> str",
+  "run_cmd": "docker compose up --build",
+  "services": [
+    {"name": "pg", "vetted": "pgvector"}
+  ],
+  "stack": [
+    {"layer": "ui", "choice": "gradio", "pinned_version": "4.44.1"},
+    {"layer": "vector-db", "choice": "pgvector", "pinned_version": "pg16"},
+    {"layer": "db-driver", "choice": "psycopg", "pinned_version": "3.2.3"},
+    {"layer": "language", "choice": "python", "pinned_version": "3.12"}
+  ],
+  "template_repo": null,
+  "license": "MIT"
+}

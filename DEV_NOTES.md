@@ -332,8 +332,8 @@ denials still pass). The same spike under runc resolves names fine.
 - **Enable it with the override + `PF_BROKER_SOCKET`.** `cp docker/docker-compose.override.yml.example
   docker/docker-compose.override.yml`; it defines a `broker` service (holds docker.sock, runs
   `python -m poc_foundry.sandbox.daemon`) and removes docker.sock from `app` (which gains
-  `PF_BROKER_SOCKET=/var/run/pf-broker/broker.sock` + the `/var/run/pf-broker` mount). Pre-create the
-  socket dir on the host: `mkdir -p /var/run/pf-broker && chmod 777 /var/run/pf-broker`. Unset
+  `PF_BROKER_SOCKET=/var/tmp/pf-broker/broker.sock` + the `/var/tmp/pf-broker` mount). Pre-create the
+  socket dir on the host: `mkdir -p /var/tmp/pf-broker && chmod 777 /var/tmp/pf-broker`. Unset
   `PF_BROKER_SOCKET` → the in-process `Broker` (default) — so this is a safe opt-in cutover.
 - **The daemon must be LISTENING before the app connects.** `depends_on` only waits for 'started', so
   `rpc.call` retries the connect for ~15s to ride out the race. If you bring it up manually:
@@ -354,5 +354,32 @@ denials still pass). The same spike under runc resolves names fine.
 - **Single-threaded daemon, connection-per-call.** No locking, no request multiplexing — suits one
   build at a time. If multi-build concurrency is ever needed, the daemon already keys brokers by
   `build_id`, but the accept loop would need threading + per-broker locks.
+
+## M2a S4b sibling services (2026-06-23)
+
+- **Two one-time server steps** before a pgvector build: (1) **rebuild the sandbox image** —
+  `docker compose -f docker/compose.yaml build sandbox` (it now bakes `psycopg[binary]`); (2)
+  **restart the broker daemon** — it has stale Python loaded from S4a (`docker compose … up -d
+  --force-recreate broker`), so it picks up the new `create_service` readiness + `ready_cmd` code.
+- **Force the service template:** `… cli build <fixture> --template gradio-rag-pgvector`. The architect
+  doesn't auto-select service templates yet (out of scope); the CLI `--template` flag forces it.
+- **Why iterations need psycopg baked in, not installed:** the iteration VMs run the criterion tests
+  but never `uv pip install` (only P6 clean-room does). A service PoC's `core.py` imports psycopg at
+  call time, so the driver must already be in the image. `import psycopg` is LAZY in core.py, so the
+  stdlib smoke (P3) still runs without it.
+- **By-IP, not by-name:** `PF_SERVICE_PG_HOST` is the pgvector container's internal-net IP (Kata VMs
+  have no Docker name-DNS — same finding as the proxy). The PoC reads it; for a human `docker compose
+  up`, compose DNS resolves the `pg` service name instead (the template's compose.yaml sets
+  `PF_SERVICE_PG_HOST=pg`).
+- **Leak-check now includes the service container.** After a pgvector build, `docker ps -a | grep pf-`
+  must be empty (the service `pf-…-svc-pg-…` is reaped by `broker.destroy()` over RPC) — except the
+  long-lived `pf-broker` daemon. `docker network/volume ls | grep pf-` empty too.
+- **Image/tag come from `pipeline.yaml vetted_services`, never the template's free text** (rule #8):
+  `template.json` only names `{name, vetted}`; the harness resolves the pinned `image:tag`. Pin to a
+  digest for production (the design's "pin exact tags"); `pg16` is the reachable convenience tag.
+- **Coder's task is glue, not infra:** the scaffold ships `search()` working; the coder wires
+  `generate_reply → search → "[id]" citation`. If a non-core criterion (relevance threshold) is too
+  hard and descopes, the build is still `done` when the core retrieval criterion + the clean-room
+  (published green tests) pass.
 
 ## (sections appended as slices land)

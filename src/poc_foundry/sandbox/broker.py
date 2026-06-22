@@ -277,10 +277,12 @@ class Broker:
         return sbx
 
     def create_service(self, *, image: str, name: str, env: dict | None = None,
-                       pinned_tag: str | None = None) -> Sandbox:
-        """Spin a sibling production service on the internal net (M1: service-less builds are the
-        norm; this is the seam, exercised for real at M2a). Image MUST be allowlisted + tag-pinned
-        (the invariant) — services are reached BY IP from the sandbox, same Kata-DNS rule."""
+                       pinned_tag: str | None = None, ready_cmd: str | None = None) -> Sandbox:
+        """Spin a sibling production service on the per-build internal net (design §5.6). Image MUST be
+        allowlisted + tag-pinned (the invariant — image/tag come from the harness-fixed vetted list, not
+        from artifact/model output). Reached BY IP from the sandbox (same Kata-DNS rule as the proxy).
+        Runs under the DEFAULT runtime (a stock vendor image, not Kata) — siblings are infra, not the
+        LLM-driven build env. If ``ready_cmd`` is given, block until it succeeds (e.g. ``pg_isready``)."""
         if not self._provisioned:
             raise BrokerError("call provision() before create_service()")
         ref = f"{image}:{pinned_tag}" if pinned_tag else image
@@ -294,8 +296,29 @@ class Broker:
         _run(argv, check=True)
         sbx = Sandbox(self, full)
         self._sandboxes[full] = sbx
+        self._await_service(full, ready_cmd)
         self._log(f"created service {full} ({ref})")
         return sbx
+
+    def _await_service(self, name: str, ready_cmd: str | None, *, tries: int = 40) -> None:
+        """Wait for a service container to be Running and (if given) for ``ready_cmd`` to succeed
+        inside it. Fails LOUD with the container logs if it never comes up."""
+        for _ in range(tries):
+            if _run(["docker", "inspect", "-f", "{{.State.Running}}", name], check=False).stdout.strip() == "true":
+                break
+            time.sleep(1)
+        else:
+            logs = _run(["docker", "logs", name], check=False).combined[-800:]
+            raise BrokerError(f"service {name} never reached Running:\n{logs}")
+        if not ready_cmd:
+            time.sleep(1)
+            return
+        for _ in range(tries):
+            if _run(["docker", "exec", name, "bash", "-lc", ready_cmd], check=False).ok:
+                return
+            time.sleep(1)
+        logs = _run(["docker", "logs", name], check=False).combined[-800:]
+        raise BrokerError(f"service {name} not ready ({ready_cmd!r}) in time:\n{logs}")
 
     def service_ip(self, sandbox: Sandbox) -> str:
         """Internal-net IP of a service container (siblings reach it by IP, not name — Kata DNS)."""

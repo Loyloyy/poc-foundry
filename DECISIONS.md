@@ -520,3 +520,55 @@ is fully fakes-tested over a real Unix socket; the real Kata path is the server 
 - **Deferred to S4b:** `create_service` made REAL (a vetted sibling, pinned tag, reached BY IP) + a
   service-using template that proves the path end-to-end. The seam (`create_service` RPC method) is
   already wired through the daemon/client; S4b fills in the template + the by-IP wiring in a phase.
+- **Server GREEN (2026-06-23):** build `done` via the override (out-of-process broker, 5 iterations,
+  clean-room green); the orchestrator container has **no docker.sock** (`test -S /var/run/docker.sock`
+  → GOOD); zero build-resource leaks (only the long-lived `pf-broker` daemon, removed by `compose
+  down`). Socket dir lives under `/var/tmp/pf-broker` (not `/var/run`, which is a root-locked tmpfs).
+  **M2a headline acceptance MET** (gaming caught S1/S2 · clean-room gates S3 · broker out-of-process
+  S4a). Remaining for full M2a: S4b sibling-service build.
+
+## #16 — M2a S4b: real sibling services + the gradio-rag-pgvector template (minimal-real) (2026-06-23)
+
+The last M2a piece — a build that uses a REAL vetted sibling service end-to-end. Scoped as
+"minimal-real" with the user: prove the infra path thoroughly (spin → by-IP → clean-room → no leaks)
+without gold-plating the demo app. Authored locally; fakes lock the wiring; the real pgvector
+round-trip is the server run.
+
+- **`create_service` made real (broker).** Added a readiness wait (`_await_service`: poll Running +
+  an optional `ready_cmd` like `pg_isready`, fail loud with logs). Runs under the DEFAULT runtime (a
+  stock vendor image is infra, not the Kata build env). Reached BY IP (`service_ip`, same Kata-DNS
+  rule as the proxy). Threaded `ready_cmd` through the daemon + client RPC.
+- **Image/tag are HARNESS-FIXED (rule #8).** A template only NAMES which vetted service it wants
+  (`template.json services: [{name, vetted}]`); the image + pinned tag come from `pipeline.yaml
+  vetted_services` (pgvector pinned to `pg16`), resolved by the pipeline — never from artifact/model
+  output. `cfg.service_refs()` adds `image:tag` to the broker allowlist; `create_service` checks it.
+- **Service lifecycle in the pipeline.** P3 (`_spin_services`) spins declared services ONCE per build
+  (idempotent on replan), records `PF_SERVICE_<NAME>_HOST=<ip>` (+ service env like the PG password)
+  on `ctx.service_env`; P4 + P6 pass it as `env_extra` so iterations AND the clean-room reach the
+  sibling by IP. Services persist across iterations (design §5.6); reaped by `broker.destroy()` at
+  build end (leak-safe). P7 records `services[]`.
+- **The `gradio-rag-pgvector` template.** Retrieval over REAL pgvector (Postgres + `vector`), with a
+  **deterministic stdlib hashing embedding** (no model, no network) so retrieval is reproducible +
+  unit-testable; the similarity search runs in pgvector (`embedding <-> %s::vector`). Decision: the
+  scaffold ships the DB plumbing (`_connect`/`_ensure_corpus`/`search`) WORKING + a STUB
+  `generate_reply` → the smoke test is stdlib-only/DB-free (start-green), iteration 0's retrieval
+  criterion is RED against the stub (red-first holds), and the coder's job is the tractable glue
+  (wire `generate_reply` to `search` + format a `[id]` citation), NOT writing psycopg/SQL from
+  scratch. Self-seeding idempotent corpus → a fresh clean-room DB self-seeds on first query.
+- **`psycopg[binary]` baked into the sandbox image.** Iterations run the criterion tests but do NOT
+  `uv pip install` (only the clean-room does); so the common sibling DRIVER is baked in (same
+  rationale as pytest/ruff already are). Pinned in `requirements.txt` too so the emitted bundle
+  installs standalone. Needs a one-time `docker compose build sandbox` on the server.
+- **Spec prompt is service-aware** (`spec_system(has_services)` / `spec_prompt(..., services)`): when
+  the template declares a service, the architect is told the PoC uses a real provided sibling (tests
+  still verify via `generate_reply`), instead of the old "no services, stdlib only" constraint.
+- **Clean-room uses the per-build service** (IP injected) rather than recreating a fresh one — the
+  idempotent self-seed makes that equivalent for the proof; a truly-fresh clean-room DB
+  (design §5.6 "recreate from scratch") is a noted refinement.
+- **Robust to coder imperfection:** if a non-core criterion (e.g. a relevance threshold) descopes, the
+  build is still `done` when the CORE retrieval criterion is met + the clean-room (published green
+  tests) passes — the descope mechanism (S2) handles it honestly.
+- **Verified locally (42/42 fakes):** config exposes the pinned ref; the template declares its service;
+  P3 spins pgvector with the fixed image/tag/ready_cmd + records the IP + password; the iteration
+  sandbox receives `PF_SERVICE_PG_HOST`. The pgvector template's `_embed` is deterministic/normalized
+  (ran directly). Contract 11/11; hygiene clean (psycopg lazy-imported, not at module load).

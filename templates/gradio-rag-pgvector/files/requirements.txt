@@ -1,0 +1,6 @@
+# Pinned start-green deps. gradio needs huggingface_hub<0.26 (HfFolder import; the M1 lesson).
+# psycopg is also baked into the sandbox image, but pin it here so the emitted bundle installs
+# standalone (clean-room + a human running `docker compose up`).
+gradio==4.44.1
+huggingface_hub==0.24.7
+psycopg[binary]==3.2.3

@@ -56,7 +56,7 @@ class _FakeEngine:
         self._sandboxes[full] = sbx
         return sbx
 
-    def create_service(self, *, image, name, env=None, pinned_tag=None):
+    def create_service(self, *, image, name, env=None, pinned_tag=None, ready_cmd=None):
         full = f"svc-{name}"
         sbx = _FakeSbx(full)
         self._sandboxes[full] = sbx

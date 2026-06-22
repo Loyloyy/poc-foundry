@@ -140,10 +140,22 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       in-process `Broker`, unchanged default). Compose override gains a `broker` service (holds
       docker.sock) and drops docker.sock from `app`. Local: **38/38 fakes** (+3 broker-RPC: real
       socket round-trip + invariant re-raises same type client-side + interface parity) + contract
-      11/11 + hygiene clean. *Server: run via the override; prove `app` has NO docker.sock + the build
-      still reaches `done` + zero leaks.*
-- [ ] S4b real sibling services (`create_service` pins a vetted tag, reached BY IP) + a service-using
-      template (proves the path end-to-end).
+      11/11 + hygiene clean. **Server GREEN (2026-06-23):** build `done` via the out-of-process broker
+      (5 iterations); `no docker.sock in app (GOOD)`; zero build-resource leaks (only the long-lived
+      `pf-broker` daemon remains, removed by `down`). M2a headline acceptance MET.
+- [~] **S4b sibling services — minimal-real (2026-06-23, local):** `create_service` made real
+      (readiness wait via `pg_isready`; image/tag from the HARNESS-FIXED `vetted_services` list, rule #8;
+      added to the broker allowlist). A template DECLARES its services (`template.json services`); P3
+      spins them once per build on the internal net, records each IP as `PF_SERVICE_<NAME>_HOST`, and
+      P4/P6 inject that env so the sandbox + clean-room reach the sibling **by IP**. New
+      `gradio-rag-pgvector` template: deterministic stdlib embedding + real pgvector similarity search;
+      scaffold ships working DB plumbing + a stub `generate_reply` (red-first holds, coder writes the
+      retrieval glue). `psycopg[binary]` baked into the sandbox image (iterations don't `uv pip
+      install`). Spec prompt is service-aware. P7 records `services[]`. Local: **42/42 fakes** (+4:
+      config pin, template decl, P3 spin+IP record, iteration env injection) + contract 11/11 + hygiene
+      clean. *Server: rebuild sandbox image (psycopg) + restart broker daemon; `build … --template
+      gradio-rag-pgvector` → pgvector spun, reached by IP, core retrieval met, clean-room green, no
+      leaks.*
 - **Acceptance:** a planted test-gaming attempt is caught by the ledger/scanner; clean-room gates
       a known-bad build red; broker runs out-of-process (orchestrator has no docker.sock).
       *(S1 proves the gaming-caught half via fakes; the on-server adversarial demo lands with S2's

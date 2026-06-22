@@ -71,8 +71,9 @@ class RemoteBroker:
         return RemoteSandbox(self, r["name"])
 
     def create_service(self, *, image: str, name: str, env: dict | None = None,
-                       pinned_tag: str | None = None) -> RemoteSandbox:
-        r = self._call("create_service", image=image, name=name, env=env, pinned_tag=pinned_tag)
+                       pinned_tag: str | None = None, ready_cmd: str | None = None) -> RemoteSandbox:
+        r = self._call("create_service", image=image, name=name, env=env, pinned_tag=pinned_tag,
+                       ready_cmd=ready_cmd, _timeout=180)
         return RemoteSandbox(self, r["name"])
 
     def service_ip(self, sandbox: RemoteSandbox) -> str:

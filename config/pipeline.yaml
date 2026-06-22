@@ -34,14 +34,17 @@ license_policy:
 # Stock vendor images only, from REACHABLE registries (Docker Hub). Pin exact tags before use; check
 # registry reachability at ingest (P0 capability manifest). ES proper waits on docker.elastic.co.
 vetted_services:
+  - name: pgvector
+    image: pgvector/pgvector
+    pinned_tag: "pg16"               # Postgres 16 + pgvector (reachable on Docker Hub; pin to a digest for prod)
+    role: postgres+vector
+    ready_cmd: "pg_isready -U postgres"
+    env:
+      POSTGRES_PASSWORD: pf
   - name: milvus
     image: milvusdb/milvus
     pinned_tag: "<pin-before-use>"
     role: vector-db
-  - name: pgvector
-    image: pgvector/pgvector
-    pinned_tag: "<pin-before-use>"
-    role: postgres+vector
   - name: opensearch
     image: opensearchproject/opensearch
     pinned_tag: "<pin-before-use>"
