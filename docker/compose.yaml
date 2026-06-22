@@ -1,0 +1,64 @@
+# poc-foundry compose. NO LiteLLM (roles bind their own endpoint via build_chat_model). Run on the
+# server (no host docker, rule #3). Shared services (SearXNG + Langfuse) live in ../service-depot and
+# are reached over the external `depot-net` network — bring them up first: `./depot up stage-3` there.
+#
+# No top-level `version:` (the server runs Compose v2; it treats `version:` as obsolete).
+#
+# Build all three images:
+#   docker compose -f docker/compose.yaml build app sandbox proxy
+# Smoke an image without wiring topology (the broker spins sandbox/proxy per build at M1+):
+#   docker compose -f docker/compose.yaml run --rm sandbox
+#   docker compose -f docker/compose.yaml run --rm proxy   # Ctrl-C to stop (foreground squid)
+#
+# Host-specific bits (PF_WORKSPACE_DIR local-disk mount, the docker.sock mount at M1, model paths)
+# go in docker-compose.override.yml (gitignored) — see docker-compose.override.yml.example.
+
+services:
+  # ---- Orchestrator (run via `docker compose run`, not auto-started). Holds the secrets. ----
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: poc-foundry-app
+    container_name: pf-app
+    profiles: ["app"]
+    env_file:
+      - ../.env
+    extra_hosts:
+      # Early bring-up convenience. M1 routes the orchestrator's OWN egress through the proxy too
+      # (Finding-0) — this host-gateway path is for pre-proxy spikes only.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../config:/app/config            # edit pipeline.yaml without rebuilding
+      - ../src:/app/src                  # code changes need no image rebuild
+      - ../scripts:/app/scripts
+      # builds/ = emitted PoCs (server-local, gitignored). On NFS PRE-CREATE first (root-squash blocks
+      # mkdir): `mkdir -p ../builds && chmod 777 ../builds`.
+      - ../builds:/app/builds
+      # Sandbox workspaces + uv cache live on LOCAL disk via PF_WORKSPACE_DIR — mount that host path
+      # in docker-compose.override.yml (it's host-specific, gitignored).
+    networks:
+      - depot-net
+
+  # ---- Sandbox image (BUILD/SMOKE target). At runtime the broker spins this `--runtime kata` as a
+  #      fresh VM per iteration on a per-build internal network — NOT a long-running compose service.
+  sandbox:
+    build:
+      context: ./sandbox
+    image: poc-foundry-sandbox
+    profiles: ["images"]
+    # No network / no run in normal operation; `run --rm sandbox` just executes the version smoke.
+
+  # ---- Egress proxy image (BUILD/SMOKE target). At runtime the broker spins it dual-homed: one leg
+  #      on the per-build internal:true network, the other with allowlisted egress. ----
+  proxy:
+    build:
+      context: ./proxy
+    image: poc-foundry-proxy
+    profiles: ["images"]
+    env_file:
+      - ../.env                          # supplies PF_VLLM_ALLOW_HOST for the private-host exception
+
+networks:
+  depot-net:
+    external: true

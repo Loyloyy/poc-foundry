@@ -1,0 +1,33 @@
+# ── Secrets & host-specific config (data-hygiene rule #1) ────────────────────
+.env
+.env.*
+!.env.example
+docker-compose.override.yml
+build_env.json                 # gitignored sidecar: real role→model-id map
+
+# ── Build outputs (server-local, gitignored — publishing a PoC is a human call)
+builds/
+workspaces/                    # local-disk sandbox workspaces + uv cache
+*.sqlite                       # checkpoint / state DBs
+
+# ── Diagnostic run artifacts. Bake-off traces can capture the model endpoint in an error message
+#    (HTTPError repr includes the URL) — NEVER commit them. Also just run noise.
+**/traces/
+scripts/m0b_bakeoff/traces/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+.DS_Store
+*.log
+logs/
+.pytest_cache/
+.ruff_cache/

@@ -1,0 +1,13 @@
+# Copy to docker-compose.override.yml (gitignored, rule #1) on the server for HOST-SPECIFIC bits that
+# must never be tracked: local-disk paths, the docker socket (M1), GPU reservations, model paths.
+# Compose auto-merges an override sitting next to the base file. Example only — adjust to the host.
+
+services:
+  app:
+    volumes:
+      # Sandbox workspaces + uv cache on LOCAL disk (design §2; never NFS). Match PF_WORKSPACE_DIR in
+      # .env. Pre-create + chmod on the host first.
+      - /path/to/local-disk/workspaces:/workspaces
+      # M1 ONLY — the in-process broker stub drives host Docker to spin Kata VMs. Mounting the socket
+      # is the risk-accepted M1 residual (record it in DECISIONS at M1 wiring; runs egress-isolated).
+      # - /var/run/docker.sock:/var/run/docker.sock

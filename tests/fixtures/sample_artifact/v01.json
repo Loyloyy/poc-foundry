@@ -1,0 +1,37 @@
+{
+  "id": "dra-20260101-000000-abc123-m",
+  "version": 1,
+  "parent_id": null,
+  "generated_at": "2026-01-01T00:00:00+00:00",
+  "model_versions": {
+    "roles": {"lead": "strategic", "extract": "smart"},
+    "coverage": {"fetch_attempts": 5, "fetched_ok": 4, "blocked_or_failed": 1, "blocked_hosts": ["example-blocked.test"]}
+  },
+  "topic": "Synthetic RAG-over-docs PoC (fixture)",
+  "brief": "A small, hygiene-clean fixture artifact for poc-foundry contract tests. Not a real run.",
+  "seed_pages": ["RAG"],
+  "findings": [
+    {"claim": "A gradio chat over a local corpus with a vector store demonstrates grounded retrieval.", "evidence_ids": ["src-001"], "confidence": 0.9},
+    {"claim": "pgvector is a low-friction vector store for a single-node PoC.", "evidence_ids": ["src-001", "src-002"], "confidence": 0.75}
+  ],
+  "recommended_architectures": [
+    {"name": "Gradio RAG", "summary": "Chat UI -> retriever -> vector store -> LLM with citations.", "components": ["gradio", "retriever", "pgvector", "vllm"], "diagram_hint": "linear pipeline"}
+  ],
+  "tech_stack": [
+    {"layer": "ui", "choice": "gradio", "rationale": "fast runnable demo", "alternatives": ["streamlit"]},
+    {"layer": "vector_store", "choice": "pgvector", "rationale": "single-node simplicity", "alternatives": ["milvus"]}
+  ],
+  "reference_repos": [
+    {"name": "example/rag-demo", "url": "https://github.com/example/rag-demo", "license": "MIT", "why_relevant": "reference RAG layout", "stars": 1200, "last_commit": "2025-12-15", "archived": false, "code_gathered": true, "reproducibility": "HIGH"}
+  ],
+  "implementation_steps": [
+    {"order": 1, "action": "scaffold gradio chat + retriever interface", "tools": ["gradio"], "est_effort": "S"},
+    {"order": 2, "action": "wire pgvector + embed a labeled mini-corpus", "tools": ["pgvector"], "est_effort": "M"}
+  ],
+  "open_questions": ["Which embedding model is host-served vs pre-staged?"],
+  "sources": [
+    {"id": "src-001", "url": "https://github.com/example/rag-demo", "title": "rag-demo", "origin": "code", "fetched_at": "2026-01-01T00:00:00+00:00"},
+    {"id": "src-002", "url": "https://example.com/pgvector-notes", "title": "pgvector notes", "origin": "web", "fetched_at": "2026-01-01T00:00:00+00:00"}
+  ],
+  "report_markdown": "# Synthetic RAG PoC (fixture)\n\nThis is a hygiene-clean fixture, not a real Stage-2 run.\n"
+}

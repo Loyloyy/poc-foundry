@@ -1,0 +1,21 @@
+# Build context is the repo root (compose `context: ..`). Keep secrets + bulky/gitignored paths out.
+.git
+.gitignore
+**/__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+
+# Secrets / host-specific (rule #1) — must NEVER enter an image layer.
+.env
+.env.*
+!.env.example
+docker-compose.override.yml
+build_env.json
+
+# Build outputs (server-local, gitignored).
+builds/
+workspaces/
+logs/
+*.sqlite

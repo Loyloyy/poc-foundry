@@ -1,0 +1,79 @@
+# poc-foundry pipeline configuration — NON-SECRET knobs only.
+# Secrets + host/model bindings live in the gitignored .env (see .env.example). Every value here is
+# also overridable by the matching PF_* env var (env wins). Tune caps from caps_hit[] evidence, not
+# guesswork (design §5.8). Values below are conservative scaffolding defaults — revisit after M0/M1.
+
+# ── Escalation ladder & budgets (design §5.8) ───────────────────────────────
+# Primary budgets are DETERMINISTIC under load (attempts + LLM-call counts); wall-clock is secondary
+# and generous (one vLLM serves coder + critic + live-tests + the PoC runtime).
+budgets:
+  max_fix_attempts: 3              # PF_MAX_FIX_ATTEMPTS — fixes from traceback before forced descope/replan
+  stuck_research_after: 2          # PF_STUCK_RESEARCH_AFTER — same error signature N times → research escalation
+  max_iterations: 8                # PF_MAX_ITERATIONS — cap, NOT the plan's anchor (plan = small diffs)
+  max_llm_calls_per_iter: 60       # PF_MAX_LLM_CALLS_ITER
+  max_llm_calls_per_run: 400       # PF_MAX_LLM_CALLS_RUN
+  max_iter_wall_clock_s: 1800      # PF_MAX_ITER_WALL_CLOCK_S (secondary, generous)
+  max_run_wall_clock_s: 14400      # PF_MAX_RUN_WALL_CLOCK_S (secondary, generous)
+  toolcalls_per_attempt: 25        # PF_TOOLCALLS_PER_ATTEMPT — coder bounded-loop per-attempt budget
+
+# ── Critic gate ─────────────────────────────────────────────────────────────
+critic:
+  fix_limit_k: 3                   # `fix` verdicts before forced descope-or-replan
+  respec_cap: 1                    # spec revisions allowed (versioned)
+  degraded_fix_limit_k: 2          # lower K when critic.family == coder.family (degraded-critic mode)
+
+# ── License gate (design §3.15) ─────────────────────────────────────────────
+# permissive → may adapt code/**; copyleft/unknown → patterns-only, never copied, flagged in docs.
+license_policy:
+  permissive: [MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Unlicense]
+  copyleft_patterns_only: [GPL-2.0, GPL-3.0, AGPL-3.0, LGPL-2.1, LGPL-3.0, MPL-2.0]
+  unknown_policy: patterns-only    # unknown/missing license → patterns-only + flag
+
+# ── Vetted sibling services (design §5.6) ───────────────────────────────────
+# Stock vendor images only, from REACHABLE registries (Docker Hub). Pin exact tags before use; check
+# registry reachability at ingest (P0 capability manifest). ES proper waits on docker.elastic.co.
+vetted_services:
+  - name: milvus
+    image: milvusdb/milvus
+    pinned_tag: "<pin-before-use>"
+    role: vector-db
+  - name: pgvector
+    image: pgvector/pgvector
+    pinned_tag: "<pin-before-use>"
+    role: postgres+vector
+  - name: opensearch
+    image: opensearchproject/opensearch
+    pinned_tag: "<pin-before-use>"
+    role: search/lexical
+
+# ── Egress allowlist (design §5.2; the proxy is the sole exit) ───────────────
+# The orchestrator's own egress goes through this proxy too (Finding-0). The VM reaches the proxy on
+# the internal network; the proxy's other leg reaches the single named vLLM host. The REAL vLLM host
+# is an .env value (PF_VLLM_ALLOW_HOST) — never list it here (data hygiene).
+egress_allowlist:
+  hosts:
+    - github.com
+    - codeload.github.com
+    - objects.githubusercontent.com
+    - raw.githubusercontent.com
+    - api.github.com
+    - pypi.org
+    - files.pythonhosted.org
+    - huggingface.co
+    - registry-1.docker.io
+    - production.cloudflare.docker.com
+  # The single private-host exception (vLLM) is injected from .env, not tracked here.
+  vllm_host_from_env: PF_VLLM_ALLOW_HOST
+
+# ── Templates (design §5.3) ─────────────────────────────────────────────────
+templates:
+  default: gradio-chatbot
+  available: [gradio-chatbot, gradio-generic-app]
+
+# ── Drivers (input shaping, not pipeline shape; design §1.1) ────────────────
+drivers:
+  default: tech-scout             # tech-scout | customer | workshop
+  interactive_spec_gate:
+    customer: true                # spec approval gate ON for customer driver
+    tech-scout: false
+    workshop: false

@@ -1,0 +1,16 @@
+# Normalize line endings so shell scripts keep LF after a Windows-host commit/checkout. The proxy's
+# in-container entrypoint.sh and the M0 spike scripts run under /bin/sh|bash on Linux — a CRLF shebang
+# breaks them. Force LF for code/text; treat known binaries as binary.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.py   text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+Dockerfile* text eol=lf
+
+# (add binary patterns here if any are ever committed, e.g.)
+# *.png binary

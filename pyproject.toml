@@ -1,0 +1,46 @@
+[project]
+name = "poc-foundry"
+version = "0.1.0"
+description = "Stage 3 PoC foundry: turns ONE Stage-2 DeepResearchArtifact into a verified, runnable, documented PoC built inside Kata Containers VM sandboxes, gated by a deterministic LangGraph harness."
+# The pipeline (langchain/langgraph/deepagents) needs >=3.11 and runs only in containers. The local
+# dev box is 3.10 — pure pydantic/stdlib modules (e.g. the vendored artifact schema) still import there.
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2",
+]
+
+[project.optional-dependencies]
+# THE PIPELINE RUNTIME — everything to actually RUN the foundry (vs. read artifacts). Requested only
+# at image build (docker/Dockerfile). A bare install is schema-light. Pins firm up as slices land.
+runtime = [
+  "langgraph>=0.2",
+  "langchain>=1.0",
+  "langchain-openai>=0.3",
+  "deepagents==0.6.7",            # research phase only; pinned (beta) — bump after changelog review
+  "langgraph-checkpoint-sqlite>=2.0",
+  "python-dotenv",
+  "pyyaml",
+  "httpx",
+  "trafilatura>=1.8",            # vendored Stage-2 scrape tool
+]
+# Observability — optional self-hosted Langfuse (../service-depot, project stage-3-poc). Lazy-imported
+# + env-gated (PF_TRACING) so the core stays import-light when tracing is off.
+obs = ["langfuse>=3"]
+# Web UI (M3) — FastAPI control/presentation over the headless contract; NO pipeline logic.
+ui = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "sse-starlette>=2"]
+test = ["pytest>=8"]
+
+# ── Stage-2 schema dependency (design §5.10; ledger) ─────────────────────────
+# END-STATE (not yet wired — see DECISIONS #2): import the DeepResearchArtifact schema from Stage 2
+# as a SHA-pinned git dep so it can't drift. Base install of ai-engineer-research is schema-only
+# (pydantic), so no [research] extra is needed to read artifacts.
+#   "ai-engineer-research @ git+https://github.com/<org>/ai-engineer-research.git@<full-40-char-sha>",
+# STOPGAP for M0/M1: a vendored copy lives under src/poc_foundry/artifact/ (mirror; see DECISIONS #2).
+# Swap the vendored copy for the line above once the user confirms Stage 2 is pushed at a known SHA.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
