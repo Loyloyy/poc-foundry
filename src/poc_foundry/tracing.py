@@ -100,12 +100,14 @@ class _LangfuseTracer(_Tracer):
     so the TRACE name comes from the root observation's name (`build/<id>`) and tags/session ride in
     `metadata`.
 
-    ONE TRACE PER BUILD: `build` records the root observation's `trace_id` and every later span/event
-    pins to it via `trace_context` — so even when LangGraph runs a node without propagating the OTEL
-    context (which otherwise spawns a fresh root trace per span → the scattered-traces wart), all spans
-    land inside the single `build/<id>` trace. `trace_context` is passed defensively (fallback for SDKs
-    that don't accept the kwarg), so this can't regress. Every operation is guarded — on ANY failure it
-    degrades to a no-op span so a tracing problem can never halt a build."""
+    ONE TRACE PER BUILD (explicit parenting). LangGraph runs nodes WITHOUT propagating the OTEL
+    context, so relying on the contextvar (or a loose trace_id pin) scatters spans into many root
+    traces. Instead, `build` keeps the live root observation and every later span/event is created
+    FROM that root object (`root.start_as_current_observation(...)` / `root.create_event(...)`), which
+    sets the parent explicitly by object reference — thread or no thread — so the whole build lands in
+    the single `build/<id>` trace. Falls back to a client-level (own-trace) span when no build is
+    active or the obj lacks the method. Every operation is guarded — on ANY failure it degrades to a
+    no-op so a tracing problem can never halt a build."""
 
     enabled = True
 
@@ -114,45 +116,53 @@ class _LangfuseTracer(_Tracer):
         # v4: start_as_current_observation (as_type defaults to 'span'); v3: start_as_current_span.
         self._span_cm = (getattr(client, "start_as_current_observation", None)
                          or getattr(client, "start_as_current_span", None))
-        self._trace_id = None   # set for the duration of a build → every span/event pins to it
+        self._root = None   # the live build root observation; children attach to it explicitly
 
-    def _start(self, name: str, *, input=None, metadata=None):
-        """Open a span ctx-mgr, pinned to the active build trace_id when set. Returns the ctx-mgr or
-        None (→ caller yields a no-op). Falls back to no-trace_context for SDKs without the kwarg."""
-        if self._span_cm is None:
-            return None
-        kw = {"name": name, "input": input}
+    def _open(self, name: str, *, input=None, metadata=None):
+        """Return a span ctx-mgr nested under the active build root (explicit parent, robust to
+        LangGraph not propagating the OTEL context), else a client-level (own-trace) span, else None."""
+        kw = {"name": name}
+        if input is not None:
+            kw["input"] = input
         if metadata is not None:
             kw["metadata"] = metadata
-        tc = {"trace_id": self._trace_id} if self._trace_id else None
-        try:
-            if tc is not None:
+        root = self._root
+        if root is not None:
+            starter = getattr(root, "start_as_current_observation", None)   # child of the build root
+            if starter is not None:
                 try:
-                    return self._span_cm(trace_context=tc, **kw)
-                except TypeError:
-                    pass   # SDK signature without trace_context — fall through
+                    return starter(**kw)
+                except Exception:  # noqa: BLE001 — fall back to a client-level span
+                    pass
+        if self._span_cm is None:
+            return None
+        try:
             return self._span_cm(**kw)
         except Exception:  # noqa: BLE001
             return None
 
     @contextlib.contextmanager
     def build(self, build_id: str, tags=None):
-        cm = self._start(f"build/{build_id}", input={"build_id": build_id},
-                         metadata={"session_id": build_id, "tags": list(tags or [])})
-        if cm is None:
+        if self._span_cm is None:
+            yield _NoopSpan()
+            return
+        try:
+            cm = self._span_cm(name=f"build/{build_id}", input={"build_id": build_id},
+                               metadata={"session_id": build_id, "tags": list(tags or [])})
+        except Exception:  # noqa: BLE001
             yield _NoopSpan()
             return
         with cm as span:
-            prev = self._trace_id
-            self._trace_id = getattr(span, "trace_id", None) or prev   # pin children to THIS trace
+            prev = self._root
+            self._root = span                # children attach to THIS root by object reference
             try:
                 yield _LangfuseSpan(span)
             finally:
-                self._trace_id = prev
+                self._root = prev
 
     @contextlib.contextmanager
     def span(self, name: str, **attrs):
-        cm = self._start(name, input=(attrs or None))
+        cm = self._open(name, input=(attrs or None))
         if cm is None:
             yield _NoopSpan()
             return
@@ -161,13 +171,10 @@ class _LangfuseTracer(_Tracer):
 
     def event(self, name: str, **attrs) -> None:
         try:
-            tc = {"trace_id": self._trace_id} if self._trace_id else None
-            if tc is not None:
-                try:
-                    self._client.create_event(name=name, input=(attrs or None), trace_context=tc)
-                    return
-                except TypeError:
-                    pass
+            root = self._root
+            if root is not None and hasattr(root, "create_event"):
+                root.create_event(name=name, input=(attrs or None))   # event on the build trace
+                return
             self._client.create_event(name=name, input=(attrs or None))
         except Exception:  # noqa: BLE001
             pass

@@ -207,73 +207,90 @@ def test_chat_text_emits_llm_span(monkeypatch):
 
 
 # ── the real _LangfuseTracer wired against a fake langfuse v4 client (no langfuse installed) ───
+# One-trace-per-build via EXPLICIT parenting: children are created FROM the build root observation
+# (root.start_as_current_observation / root.create_event), so each records its parent by object.
 class _FakeObs:
-    def __init__(self, rec, trace_id="trace-xyz"):
+    def __init__(self, rec, name):
         self.rec = rec
-        self.trace_id = trace_id
+        self.name = name
+        self.trace_id = "trace-xyz"
 
     def update(self, **kw):
-        self.rec["updates"].append(kw)
+        self.rec["updates"].append((self.name, kw))
 
-    def create_event(self, **kw):
-        self.rec["events"].append(kw)
+    def create_event(self, *, name, input=None, **kw):
+        self.rec["events"].append({"name": name, "input": input, "parent": self.name})
+
+    def start_as_current_observation(self, *, name, input=None, metadata=None, as_type="span", **kw):
+        self.rec["obs"].append({"name": name, "input": input, "metadata": metadata, "parent": self.name})
+        return _FakeObsCM(self.rec, name)
+
+    def end(self):
+        pass
 
 
 class _FakeObsCM:
-    def __init__(self, rec):
+    def __init__(self, rec, name):
         self.rec = rec
+        self.name = name
 
     def __enter__(self):
-        return _FakeObs(self.rec)
+        return _FakeObs(self.rec, self.name)
 
     def __exit__(self, *a):
         return False
 
 
 class _FakeV4Client:
-    """Mimics the langfuse 4.x surface we use: start_as_current_observation / create_event / flush
-    (including the `trace_context` kwarg the consolidation passes to pin spans to one build trace)."""
+    """Mimics the langfuse 4.x surface we use: start_as_current_observation / create_event / flush.
+    The returned observation itself can spawn children (explicit parenting) — see `_FakeObs`."""
 
     def __init__(self):
         self.rec = {"obs": [], "events": [], "updates": [], "flushed": 0}
 
-    def start_as_current_observation(self, *, name, input=None, metadata=None, as_type="span",
-                                     trace_context=None, **kw):
-        self.rec["obs"].append({"name": name, "input": input, "metadata": metadata,
-                                "trace_context": trace_context})
-        return _FakeObsCM(self.rec)
+    def start_as_current_observation(self, *, name, input=None, metadata=None, as_type="span", **kw):
+        self.rec["obs"].append({"name": name, "input": input, "metadata": metadata, "parent": None})
+        return _FakeObsCM(self.rec, name)
 
-    def create_event(self, *, name, input=None, trace_context=None, **kw):
-        self.rec["events"].append({"name": name, "input": input, "trace_context": trace_context})
+    def create_event(self, *, name, input=None, **kw):
+        self.rec["events"].append({"name": name, "input": input, "parent": None})
 
     def flush(self):
         self.rec["flushed"] += 1
+
+
+class _BareObsCM:
+    """A v3-style observation that does NOT expose start_as_current_observation (so the tracer must
+    fall back to the client-level span creator)."""
+
+    def __enter__(self):
+        return type("_BareObs", (), {})()      # no start_as_current_observation / create_event
+
+    def __exit__(self, *a):
+        return False
 
 
 class _FakeV3Client:
     """Mimics the older v3 surface (only start_as_current_span) — feature-detection must still work."""
 
     def __init__(self):
-        self.rec = {"obs": [], "events": [], "updates": [], "flushed": 0}
+        self.rec = {"obs": [], "flushed": 0}
 
     def start_as_current_span(self, *, name, input=None, metadata=None, **kw):
-        self.rec["obs"].append({"name": name, "input": input, "metadata": metadata})
-        return _FakeObsCM(self.rec)
-
-    def create_event(self, *, name, input=None, **kw):
-        self.rec["events"].append({"name": name, "input": input})
+        self.rec["obs"].append(name)
+        return _BareObsCM()
 
     def flush(self):
         self.rec["flushed"] += 1
 
 
-def test_langfuse_tracer_targets_v4_observation_api():
+def test_langfuse_tracer_one_trace_per_build_explicit_parenting():
     from poc_foundry.tracing import _LangfuseTracer
 
     c = _FakeV4Client()
     t = _LangfuseTracer(c)
-    # nest the child span + event INSIDE the build (as the real pipeline does) so the consolidation
-    # (one trace per build) is exercised: child spans/events must pin to the build's trace_id.
+    # nest the child span + event INSIDE the build (as the real pipeline does): both must be created
+    # FROM the build root → parent == "build/poc-1" → one trace, not scattered roots.
     with t.build("poc-1", tags=["tech-scout", "gradio-chatbot"]) as bsp:
         bsp.update(output="ok")
         with t.span("broker.exec", cmd="pytest -q") as ssp:
@@ -282,28 +299,25 @@ def test_langfuse_tracer_targets_v4_observation_api():
     t.flush()
 
     obs = {o["name"]: o for o in c.rec["obs"]}
-    assert "build/poc-1" in obs                    # root obs name becomes the trace name (v4 has no update_trace)
-    assert "broker.exec" in obs
-    assert c.rec["updates"]                        # span.update reached the obs
-    assert c.rec["events"] and c.rec["events"][0]["name"] == "proxy.denials"
+    assert obs["build/poc-1"]["parent"] is None              # the root (its name = the trace name)
+    assert obs["broker.exec"]["parent"] == "build/poc-1"     # child attached to the build root
+    assert c.rec["events"][0] == {"name": "proxy.denials", "input": {"count": 2}, "parent": "build/poc-1"}
     assert c.rec["flushed"] == 1
     # the build obs carries session_id + tags in metadata (v4 exposes no trace-tag setter)
     assert obs["build/poc-1"]["metadata"]["session_id"] == "poc-1"
     assert "tech-scout" in obs["build/poc-1"]["metadata"]["tags"]
-    # ONE TRACE PER BUILD: the child span + the event pin to the build's trace_id (trace-xyz)
-    assert obs["broker.exec"]["trace_context"] == {"trace_id": "trace-xyz"}
-    assert c.rec["events"][0]["trace_context"] == {"trace_id": "trace-xyz"}
 
 
-def test_langfuse_tracer_no_trace_pin_outside_build():
-    # a span created OUTSIDE any build has no active trace_id → no trace_context forced (own trace).
+def test_langfuse_tracer_span_outside_build_uses_client():
+    # a span created OUTSIDE any build has no root → it's a client-level span (its own trace).
     from poc_foundry.tracing import _LangfuseTracer
 
     c = _FakeV4Client()
     t = _LangfuseTracer(c)
     with t.span("broker.exec", cmd="x"):
         pass
-    assert c.rec["obs"][0]["trace_context"] is None
+    assert c.rec["obs"][0] == {"name": "broker.exec", "input": {"cmd": "x"},
+                               "metadata": None, "parent": None}
 
 
 def test_langfuse_tracer_falls_back_to_v3_span_api():
@@ -311,8 +325,11 @@ def test_langfuse_tracer_falls_back_to_v3_span_api():
 
     c = _FakeV3Client()
     t = _LangfuseTracer(c)
-    with t.span("spec") as sp:
-        sp.update(output="x")
+    # the v3 obs lacks start_as_current_observation, so even inside a build the child falls back to
+    # the client-level start_as_current_span (feature-detection both ways).
+    with t.build("poc-9"):
+        with t.span("spec") as sp:
+            sp.update(output="x")
     t.flush()
-    assert [o["name"] for o in c.rec["obs"]] == ["spec"]
+    assert c.rec["obs"] == ["build/poc-9", "spec"]
     assert c.rec["flushed"] == 1

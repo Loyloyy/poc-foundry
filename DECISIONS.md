@@ -792,11 +792,16 @@ exec/VERIFY/gates/critic/clean-room/proxy denials; and our LLM calls go through 
 - **ONE TRACE PER BUILD (consolidation, 2026-06-24).** The first validated run also emitted a SCATTER
   of standalone top-level traces (`broker.exec`/`create`/`provision`/`destroy`) alongside the rich
   `build/<id>` tree: (a) `broker.destroy`+flush ran in `core`'s outer `finally`, OUTSIDE the build span;
-  (b) LangGraph can run a node without propagating the OTEL contextvar, so those spans started fresh
-  root traces. Fix: `build` records the root obs `trace_id` and every later `span`/`event` pins to it
-  via `trace_context` (defensive — falls back to no-kwarg for older SDKs, so it can't regress), and
-  teardown was moved INSIDE the build span. Volume itself is a non-issue — one trace with ~20–50 nested
-  observations is the intended Langfuse model and self-hosted handles it easily; the goal was a single
-  drill-down tree, not fewer observations. Local: 74 fakes (the v4 test now nests a child span+event
-  and asserts both pin to the build trace_id; a second asserts no pin OUTSIDE a build). *Re-validate the
-  single-trace shape opportunistically on the next server build — non-blocking.*
+  (b) **LangGraph runs nodes WITHOUT propagating the OTEL context**, so spans created in a node started
+  fresh root traces. First attempt (pin children to the build `trace_id` via `trace_context`) BACKFIRED
+  on the server — the 22-obs tree got mis-named `broker.destroy` and the rest still scattered. The
+  working fix is **explicit parenting**: `build` keeps the live root observation and every later span/
+  event is created FROM that root object (`root.start_as_current_observation(...)` /
+  `root.create_event(...)`), setting the parent by object reference — independent of thread/context —
+  so the whole build lands in the single `build/<id>` trace (falls back to a client-level span when no
+  build is active or the obj lacks the method). Teardown moved INSIDE the build span. Volume itself is
+  a non-issue — one trace with ~20–50 nested observations is the intended Langfuse model and self-hosted
+  handles it easily; the goal was a single drill-down tree, not fewer observations. Local: 74 fakes (a
+  v4 test asserts the child span+event get `parent == build/<id>`; one asserts a span OUTSIDE a build is
+  client-level; the v3 fallback uses `start_as_current_span`). *Re-validating the single-trace shape on
+  the server (this is the test in flight).*
