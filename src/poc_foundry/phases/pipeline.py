@@ -262,10 +262,20 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     test_file = f"test_iter_{i}.py"
     strict_red_first = (i == 0)   # iteration 0 runs against the scaffold echo-stub — a real test MUST be red
 
-    test_src = _tester_write(ctx, it.acceptance, it.goal, it.interface)
     staging_tests = ctx.staging_dir / "tests"
     staging_tests.mkdir(parents=True, exist_ok=True)     # ACCUMULATE: prior iterations' tests stay (cumulative suite)
-    (staging_tests / test_file).write_text(test_src)
+    test_path = staging_tests / test_file
+    if test_path.exists():
+        # FIX-RETRY of this iteration (the critic granted another go): REUSE the same staged test —
+        # don't re-author it. Saves a tester call and keeps the coder's target STABLE so it converges
+        # instead of chasing a freshly-generated (possibly different) test each round. The workspace was
+        # already rolled back to the last green commit, so the coder retries cleanly. (P2 clears the
+        # staging dir on a fresh plan, so a reused index only ever means a same-plan fix-retry.)
+        test_src = test_path.read_text()
+        ctx.say(f"P4 iter{i}: reusing the staged test (fix-retry — no re-author)")
+    else:
+        test_src = _tester_write(ctx, it.acceptance, it.goal, it.interface)
+        test_path.write_text(test_src)
     chown_to_builder(staging_tests)
 
     base_sha = state.commit_sha or state.scaffold_sha or "HEAD"
@@ -377,7 +387,10 @@ def _critic_adequacy(ctx: Ctx, criterion: str, test_src: str):
     from poc_foundry.state import AdequacyReview
     try:
         from poc_foundry.models import build_chat_model
-        llm = build_chat_model("critic").with_structured_output(AdequacyReview)
+        # Give the structured-output call headroom: a reasoning model can spend tokens "thinking" and
+        # hit finish_reason=length mid-JSON (→ LengthFinishReasonError) on the default budget. The
+        # verdict is short; the extra ceiling just avoids truncation + a wasted call.
+        llm = build_chat_model("critic", max_tokens=8000).with_structured_output(AdequacyReview)
         rv = llm.invoke([("system", prompts.CRITIC_SYSTEM),
                          ("human", prompts.critic_adequacy_prompt(criterion, test_src, ctx.template.interface))])
         return AdequacyReview(**rv) if isinstance(rv, dict) else rv

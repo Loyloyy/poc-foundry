@@ -168,7 +168,7 @@ First on-server M0 run validated two of the three gate spikes.
 
 ## #8 — M0(b) DECISION: bespoke loop takes the CoderEngine seat (2026-06-22)
 
-First on-server bake-off (GLM-5.1-NVFP4 via the `coder` role, runc). Results — tasks passed:
+First on-server bake-off (the on-prem model via the `coder` role, runc). Results — tasks passed:
 **bespoke 4/4 (whole-file) · bespoke 4/4 (unified diff) · OpenCode 1/4.**
 
 | task | kind | bespoke whole | bespoke diff | OpenCode |
@@ -191,7 +191,7 @@ clearly usable (the model handles unified diffs). M1 keeps the edit-format-adapt
 weaker models, diff for stronger), defaulting to whole.
 
 **Honest caveat on OpenCode's 1/4 (do NOT over-read it):** OpenCode passed fix_logic but capped out on
-the three *easier* tasks — inconsistent with `poc-builder-prework`'s finding that OpenCode+GLM one-shots
+the three *easier* tasks — inconsistent with `poc-builder-prework`'s finding that OpenCode + the model one-shots
 single-component tasks. That points to an artifact in THIS M0(b) OpenCode adapter (the scripted
 `opencode run` invocation / model binding), NOT a real OpenCode weakness. It doesn't change the decision
 (bespoke won outright; OpenCode was only the diagnostic control). Flag: revisit the OpenCode adapter when
@@ -300,7 +300,7 @@ workspace emitted); NOT_BUILDABLE short-circuits to `not-buildable`; broker inva
 
 **M1 GATE GREEN on the server (2026-06-22).** One fixture → `builds/poc-…/` with `status=done`,
 `demonstrates_core_value=yes`, **clean-room install=test=demo all TRUE**, on real Kata + the egress
-proxy + GLM. P1 spec quality is good (GLM produced a coherent 5-criterion RAG-citation spec, one core;
+proxy + the model. P1 spec quality is good (the model produced a coherent 5-criterion RAG-citation spec, one core;
 the M0(c) spec-grading tail is satisfied). Four server-only fixes were needed (all logged in
 DEV_NOTES "M1 broker + pipeline" + the new gotchas):
 1. **app image: install `docker-cli`, not `docker.io`.** Debian 13 split the monolith — `docker.io
@@ -403,7 +403,7 @@ happy-path re-run.
   failure gets bounded retries before an honest descope. P4 exposes `pending_test_src`/
   `pending_criterion` for the critic to review.
 - **Degraded-critic mode (design §5.4) — and a principled honesty call.** `models.same_family(a,b)`
-  compares the resolved served-model ids; on this server ALL roles are one GLM → **degraded=True**.
+  compares the resolved served-model ids; on this server ALL roles are one on-prem model → **degraded=True**.
   Degraded mode lowers the fix budget K (`degraded_fix_limit_k=2` vs `fix_limit_k=3`) and sets
   `security.degraded_critic=true`. **Decision:** in degraded mode the critic's **adequacy verdict is
   ADVISORY (recorded as a caveat), never blocking** — a critic sharing the coder's family cannot
@@ -411,7 +411,7 @@ happy-path re-run.
   (inventory ledger / red-first / diff-scanner, S1) still gate; the trivially-true-test case is caught
   by red-first regardless. Blocking adequacy returns automatically when a distinct frontier `critic`
   endpoint is configured (`same_family → False`). Rationale: (a) preserves the M1/S1-proven server
-  happy path — a same-family GLM critic won't accidentally descope its own good 5-test suite; (b) is
+  happy path — a same-family critic won't accidentally descope its own good 5-test suite; (b) is
   honest about what a degraded critic can certify; (c) matches §5.4's "critic-independence is
   contingent on frontier egress; until then degraded mode applies and is recorded."
 - **Critic adequacy never crashes the build.** `_critic_adequacy` defaults to `adequate=True` if the

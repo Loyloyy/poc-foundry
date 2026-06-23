@@ -589,3 +589,51 @@ def test_abandoned_iteration_rolls_back_to_last_green(tmp_path, monkeypatch):
 
     core_txt = (ws / "core.py").read_text()
     assert "M0 only" in core_txt and "BAD" not in core_txt           # last GREEN, not the failed edit
+
+
+def test_fix_retry_reuses_staged_test_no_reauthor(tmp_path, monkeypatch):
+    """A critic `fix` re-runs the SAME iteration; P4 must REUSE the existing staged test, not call the
+    tester again (saves a call + keeps the coder's target stable). The pgvector run showed iterations
+    re-running several times — re-authoring each round was pure waste."""
+    import poc_foundry.models as M
+    from poc_foundry.coder import BespokeCoder
+    from poc_foundry.phases import Ctx, load_template, p0_ingest, p1_spec, p2_plan, p3_scaffold, p4_iterate
+    from poc_foundry.state import AdequacyReview
+
+    counts = {"tester": 0}
+    spec = _spec()
+
+    class _S:
+        def invoke(self, m):
+            return AdequacyReview(adequate=True, reason="ok")
+
+    class _Chat:
+        def with_structured_output(self, model):
+            return _S() if model is AdequacyReview else type("X", (), {"invoke": lambda s, mm: spec})()
+
+    def _ct(role, prompt, system=None, **k):
+        if role == "tester":
+            counts["tester"] += 1
+            return "```python\nfrom core import generate_reply\ndef test_x():\n    assert 'ECHO:' in generate_reply('hi', [])\n```"
+        return "*** FILE: core.py\n```python\nx = 1\n```"            # coder never reaches green → abandoned
+
+    monkeypatch.setattr(M, "build_chat_model", lambda role, **k: _Chat())
+    monkeypatch.setattr(M, "chat_text", _ct)
+    monkeypatch.setattr(M, "same_family", lambda a, b: False)
+
+    cfg = load_config(tmp_path / "builds")
+    ws, st = tmp_path / "ws", tmp_path / "staging"
+    ws.mkdir(); st.mkdir()
+    sbx = _Sbx(tmp_path, plain_ok=False, collected={"test_x"})       # always red → coder fails → abandoned
+    ctx = Ctx(cfg=cfg, build_id="poc-fr", run_dir=_FIXTURE, template=load_template("gradio-chatbot"),
+              build_dir=cfg.builds_dir / "poc-fr", workspace_dir=ws, staging_dir=st,
+              broker=_Broker(sbx), coder=BespokeCoder())
+    sbx.ws = ws
+    state = BuildState(build_id="poc-fr", build_dir=str(ctx.build_dir), workspace_dir=str(ws))
+    for fn in (p0_ingest, p1_spec, p2_plan, p3_scaffold):
+        state = state.model_copy(update=fn(state, ctx))
+
+    state = state.model_copy(update=p4_iterate(state, ctx))          # iter0 → authors the test
+    assert counts["tester"] == 1
+    state = state.model_copy(update=p4_iterate(state, ctx))          # fix-retry of iter0 → reuse
+    assert counts["tester"] == 1                                    # NOT re-authored

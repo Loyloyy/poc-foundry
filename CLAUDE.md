@@ -11,7 +11,11 @@ notes below are Claude-Code-specific.
   checks are `python -m py_compile <files>` and running pure pydantic/stdlib modules directly.
   Everything that imports the agent stack (langchain/langgraph/deepagents) or runs the pipeline is a
   **server-in-Docker** step — author it, hand the user the command block, don't try to run it here.
-- **Never run git mutations** on this repo (rule #2). If a commit/push is needed, tell the user.
+- **The local GREEN BAR is `bash scripts/check.sh`** — py_compile + the no-pytest fakes suite
+  (`run_spine_tests.py`) + contract checks + the data-hygiene guard (`check_hygiene.sh`). Run it before
+  handing the user any commit; every new gate/logic change gets a fakes test so it's covered here.
+- **Never run git mutations** on this repo (rule #2). If a commit/push is needed, tell the user — and
+  run `bash scripts/check_hygiene.sh` first (rule #1: no host/model-id/path/key in TRACKED files).
 - **Consult the planning chat via the user** for ledger deviations / structural surprises — don't
   guess on structural calls (rule in `AGENTS.md` → Decision culture).
 - **Per-phase test commands.** The user wants each milestone provably finished before the next.
@@ -20,5 +24,7 @@ notes below are Claude-Code-specific.
 
 ## Status
 
-Bootstrapping (Slice 1: repo foundation). M0 spikes not yet run. See `ROADMAP.md` for live
-milestone state and `DECISIONS.md` for the rationale log.
+**M0 ✅ · M1 ✅ · M2a ✅ COMPLETE** (all server-validated, 2026-06-23). Next: **M2b — resilience**
+(budgets/caps/escalation, checkpoint/resume/stop, salvage + descope report, contention indicator,
+hygiene scrubber). Local checks: `python3 scripts/run_spine_tests.py` (44) + `run_contract_checks.py`
+(11). See `ROADMAP.md` for live milestone state and `DECISIONS.md` for the rationale log (newest: #17).

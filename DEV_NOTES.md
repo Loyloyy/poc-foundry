@@ -262,7 +262,7 @@ denials still pass). The same spike under runc resolves names fine.
   full architect call + re-scaffold + re-iterate) — capped at `respec_cap=1`. A `fix` re-runs P4 (a
   fresh tester test + a fresh coder loop) — capped at K. Both spin fresh Kata VMs each pass. The caps
   keep cost bounded; tune via `PF_RESPEC_CAP`/`PF_FIX_LIMIT_K`/`PF_DEGRADED_FIX_LIMIT_K`.
-- **Degraded adequacy is advisory (server reality).** All five roles point to one GLM here →
+- **Degraded adequacy is advisory (server reality).** All five roles point to one on-prem model here →
   `same_family("critic","coder")` is True → degraded. In degraded mode an "inadequate" adequacy
   verdict on a GREEN iteration becomes a CAVEAT, not a respec/descope (a same-family judge can't
   independently certify). So the server happy path stays `done`; you'll see `degraded_critic: true`
@@ -307,13 +307,13 @@ denials still pass). The same spike under runc resolves names fine.
 ## Build wall-clock: where the time goes + the one safe speed-up (2026-06-23)
 
 - **The full gate build is minutes because it does REAL multi-iteration work, not because of redundant
-  testing.** Dominant cost = the GLM round-trips × iterations (each iteration: 1 tester + 1–3 coder +
+  testing.** Dominant cost = the the model round-trips × iterations (each iteration: 1 tester + 1–3 coder +
   1 critic call) + a fresh Kata VM boot per iteration + the clean-room VM. For the 5-criterion fixture
-  that's ~15–25 GLM calls + ~6 VM boots. The clean-room `uv pip install gradio` happens ONCE per build
+  that's ~15–25 the model calls + ~6 VM boots. The clean-room `uv pip install gradio` happens ONCE per build
   (only P6 installs; iterations + scaffold are stdlib-only). So the build can't be made much faster
   without removing the actual verification work.
 - **Rigor lives in the local fakes, NOT in re-running the full build.** `run_spine_tests.py` (35/35,
-  seconds) covers ALL gate logic; the full build's unique value is confirming the real Kata/GLM/network/
+  seconds) covers ALL gate logic; the full build's unique value is confirming the real Kata/the model/network/
   clean-room ENVIRONMENT still behaves. So: fakes are the dev inner-loop; run the full build ONCE per
   slice that touches the heavy path. Re-running it more often re-confirms the environment, not logic.
 - **The one thoroughness-neutral speed-up: `PF_UV_CACHE_SHARED=1`.** Reuses a single `pf-uvcache-shared`
@@ -395,5 +395,18 @@ denials still pass). The same spike under runc resolves names fine.
   cumulative gate kept earlier criteria green AND the workspace never advances past a green commit. If a
   clean-room test fails despite green iterations, suspect (a) the workspace reflecting a failed edit
   (this salvage fix), or (b) an iteration vs clean-room ENV difference (e.g. a service not reachable).
+
+## Local tooling: the green bar + the hygiene guard (2026-06-23)
+
+- **`bash scripts/check.sh` is the one-command GREEN BAR** — py_compile (3.10) + the no-pytest fakes
+  suite (`run_spine_tests.py`, 44) + the contract checks (`run_contract_checks.py`, 11) + the
+  data-hygiene guard. Run it before handing the user any commit. Every new gate/logic change gets a
+  fakes test so it's covered here (the full Kata build stays the server gate).
+- **`bash scripts/check_hygiene.sh` enforces rule #1 on TRACKED files.** Static layer (real
+  `_(MODEL|API_BASE|API_KEY)=` values, `/nfs/` paths, key patterns) runs anywhere; the dynamic layer
+  (only when a local `.env` exists — i.e. on the server) greps tracked files for the REAL `.env`
+  host/model values, catching PROSE leaks (e.g. a doc naming the served model), not just `KEY=VALUE`.
+  It caught a real prose leak (the served-model id had drifted into DECISIONS/DEV_NOTES/ROADMAP);
+  scrubbed to "the on-prem model". Run it on the SERVER for the authoritative check.
 
 ## (sections appended as slices land)
