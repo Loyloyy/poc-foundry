@@ -164,7 +164,18 @@ def _init_tracer() -> _Tracer:
         logger.info("PF_TRACING set but `langfuse` not installed; tracing off")
         return _Tracer()
     try:
-        return _LangfuseTracer(get_client())   # creds from LANGFUSE_HOST/_PUBLIC_KEY/_SECRET_KEY
+        # PF_LANGFUSE_TIMEOUT_S raises the SDK's HTTP/OTEL-export timeout: the on-prem langfuse OTEL
+        # ingest endpoint (clickhouse/minio-backed) can be slow and the default 5s export read-timeout
+        # drops batches ("Failed to export span batch … Read timed out"). Unset → the SDK default.
+        client = None
+        to = os.environ.get("PF_LANGFUSE_TIMEOUT_S", "").strip()
+        if to:
+            try:
+                from langfuse import Langfuse
+                client = Langfuse(timeout=int(to))   # creds still from LANGFUSE_* env; just a longer timeout
+            except Exception:  # noqa: BLE001 — fall back to the env-configured singleton
+                client = None
+        return _LangfuseTracer(client or get_client())   # creds from LANGFUSE_HOST/_PUBLIC_KEY/_SECRET_KEY
     except Exception as e:  # noqa: BLE001 — misconfigured creds etc.
         logger.warning("could not initialise Langfuse (%s); tracing off", e)
         return _Tracer()
