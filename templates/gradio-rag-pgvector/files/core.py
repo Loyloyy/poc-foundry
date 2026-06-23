@@ -3,12 +3,14 @@
 This PoC retrieves from a REAL **pgvector** sibling service (Postgres + the `vector` extension),
 reached BY IP via the harness-injected ``PF_SERVICE_PG_HOST`` (Kata VMs have no container-name DNS).
 Embeddings are a deterministic stdlib hashing trick — NO model, NO network — so retrieval is
-reproducible and unit-testable; the nearest-neighbour search itself runs in pgvector.
+reproducible and unit-testable; the nearest-neighbour ranking runs in pgvector.
 
-The scaffold ships the DB plumbing (`_connect` / `_ensure_corpus` / `search`) working against a tiny
-fixed corpus, plus a STUB ``generate_reply``. Build iterations implement ``generate_reply`` on top of
-``search`` (retrieve → format a reply with a citation marker). Importing this module does nothing and
-touches no DB; ``psycopg`` is imported lazily so the stdlib smoke test runs without a database.
+The scaffold ships the retrieval plumbing WORKING — `_connect`/`_ensure_corpus`, `search` (pgvector
+ranking), `retrieve` (ranking + a lexical relevance gate so an unrelated query matches nothing),
+`snippet` (a verbatim grounding quote) and `cite` (a citation marker) — plus a STUB `generate_reply`.
+**Build iterations implement `generate_reply` on top of these helpers** (a few lines of glue — see its
+docstring); they should not need to write SQL or psycopg. Importing this module touches no DB
+(`psycopg` is imported lazily), so the stdlib smoke test runs without a database.
 """
 from __future__ import annotations
 
@@ -18,32 +20,51 @@ import time
 
 EMBED_DIM = 64
 
-# The PoC's fixed knowledge base (id, title, content). Distinct keywords per doc so retrieval is clear.
+# The PoC's fixed knowledge base — topical to the artifact (RAG / retrieval / pgvector / gradio) so
+# domain queries find a match; (id, title, content). Single-spaced content so a snippet is a verbatim
+# substring.
 CORPUS = [
-    {"id": 1, "title": "Python",
-     "content": "Python is a high level programming language known for readability and a large ecosystem of libraries."},
-    {"id": 2, "title": "Rust",
-     "content": "Rust is a systems programming language focused on memory safety and performance without a garbage collector."},
-    {"id": 3, "title": "PostgreSQL",
-     "content": "PostgreSQL is an advanced open source relational database with strong SQL support and powerful extensions."},
+    {"id": 1, "title": "Retrieval-augmented generation",
+     "content": "Retrieval augmented generation grounds a language model answer in documents fetched "
+                "from a corpus so the reply can cite its sources instead of relying only on the model."},
+    {"id": 2, "title": "Vector search with pgvector",
+     "content": "pgvector adds a vector column type and similarity operators to Postgres letting you "
+                "store document embeddings and run nearest neighbour search with a simple SQL query."},
+    {"id": 3, "title": "Grounded citations",
+     "content": "A grounded answer includes a citation marker pointing at the retrieved document and "
+                "quotes a verbatim snippet of its content so a reader can verify the claim against the source."},
+    {"id": 4, "title": "Gradio chat interface",
+     "content": "Gradio provides a chat interface where each user message is passed to a pure reply "
+                "function keeping the retrieval and generation logic testable without launching a browser."},
 ]
+
+
+def _tokens(text: str) -> set[str]:
+    return {t for t in "".join(c.lower() if c.isalnum() else " " for c in text).split() if t}
 
 
 def _embed(text: str) -> list[float]:
     """Deterministic stdlib embedding: hash each alphanumeric token into one of EMBED_DIM buckets
-    (bag-of-words), then L2-normalize. Pure + reproducible (no model, no network) — good enough for
-    nearest-neighbour over a tiny corpus, and trivially unit-testable."""
+    (bag-of-words), then L2-normalize. Pure + reproducible (no model, no network)."""
     vec = [0.0] * EMBED_DIM
-    cleaned = "".join(c.lower() if c.isalnum() else " " for c in text)
-    for tok in cleaned.split():
-        bucket = int(hashlib.sha1(tok.encode()).hexdigest(), 16) % EMBED_DIM
-        vec[bucket] += 1.0
+    for tok in _tokens(text):
+        vec[int(hashlib.sha1(tok.encode()).hexdigest(), 16) % EMBED_DIM] += 1.0
     norm = sum(v * v for v in vec) ** 0.5
     return [v / norm for v in vec] if norm else vec
 
 
 def _vec_literal(vec: list[float]) -> str:
     return "[" + ",".join(f"{v:.6f}" for v in vec) + "]"
+
+
+_VOCAB: set[str] | None = None
+
+
+def _vocab() -> set[str]:
+    global _VOCAB
+    if _VOCAB is None:
+        _VOCAB = set().union(*(_tokens(d["title"] + " " + d["content"]) for d in CORPUS))
+    return _VOCAB
 
 
 def _connect(retries: int = 30):
@@ -66,8 +87,8 @@ def _connect(retries: int = 30):
 
 
 def _ensure_corpus(conn) -> None:
-    """Idempotently create the vector table + extension and seed the corpus (safe to call every time;
-    so a fresh clean-room DB self-seeds on first query)."""
+    """Idempotently create the vector table + extension and seed the corpus (safe every call → a fresh
+    clean-room DB self-seeds on first query)."""
     with conn.cursor() as cur:
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
         cur.execute(f"CREATE TABLE IF NOT EXISTS docs "
@@ -80,24 +101,51 @@ def _ensure_corpus(conn) -> None:
 
 
 def search(query: str, k: int = 1) -> list[dict]:
-    """The k nearest corpus documents to ``query`` (pgvector L2 distance). Returns
-    ``[{id, title, content}]``. Opens a connection, ensures the corpus, queries, closes."""
+    """The k corpus documents ranked nearest to ``query`` by pgvector L2 distance — ``[{id, title,
+    content, distance}]``. Always returns up to k rows (no relevance gate; use ``retrieve`` for that)."""
     conn = _connect()
     try:
         _ensure_corpus(conn)
         with conn.cursor() as cur:
-            cur.execute("SELECT id, title, content FROM docs ORDER BY embedding <-> %s::vector LIMIT %s",
-                        (_vec_literal(_embed(query)), k))
-            return [{"id": r[0], "title": r[1], "content": r[2]} for r in cur.fetchall()]
+            cur.execute("SELECT id, title, content, embedding <-> %s::vector AS dist "
+                        "FROM docs ORDER BY dist LIMIT %s", (_vec_literal(_embed(query)), k))
+            return [{"id": r[0], "title": r[1], "content": r[2], "distance": float(r[3])}
+                    for r in cur.fetchall()]
     finally:
         conn.close()
 
 
-def generate_reply(message: str, history: list | None = None) -> str:
-    """SCAFFOLD STUB — build iterations implement retrieval + citation HERE using ``search``.
+def retrieve(query: str, k: int = 1) -> list[dict]:
+    """Relevant corpus docs for ``query``, best-first (pgvector ranking) — or ``[]`` if the query shares
+    NO vocabulary with the corpus. The lexical gate makes "unrelated query → no citation" RELIABLE (a
+    pure vector-distance threshold is too noisy on a tiny hashed-embedding corpus)."""
+    if not (_tokens(query) & _vocab()):
+        return []
+    return search(query, k)
 
-    Target behaviour (what the iterations build): retrieve the most relevant corpus document(s) for
-    ``message`` via ``search`` and return a reply that cites them with a ``[id]`` marker referencing
-    the matched document. The scaffold stub below does no retrieval (so a real criterion test is RED
-    first)."""
+
+def snippet(doc: dict, n: int = 8) -> str:
+    """A verbatim grounding quote — the first ``n`` words of the document content (≥3 consecutive
+    words, an exact substring of the source so a reader can verify the answer)."""
+    return " ".join(doc["content"].split()[:n])
+
+
+def cite(doc: dict) -> str:
+    """A citation marker referencing the document id, e.g. ``[1]``."""
+    return f"[{doc['id']}]"
+
+
+def generate_reply(message: str, history: list | None = None) -> str:
+    """SCAFFOLD STUB — build iterations implement retrieval HERE using ``retrieve`` / ``cite`` /
+    ``snippet`` (no SQL needed). The target shape::
+
+        docs = retrieve(message)
+        if not docs:
+            return "no relevant documents found"
+        d = docs[0]
+        return f"{cite(d)} {snippet(d)}"          # → e.g. "[1] Retrieval augmented generation grounds ..."
+
+    Extend for the spec's exact criteria (multiple matches → cite each in id order; a `[doc-N]` marker →
+    format `cite` accordingly). The stub below does NO retrieval, so a real criterion test is RED first.
+    """
     return "I couldn't find any relevant documents."

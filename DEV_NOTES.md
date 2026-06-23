@@ -409,4 +409,26 @@ denials still pass). The same spike under runc resolves names fine.
   It caught a real prose leak (the served-model id had drifted into DECISIONS/DEV_NOTES/ROADMAP);
   scrubbed to "the on-prem model". Run it on the SERVER for the authoritative check.
 
+## pgvector template hardening — reliable builds for the degraded coder (2026-06-23)
+
+- **Why a build went `incomplete`:** the architect's core criterion varies run-to-run; a hard one
+  ("citation marker AND ≥3 consecutive words from the matched chunk") sat above the degraded coder's
+  ceiling → core descoped → honest `incomplete` (the DONE floor working). Correct behaviour, but it
+  made the sibling-service template a coin-flip as a regression gate.
+- **Fix = make the coder's core task pure glue.** The scaffold `core.py` now ships WORKING helpers —
+  `retrieve(query)` (pgvector ranking + a relevance gate), `snippet(doc)` (a verbatim ≥3-word quote),
+  `cite(doc)` (`[id]` marker) — and `generate_reply` is a stub whose docstring shows the 3-line
+  composition. The coder composes helpers (no SQL/psycopg), which M0(b) showed the model does reliably.
+  Red-first still holds (the stub does no retrieval).
+- **The relevance gate is LEXICAL, not a vector threshold.** The deterministic hashing embedding does
+  NOT cleanly separate matched from unmatched (measured: matched 0.9–1.26 vs unmatched 1.13–1.41 — they
+  OVERLAP; `quantum banana` landed closer than `postgres`). So `retrieve` gates on "does the query share
+  a token with the corpus vocabulary" (reliable: unrelated → `[]`), and uses pgvector only to RANK the
+  matches. pgvector is still genuinely exercised (the `<->` query runs); the gate just isn't trusted to
+  a noisy distance. The lexical gate short-circuits before any DB call, so the unrelated-query case is
+  even smoke-testable without pgvector.
+- **Corpus is topical to the artifact** (RAG / retrieval / pgvector / gradio) so the tester's
+  domain-derived queries hit. If you change the artifact fixture, re-align the corpus vocabulary or the
+  tester may query words the corpus lacks → a matching-query test that can't pass.
+
 ## (sections appended as slices land)

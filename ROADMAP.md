@@ -161,7 +161,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       5 criteria met, ZERO leaks. **S4b COMPLETE.** Perf: a `fix`-retry now REUSES the staged test (no
       re-author) — the run was ~30 min (a hard template: the model grinding the citation-format + relevance
       threshold across 5 criteria w/ retries; VMs are warm within an iteration; the fix-loop salvaged
-      iter1 on round 3 — rigor, not waste).
+      iter1 on round 3 — rigor, not waste). **Hardening (2026-06-23):** a later run came back honest
+      `incomplete` when the architect's core was too hard for the degraded coder (DONE floor working).
+      Fixed by shipping working scaffold helpers (`retrieve` w/ a LEXICAL relevance gate, `snippet`,
+      `cite`) so the coder's core task is ~3 lines of glue + a corpus topical to the artifact → the
+      sibling build is now a reliable `done`, not a coin-flip (DEV_NOTES). *Server re-run pending.*
 - **Acceptance — ALL MET (server-validated 2026-06-23):** ✅ planted test-gaming caught by the
       ledger/red-first/scanner + critic (44 fakes, incl. 3 planted cases); ✅ clean-room gates a
       known-bad build red (the pgvector run literally caught broken code → `incomplete`); ✅ broker runs

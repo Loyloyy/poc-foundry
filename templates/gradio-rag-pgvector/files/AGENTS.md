@@ -4,9 +4,11 @@ This is an emitted **poc-foundry** bundle: a Gradio chatbot doing RAG over a rea
 database. It is a standalone git repo; you can continue it by hand or in OpenCode.
 
 ## Layout
-- `core.py` — the logic. `_embed` (deterministic stdlib embedding), `search()` (pgvector
-  nearest-neighbour), and `generate_reply` (retrieve → answer with a `[id]` citation). **Put new
-  behaviour here.**
+- `core.py` — the logic. The scaffold ships working helpers: `retrieve(query)` (pgvector ranking + a
+  lexical relevance gate → `[]` for an unrelated query), `snippet(doc)` (a verbatim grounding quote),
+  `cite(doc)` (a `[id]` marker). **`generate_reply` is a stub — implement it by composing those
+  helpers** (a few lines; see its docstring), e.g. `docs = retrieve(message); return f"{cite(docs[0])}
+  {snippet(docs[0])}"` with a no-match fallback. No SQL/psycopg needed. **Put new behaviour here.**
 - `app.py` — Gradio UI only. No logic.
 - `tests/` — the suite (a stdlib embedding smoke + retrieval criterion tests). **Red-first.**
 - `requirements.txt` — pinned deps. `compose.yaml` — pgvector + the app for `docker compose up`.
