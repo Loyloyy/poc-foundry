@@ -192,7 +192,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       (+8 `test_m2b_budget.py`) + contract 11/11 + hygiene clean. *Server: normal build shows
       `budget.llm_calls`/`contention_indicator`; `PF_MAX_LLM_CALLS_RUN=3` → run-cap salvage to
       `incomplete` + `caps_hit`, ZERO leaks.*
-- [ ] checkpoint/resume/stop · salvage abandoned.patch + descope-report polish (S3/S4)
+- [x] **S3 run-cap salvage — abandoned.patch + descope + gaps (2026-06-23, local):** the S2 salvage
+      path now captures the in-flight (un-merged) coder edits to `builds/<id>/abandoned.patch` BEFORE
+      the rollback, appends a `descope_report[]` entry for the in-flight criterion (with a resume-or-
+      finish-by-hand `finish_path`), and `final_verdict.gaps` is populated for every build (criteria
+      not `met`). Report gains Gaps + the index advertises the patch (DECISIONS #20). Local: **58/58
+      fakes** (+2 `test_m2b_salvage.py`) + contract 11/11 + hygiene clean. *Server: the
+      `PF_MAX_LLM_CALLS_RUN=3` run now also drops `abandoned.patch` + a Descope/Gaps section.*
+- [ ] checkpoint/resume/stop (S4)
 - **Acceptance:** a killed run resumes from last green commit; a forced descope yields a descope
       report; scrubber leaves no endpoint/id in emitted text.
 

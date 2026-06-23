@@ -657,3 +657,28 @@ The M2a residual: caps were DEFINED but never enforced; `caps_hit[]` / `budget` 
   clean. *Server: (a) a normal build shows `budget.llm_calls`/`contention_indicator` populated; (b)
   `PF_MAX_LLM_CALLS_RUN=3` forces a run-cap salvage → `status=incomplete`,
   `caps_hit=["max_llm_calls_per_run"]`, rolled back, ZERO leaks.*
+
+## #20 — M2b S3: run-cap salvage — abandoned.patch + descope entry + gaps (2026-06-23)
+
+Builds on the S2 (#19) salvage path: a run-cap breach now produces a forensic, human-finishable
+incomplete (design §5.8), not just a bare `incomplete`.
+
+- **`abandoned.patch`.** Before the rollback, `_salvage_run` captures the in-flight (un-merged) coder
+  edits via `git_diff(ws)` (working-tree diff vs HEAD, incl. untracked) and writes them to
+  `builds/<id>/abandoned.patch` (only when non-empty), so a human can apply + finish the abandoned
+  iteration. THEN it `git reset --hard HEAD`s the workspace to the last green commit (#17 pattern), so
+  the emitted `workspace/` is sound.
+- **Descope entry.** A `descope_report[]` item is appended for the in-flight criterion (resolved from
+  `plan.iterations[state.iteration]`), with `why_failed = "run halted by budget cap: <cap>"` and a
+  `finish_path` that names BOTH options: resume with a higher cap (state + workspace persist), or
+  apply `abandoned.patch` + finish by hand in OpenCode.
+- **`final_verdict.gaps`** (now populated for EVERY build, not just salvage): every criterion whose
+  status != `met` (descoped / pending / partial). An honest gap list vs the spec — a `done` build has
+  none; a `partial`/`incomplete` lists what's missing. Report gains a "Gaps vs spec" section; the
+  index advertises `abandoned.patch` when present.
+- **Verified locally (58/58 fakes; +2 in `test_m2b_salvage.py`):** a fake graph + a real tmp git
+  workspace with an in-flight edit → `abandoned.patch` captures the in-flight code, the workspace is
+  rolled back to green, the artifact is `incomplete` + `caps_hit` + a descope entry for the in-flight
+  criterion + gaps (met criteria excluded); a clean-tree salvage writes no patch. Contract 11/11;
+  hygiene clean. *Server: the `PF_MAX_LLM_CALLS_RUN=3` run (S2 case b) should now ALSO drop an
+  `abandoned.patch` + a Descope-report / Gaps section in `report.md`.*

@@ -632,6 +632,8 @@ def p7_emit(state, ctx: Ctx) -> dict:
     core_met = bool(state.spec) and any(c.core and c.status == "met" for c in state.spec.success_criteria)
     demonstrates = ("yes" if (core_met and state.cleanroom.get("suite_ok") and _trustworthy(state))
                     else ("partial" if core_met else "no"))
+    # honest gap list: every criterion not `met` (descoped / pending / partial), judged vs the spec.
+    gaps = [c.text for c in (state.spec.success_criteria if state.spec else []) if c.status != "met"]
 
     allowlist = []
     try:
@@ -654,7 +656,7 @@ def p7_emit(state, ctx: Ctx) -> dict:
                            inventory_ok=bool(state.inventory_ok)),
         cleanroom=CleanroomResult(**{k: bool(v) for k, v in state.cleanroom.items()}),
         demo_quality=state.demo_quality,
-        final_verdict=FinalVerdict(demonstrates_core_value=demonstrates),
+        final_verdict=FinalVerdict(demonstrates_core_value=demonstrates, gaps=gaps),
         descope_report=[DescopeItem(criterion=d.get("criterion", ""),
                                     attempts_made=int(d.get("attempts_made", 0)),
                                     why_failed=d.get("why_failed", ""),
@@ -730,6 +732,8 @@ def _report_md(state, ctx: Ctx, pa) -> str:
               f"- degraded_critic: {pa.security.degraded_critic} "
               f"(fix budget K={ctx.cfg.degraded_fix_limit_k if pa.security.degraded_critic else ctx.cfg.fix_limit_k}; "
               f"fixes={state.fix_count}, respecs={state.respec_count}, replans={state.replan_count})"]
+    if pa.final_verdict.gaps:
+        lines += ["", "## Gaps vs spec", ""] + [f"- {g}" for g in pa.final_verdict.gaps]
     if pa.descope_report:
         lines += ["", "## Descope report", ""]
         for d in pa.descope_report:
@@ -750,10 +754,14 @@ def _report_md(state, ctx: Ctx, pa) -> str:
 
 
 def _index_md(pa, build_dir: Path) -> str:
-    return (f"# {pa.id}\n\n"
-            f"Stage-3 PoC build from `{pa.source_artifact.id}` — **{pa.status}**.\n\n"
-            f"- `v{pa.version:02d}.json` — the PoCBuildArtifact (this build's output contract)\n"
-            f"- `workspace/` — the standalone, runnable PoC (see `workspace/RUN.md`)\n"
-            f"- `report.md` — human-readable build report\n"
-            f"- `PROGRESS.md` — phase trace\n"
-            f"- `logs/egress.log` — proxy CONNECT log (egress security evidence)\n")
+    lines = [f"# {pa.id}\n",
+             f"Stage-3 PoC build from `{pa.source_artifact.id}` — **{pa.status}**.\n",
+             f"- `v{pa.version:02d}.json` — the PoCBuildArtifact (this build's output contract)",
+             "- `workspace/` — the standalone, runnable PoC (see `workspace/RUN.md`)",
+             "- `report.md` — human-readable build report",
+             "- `PROGRESS.md` — phase trace",
+             "- `logs/egress.log` — proxy CONNECT log (egress security evidence)"]
+    if (build_dir / "abandoned.patch").exists():
+        lines.append("- `abandoned.patch` — un-merged in-flight work from a salvaged iteration "
+                     "(apply + finish by hand to complete the descoped criterion)")
+    return "\n".join(lines) + "\n"

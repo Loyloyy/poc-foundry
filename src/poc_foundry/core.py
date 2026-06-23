@@ -135,15 +135,35 @@ def _salvage_run(graph, ctx, build_dir: Path, build_id: str, gcfg: dict, cap: st
                      RuntimeError(f"budget cap hit before first checkpoint: {cap}"))
         return
 
+    # Capture the in-flight (un-merged) coder edits as a forensic patch BEFORE rolling them back, so a
+    # human can finish the abandoned iteration by hand. Then reset the workspace to the last green
+    # commit (#17 pattern) so the emitted workspace is sound.
+    ws = Path(state.workspace_dir)
     try:
-        from poc_foundry.phases.context import git
-        git(Path(state.workspace_dir), "reset", "--hard", "HEAD", check=False)
+        from poc_foundry.phases.context import git, git_diff
+        patch = git_diff(ws)
+        if patch.strip():
+            build_dir.mkdir(parents=True, exist_ok=True)
+            (build_dir / "abandoned.patch").write_text(patch)
+            state.caveats = list(state.caveats) + [
+                "in-flight work saved to abandoned.patch (apply + finish by hand to complete it)"]
+        git(ws, "reset", "--hard", "HEAD", check=False)
     except Exception:  # noqa: BLE001
         pass
 
+    # Record the cap + a descope-report entry for the in-flight criterion (honest incomplete).
     state.caps_hit = list(state.caps_hit) + [cap]
     state.caveats = list(state.caveats) + [
         f"run halted by budget cap: {cap} — salvaged to the last green commit"]
+    it = (state.plan.iterations[state.iteration]
+          if state.plan and 0 <= state.iteration < len(state.plan.iterations) else None)
+    criterion = ((it.acceptance[0] if it.acceptance else it.goal) if it
+                 else (state.pending_criterion or "in-flight iteration"))
+    state.descope_report = list(state.descope_report) + [{
+        "criterion": criterion, "attempts_made": state.fix_count + 1,
+        "why_failed": f"run halted by budget cap: {cap}",
+        "finish_path": "resume the build (state + workspace persist) with a higher cap, "
+                       "or apply abandoned.patch + finish by hand in OpenCode"}]
     ctx.say(f"SALVAGE: budget cap {cap} → rolled back to last green; emitting incomplete")
     p7_emit(state, ctx)   # writes the artifact + scrubs (status will be incomplete: no clean-room)
 
