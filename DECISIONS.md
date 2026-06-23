@@ -763,14 +763,20 @@ exec/VERIFY/gates/critic/clean-room/proxy denials; and our LLM calls go through 
   from the root obs name (`build/<id>`) and tags/session ride in `metadata`; `create_event`/`flush`
   unchanged. Pinned `langfuse>=4,<5` so it can't silently resolve onto another API-breaking major.
   (DEV_NOTES has the full v4 surface + an unguarded-SDK debug one-liner.)
-- **Shared server, per-app SDK; project hygiene follow-up.** poc-foundry traces to the SAME on-prem
-  langfuse instance as stage-2 (easier to access; a 4.x client against the 4.x server is fine). The
-  depot reused its init keys, so traces currently land in the `stage-2-research` project; a dedicated
-  `stage-3-poc` project is a follow-up — new keys in `.env`, NO code change (`tracing.py` is
-  project-agnostic; the `PROJECT` constant is only a label).
-- **OTEL export timeout observed (non-blocking).** Right after langfuse-web recovered from a
-  clickhouse-network outage, span batch export timed out at 5s (warm-up suspected); if it persists the
-  OTEL ingest path is too slow → bump the exporter timeout / check langfuse-worker→clickhouse.
+- **Shared server, per-app SDK; dedicated project (done).** poc-foundry traces to the SAME on-prem
+  langfuse instance as stage-2 (easier to access; a 4.x client against the v3 server image works). A
+  dedicated **`stage-3-poc`** project was created with its own keys (in `.env`) so stage-3 traces don't
+  pollute stage-2's — NO code change (`tracing.py` is project-agnostic; the `PROJECT` constant is only
+  a label).
+- **The long tail was ALL shared-infra (service-depot), not poc-foundry.** Validating the live trace
+  surfaced three distinct langfuse-server outages: (1) clickhouse + (2) minio containers orphaned off
+  `service-depot_default` by a stray `docker network/system prune` (it deletes the network under
+  running `restart:always` containers → they keep running with zero net attachments → DNS for
+  clickhouse/minio breaks while the postgres path survives), then (3) a post-`down/up` `:3000`
+  connection-refused. Each fixed in service-depot (`./depot down/up` reattaches everything; a prune
+  guard prevents recurrence). The `PF_LANGFUSE_TIMEOUT_S` knob was added during this (a slow-ingest
+  safety margin), but the real fixes were server-side. Lesson logged: tolerated-absent tracing did its
+  job — every one of these failures left the BUILD itself green (`done`), exactly as designed.
 - **msgpack-registration carry-forward NOT folded in here.** It's an unverifiable langgraph-version
   API and the working resume path shouldn't be risked on a guess; left as the documented follow-up
   (#21 / DEV_NOTES).
@@ -779,5 +785,18 @@ exec/VERIFY/gates/critic/clean-room/proxy denials; and our LLM calls go through 
   phase-pipeline spans + the proxy-denial event via the m1 fakes harness (build still `done` — spans
   don't perturb it); the chat_text `llm.<role>` span; and the real `_LangfuseTracer` wired against
   fake langfuse **v4 + v3** clients (the feature-detection both ways). Contract 11/11; hygiene clean.
-  *Server: build trace was empty under the v3-authored code (the 4.x mismatch); re-validation pending
-  on the fixed code.*
+- **SERVER-VALIDATED (2026-06-24):** project `stage-3-poc`, root trace
+  `build/poc-20260623-164251-4d3c04` with **21 observation levels** — `broker.*` (with sandbox/cmd/rc/
+  output), `spec`, `iterate.verify`, `critic`, `cleanroom`, `llm.*` all landing; flush-on-exit
+  confirmed; survives a depot restart. **S1 DONE.**
+- **ONE TRACE PER BUILD (consolidation, 2026-06-24).** The first validated run also emitted a SCATTER
+  of standalone top-level traces (`broker.exec`/`create`/`provision`/`destroy`) alongside the rich
+  `build/<id>` tree: (a) `broker.destroy`+flush ran in `core`'s outer `finally`, OUTSIDE the build span;
+  (b) LangGraph can run a node without propagating the OTEL contextvar, so those spans started fresh
+  root traces. Fix: `build` records the root obs `trace_id` and every later `span`/`event` pins to it
+  via `trace_context` (defensive — falls back to no-kwarg for older SDKs, so it can't regress), and
+  teardown was moved INSIDE the build span. Volume itself is a non-issue — one trace with ~20–50 nested
+  observations is the intended Langfuse model and self-hosted handles it easily; the goal was a single
+  drill-down tree, not fewer observations. Local: 74 fakes (the v4 test now nests a child span+event
+  and asserts both pin to the build trace_id; a second asserts no pin OUTSIDE a build). *Re-validate the
+  single-trace shape opportunistically on the next server build — non-blocking.*

@@ -31,6 +31,7 @@ Langfuse spans, tiered evals v1, playbook injection + reflection, template CI). 
 `python3 scripts/run_spine_tests.py` (65) + `run_contract_checks.py` (11). See `ROADMAP.md` for live
 milestone state and `DECISIONS.md` for the rationale log (newest: #22).
 
-**M2c in progress:** S1 observability (`tracing.py` + manual spans) shipped locally (2026-06-23) —
-tolerated-absent Langfuse spans at the broker/VERIFY/gate/critic/clean-room/LLM/proxy-denial seams,
-flush-on-exit; server-validation pending. Local checks now: `run_spine_tests.py` (71) + contract (11).
+**M2c in progress:** S1 observability ✅ **server-validated (2026-06-24)** — tolerated-absent Langfuse
+spans (langfuse v4 API) at the broker/VERIFY/gate/critic/clean-room/LLM/proxy-denial seams, flush-on-
+exit; trace `build/poc-…` with 21 observation levels in the `stage-3-poc` project. Local checks now:
+`run_spine_tests.py` (74) + contract (11). Next: S2 (tiered evals v1).

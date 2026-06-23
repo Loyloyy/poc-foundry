@@ -223,7 +223,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       green bar stays green, both templates still build `done`. **M2b COMPLETE → M2c.**
 
 ## M2c — periphery
-- [~] **S1 observability — `tracing.py` + manual spans (2026-06-23, local):** tolerated-absent
+- [x] **S1 observability — `tracing.py` + manual spans (2026-06-24, server-validated):** tolerated-absent
       `tracing.py` (Stage-2 pattern: env-gated `PF_TRACING`, lazy langfuse, no-op when off/absent —
       a tracing hiccup can never crash a build). Manual spans around the half the LangChain handler
       can't see: a **build** root span (core), **broker** provision/create/create_service/exec/destroy
@@ -238,10 +238,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       11/11 + hygiene clean. **Server iteration (2026-06-23):** first build trace was EMPTY — the server
       has **langfuse 4.9.1** and the v3-authored API no-op'd under the guards; fixed by feature-detecting
       v4 `start_as_current_observation` (trace name = root obs `build/<id>`; tags/session in metadata),
-      pinned `langfuse>=4,<5` (langfuse-web was also down in a clickhouse-network crash loop, fixed in
-      service-depot). *Re-validation pending: build trace appears in Langfuse with the span tree +
-      flush-on-exit; watch the 5s OTEL export timeout seen during langfuse-web warm-up.*
-      msgpack-registration carry-forward NOT folded in (unverifiable API; documented follow-up).
+      pinned `langfuse>=4,<5`; added `PF_LANGFUSE_TIMEOUT_S`. **VALIDATED (2026-06-24):** in the
+      dedicated `stage-3-poc` project, root trace `build/poc-20260623-164251-4d3c04` with **21
+      observation levels** — `broker.provision/create/exec/destroy` (rich in/out: sandbox, cmd, rc,
+      output tails), `spec`, `iterate.verify`, `critic`, `cleanroom`, `llm.*` all landing; flush-on-exit
+      confirmed; survives a depot restart. The long tail was ALL shared-infra (service-depot): langfuse
+      was down for three distinct reasons — clickhouse + minio containers orphaned off
+      `service-depot_default` by a stray `docker network/system prune` (deletes the net under
+      running `restart:always` containers), then a post-recreate `:3000` connection-refused — each fixed
+      in service-depot via `./depot down/up` + a prune guard; the poc-foundry code never changed after
+      the v4 fix. msgpack-registration carry-forward NOT folded in (unverifiable API; documented).
 - [ ] S2 tiered evals v1 (spec-eval + plan-eval vs fixtures) · S3 playbook injection + reflection ·
       S4 research-on-gaps (deepagents + SearXNG) · S5 template CI
 - **Acceptance:** spec/plan evals run against fixtures; manual spans appear in Langfuse `stage-3-poc`.

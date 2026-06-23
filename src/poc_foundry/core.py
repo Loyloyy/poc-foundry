@@ -93,15 +93,17 @@ def build_poc(source: str | Path, brief: str = "", *, driver: str = "tech-scout"
     from poc_foundry import tracing
     try:
         with tracing.build(build_id, tags=[driver, template]):   # root span (manual; §5.11)
-            broker.provision()
-            graph = build_graph(ctx, cfg)
-            _invoke_with_salvage(graph, state, ctx, cfg, build_dir, build_id)
+            try:                                                 # teardown INSIDE the build span so
+                broker.provision()                               # broker.destroy nests in the build
+                graph = build_graph(ctx, cfg)                    # trace (not a stray top-level trace)
+                _invoke_with_salvage(graph, state, ctx, cfg, build_dir, build_id)
+            finally:
+                broker.destroy()
     except Exception as e:  # noqa: BLE001 — leave a forensic artifact, then surface the error
         _emit_failed(build_dir, build_id, ctx, e)
         raise
     finally:
-        broker.destroy()
-        tracing.flush()   # mandatory: flush queued spans before the ephemeral process exits
+        tracing.flush()   # mandatory: flush queued spans before the ephemeral process exits (after the span closes)
 
     return _result(build_dir)
 
@@ -229,11 +231,13 @@ def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime
     from poc_foundry import tracing
     try:
         with tracing.build(build_id, tags=["resume", meta.get("template", cfg.default_template)]):
-            broker.provision()
-            graph = build_graph(ctx, cfg)
-            _invoke_with_salvage(graph, None, ctx, cfg, build_dir, build_id)   # None → resume
+            try:
+                broker.provision()
+                graph = build_graph(ctx, cfg)
+                _invoke_with_salvage(graph, None, ctx, cfg, build_dir, build_id)   # None → resume
+            finally:
+                broker.destroy()
     finally:
-        broker.destroy()
         tracing.flush()
 
     return _result(build_dir)

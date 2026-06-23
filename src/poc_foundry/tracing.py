@@ -98,8 +98,14 @@ class _LangfuseTracer(_Tracer):
     instance resolved langfuse 4.x): the span-creator is `start_as_current_observation` on v4 and
     `start_as_current_span` on v3 (feature-detected). v4 dropped `update_current_trace`/`update_trace`,
     so the TRACE name comes from the root observation's name (`build/<id>`) and tags/session ride in
-    `metadata`. Every operation is guarded — on ANY failure it falls back to a no-op span so a tracing
-    problem can never halt a build."""
+    `metadata`.
+
+    ONE TRACE PER BUILD: `build` records the root observation's `trace_id` and every later span/event
+    pins to it via `trace_context` — so even when LangGraph runs a node without propagating the OTEL
+    context (which otherwise spawns a fresh root trace per span → the scattered-traces wart), all spans
+    land inside the single `build/<id>` trace. `trace_context` is passed defensively (fallback for SDKs
+    that don't accept the kwarg), so this can't regress. Every operation is guarded — on ANY failure it
+    degrades to a no-op span so a tracing problem can never halt a build."""
 
     enabled = True
 
@@ -108,31 +114,46 @@ class _LangfuseTracer(_Tracer):
         # v4: start_as_current_observation (as_type defaults to 'span'); v3: start_as_current_span.
         self._span_cm = (getattr(client, "start_as_current_observation", None)
                          or getattr(client, "start_as_current_span", None))
+        self._trace_id = None   # set for the duration of a build → every span/event pins to it
+
+    def _start(self, name: str, *, input=None, metadata=None):
+        """Open a span ctx-mgr, pinned to the active build trace_id when set. Returns the ctx-mgr or
+        None (→ caller yields a no-op). Falls back to no-trace_context for SDKs without the kwarg."""
+        if self._span_cm is None:
+            return None
+        kw = {"name": name, "input": input}
+        if metadata is not None:
+            kw["metadata"] = metadata
+        tc = {"trace_id": self._trace_id} if self._trace_id else None
+        try:
+            if tc is not None:
+                try:
+                    return self._span_cm(trace_context=tc, **kw)
+                except TypeError:
+                    pass   # SDK signature without trace_context — fall through
+            return self._span_cm(**kw)
+        except Exception:  # noqa: BLE001
+            return None
 
     @contextlib.contextmanager
     def build(self, build_id: str, tags=None):
-        if self._span_cm is None:
-            yield _NoopSpan()
-            return
-        try:
-            # The root observation's name becomes the TRACE name (v4 has no update_current_trace);
-            # tags/session_id ride in metadata since v4 exposes no trace-tag setter on the obs.
-            cm = self._span_cm(name=f"build/{build_id}", input={"build_id": build_id},
-                               metadata={"session_id": build_id, "tags": list(tags or [])})
-        except Exception:  # noqa: BLE001
+        cm = self._start(f"build/{build_id}", input={"build_id": build_id},
+                         metadata={"session_id": build_id, "tags": list(tags or [])})
+        if cm is None:
             yield _NoopSpan()
             return
         with cm as span:
-            yield _LangfuseSpan(span)
+            prev = self._trace_id
+            self._trace_id = getattr(span, "trace_id", None) or prev   # pin children to THIS trace
+            try:
+                yield _LangfuseSpan(span)
+            finally:
+                self._trace_id = prev
 
     @contextlib.contextmanager
     def span(self, name: str, **attrs):
-        if self._span_cm is None:
-            yield _NoopSpan()
-            return
-        try:
-            cm = self._span_cm(name=name, input=(attrs or None))
-        except Exception:  # noqa: BLE001
+        cm = self._start(name, input=(attrs or None))
+        if cm is None:
             yield _NoopSpan()
             return
         with cm as span:
@@ -140,6 +161,13 @@ class _LangfuseTracer(_Tracer):
 
     def event(self, name: str, **attrs) -> None:
         try:
+            tc = {"trace_id": self._trace_id} if self._trace_id else None
+            if tc is not None:
+                try:
+                    self._client.create_event(name=name, input=(attrs or None), trace_context=tc)
+                    return
+                except TypeError:
+                    pass
             self._client.create_event(name=name, input=(attrs or None))
         except Exception:  # noqa: BLE001
             pass

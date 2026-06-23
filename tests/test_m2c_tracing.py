@@ -208,8 +208,9 @@ def test_chat_text_emits_llm_span(monkeypatch):
 
 # ── the real _LangfuseTracer wired against a fake langfuse v4 client (no langfuse installed) ───
 class _FakeObs:
-    def __init__(self, rec):
+    def __init__(self, rec, trace_id="trace-xyz"):
         self.rec = rec
+        self.trace_id = trace_id
 
     def update(self, **kw):
         self.rec["updates"].append(kw)
@@ -230,17 +231,20 @@ class _FakeObsCM:
 
 
 class _FakeV4Client:
-    """Mimics the langfuse 4.x surface we use: start_as_current_observation / create_event / flush."""
+    """Mimics the langfuse 4.x surface we use: start_as_current_observation / create_event / flush
+    (including the `trace_context` kwarg the consolidation passes to pin spans to one build trace)."""
 
     def __init__(self):
         self.rec = {"obs": [], "events": [], "updates": [], "flushed": 0}
 
-    def start_as_current_observation(self, *, name, input=None, metadata=None, as_type="span", **kw):
-        self.rec["obs"].append({"name": name, "input": input, "metadata": metadata})
+    def start_as_current_observation(self, *, name, input=None, metadata=None, as_type="span",
+                                     trace_context=None, **kw):
+        self.rec["obs"].append({"name": name, "input": input, "metadata": metadata,
+                                "trace_context": trace_context})
         return _FakeObsCM(self.rec)
 
-    def create_event(self, *, name, input=None, **kw):
-        self.rec["events"].append({"name": name, "input": input})
+    def create_event(self, *, name, input=None, trace_context=None, **kw):
+        self.rec["events"].append({"name": name, "input": input, "trace_context": trace_context})
 
     def flush(self):
         self.rec["flushed"] += 1
@@ -268,23 +272,38 @@ def test_langfuse_tracer_targets_v4_observation_api():
 
     c = _FakeV4Client()
     t = _LangfuseTracer(c)
-    with t.build("poc-1", tags=["tech-scout", "gradio-chatbot"]) as sp:
-        sp.update(output="ok")
-    with t.span("broker.exec", cmd="pytest -q") as sp:
-        sp.update(output={"rc": 0})
-    t.event("proxy.denials", count=2)
+    # nest the child span + event INSIDE the build (as the real pipeline does) so the consolidation
+    # (one trace per build) is exercised: child spans/events must pin to the build's trace_id.
+    with t.build("poc-1", tags=["tech-scout", "gradio-chatbot"]) as bsp:
+        bsp.update(output="ok")
+        with t.span("broker.exec", cmd="pytest -q") as ssp:
+            ssp.update(output={"rc": 0})
+        t.event("proxy.denials", count=2)
     t.flush()
 
-    names = [o["name"] for o in c.rec["obs"]]
-    assert "build/poc-1" in names                 # root obs name becomes the trace name (v4 has no update_trace)
-    assert "broker.exec" in names
+    obs = {o["name"]: o for o in c.rec["obs"]}
+    assert "build/poc-1" in obs                    # root obs name becomes the trace name (v4 has no update_trace)
+    assert "broker.exec" in obs
     assert c.rec["updates"]                        # span.update reached the obs
     assert c.rec["events"] and c.rec["events"][0]["name"] == "proxy.denials"
     assert c.rec["flushed"] == 1
     # the build obs carries session_id + tags in metadata (v4 exposes no trace-tag setter)
-    build_obs = next(o for o in c.rec["obs"] if o["name"] == "build/poc-1")
-    assert build_obs["metadata"]["session_id"] == "poc-1"
-    assert "tech-scout" in build_obs["metadata"]["tags"]
+    assert obs["build/poc-1"]["metadata"]["session_id"] == "poc-1"
+    assert "tech-scout" in obs["build/poc-1"]["metadata"]["tags"]
+    # ONE TRACE PER BUILD: the child span + the event pin to the build's trace_id (trace-xyz)
+    assert obs["broker.exec"]["trace_context"] == {"trace_id": "trace-xyz"}
+    assert c.rec["events"][0]["trace_context"] == {"trace_id": "trace-xyz"}
+
+
+def test_langfuse_tracer_no_trace_pin_outside_build():
+    # a span created OUTSIDE any build has no active trace_id → no trace_context forced (own trace).
+    from poc_foundry.tracing import _LangfuseTracer
+
+    c = _FakeV4Client()
+    t = _LangfuseTracer(c)
+    with t.span("broker.exec", cmd="x"):
+        pass
+    assert c.rec["obs"][0]["trace_context"] is None
 
 
 def test_langfuse_tracer_falls_back_to_v3_span_api():

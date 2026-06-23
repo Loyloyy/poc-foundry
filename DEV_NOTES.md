@@ -493,10 +493,16 @@ run the SDK UNGUARDED inside the app container —
 - **`span(name, **attrs)` takes the name positionally** — an attr keyed `name=` raises `TypeError`.
   Broker spans use `box=`/`svc=` for the sandbox/service name (guarded by a test).
 - **Server is shared, SDK is per-app.** poc-foundry + stage-2 hit the SAME langfuse instance; the SDK
-  version is each app's own pip pin. Mixing 3.x/4.x clients against one 4.x server is supported, but
-  poc-foundry is pinned to 4.x to match. Keys currently map to the `stage-2-research` project (depot
-  reused its init keys) — a dedicated `stage-3-poc` project is a hygiene follow-up (new keys in `.env`,
-  no code change, since `tracing.py` is project-agnostic).
+  version is each app's own pip pin. poc-foundry is pinned to 4.x. A dedicated **`stage-3-poc`** project
+  (own keys in `.env`) was created so stage-3 traces don't pollute stage-2 — no code change, since
+  `tracing.py` is project-agnostic. **Validated 2026-06-24:** `build/poc-…` trace, 21 observation
+  levels, full span tree, survives a depot restart.
+- **The validation tail was all service-depot infra, not poc-foundry.** Three langfuse outages while
+  proving the live trace: clickhouse + minio containers orphaned off `service-depot_default` by a stray
+  `docker network/system prune` (deletes the net under running `restart:always` containers → zero
+  attachments → clickhouse/minio DNS breaks, postgres survives), then a post-recreate `:3000`
+  connection-refused. Fixed in service-depot (`./depot down/up` + a prune guard). If tracing breaks
+  again, suspect the depot network FIRST (audit every container's networks), not the poc-foundry code.
 
 Flush-on-exit is in `core` (`build_poc`/`resume_build` `finally`). The msgpack-registration follow-up
 (above) was NOT folded into this slice — same unverifiable-heavy-dep-API reason; shipping it blind
