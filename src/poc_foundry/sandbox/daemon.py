@@ -82,7 +82,13 @@ class BrokerDaemon:
 
 
 def main() -> int:
+    from poc_foundry import tracing
     from poc_foundry.config import load_config
+
+    # The daemon runs the instrumented in-process Broker but has NO build-root context — its spans would
+    # scatter as standalone top-level traces (and duplicate the orchestrator's, which trace broker ops
+    # WITH the build context via client.py). So the daemon never traces.
+    tracing.disable()
 
     socket_path = os.environ.get("PF_BROKER_SOCKET", "").strip()
     if not socket_path:

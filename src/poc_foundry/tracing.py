@@ -235,6 +235,14 @@ def reset_tracer() -> None:
     _current = None
 
 
+def disable() -> None:
+    """Force tracing OFF for THIS process regardless of ``PF_TRACING``. Used by the broker daemon:
+    it runs the real ``Broker`` (instrumented) but has NO build-root context, so its spans would
+    scatter as standalone top-level traces (and duplicate the orchestrator's). The orchestrator side
+    (``client.py``) traces broker ops WITH the build context instead — so the daemon stays silent."""
+    set_tracer(_Tracer())
+
+
 # ── module-level delegators (the seam every caller uses) ──────────────────────
 def build(build_id: str, tags=None):
     return get_tracer().build(build_id, tags)

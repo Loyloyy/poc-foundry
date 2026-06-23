@@ -803,5 +803,15 @@ exec/VERIFY/gates/critic/clean-room/proxy denials; and our LLM calls go through 
   a non-issue — one trace with ~20–50 nested observations is the intended Langfuse model and self-hosted
   handles it easily; the goal was a single drill-down tree, not fewer observations. Local: 74 fakes (a
   v4 test asserts the child span+event get `parent == build/<id>`; one asserts a span OUTSIDE a build is
-  client-level; the v3 fallback uses `start_as_current_span`). *Re-validating the single-trace shape on
-  the server (this is the test in flight).*
+  client-level; the v3 fallback uses `start_as_current_span`).
+- **ACTUAL root cause of the scatter — the broker DAEMON was double-emitting (2026-06-24).** The
+  scattered `broker.*` traces were NOT a nesting/OTEL problem at all: the out-of-process **broker daemon
+  (`pf-broker`)** runs the instrumented in-process `Broker` (`broker.py`) AND inherits `PF_TRACING=1`
+  (via `env_file ../.env`), but has **no build-root context** → every `provision/create/exec/destroy`
+  span it created became a standalone top-level trace, duplicating the orchestrator's (which trace the
+  same ops WITH the build context via `client.py`/`RemoteBroker`). Fix: `tracing.disable()` (forces the
+  no-op tracer for a process) called at the top of `daemon.main()` — the daemon never traces; the
+  orchestrator side remains the single source of broker spans, nested under `build/<id>`. (The
+  in-process broker.py spans still help the local no-daemon path, where they DO share the build
+  process/context.) +1 fakes test (`disable()` silences even an injected tracer). *Server re-validation
+  of the single-clean-trace shape in flight.*

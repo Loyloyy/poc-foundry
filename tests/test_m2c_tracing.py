@@ -100,6 +100,23 @@ def test_set_and_reset_tracer():
     assert tracing.get_tracer() is not fake
 
 
+def test_disable_forces_noop_even_with_a_tracer_set():
+    # the broker daemon calls tracing.disable() so its (build-context-less) spans don't scatter as
+    # standalone traces — disable() must silence even an already-set tracer.
+    fake = FakeTracer()
+    tracing.set_tracer(fake)
+    tracing.disable()
+    assert tracing.get_tracer().enabled is False
+    with tracing.build("poc-daemon") as sp:
+        sp.update(output="x")
+        with tracing.span("broker.exec", cmd="docker exec ...") as ssp:
+            ssp.update(output={"rc": 0})
+        tracing.event("proxy.denials", count=1)
+    tracing.flush()
+    assert fake.spans == [] and fake.events == [] and fake.flushed == 0   # nothing reached the fake
+    tracing.reset_tracer()
+
+
 # ── broker-layer spans (in-process Broker with a fake _run) ───────────────────
 def test_broker_spans_at_provision_create_exec_destroy(monkeypatch):
     import poc_foundry.sandbox.broker as B
