@@ -121,6 +121,9 @@ def _emit_failed(build_dir: Path, build_id: str, ctx, exc: Exception) -> None:
         save(pa, build_dir)
         (build_dir / "report.md").write_text(
             f"# Build {build_id} — FAILED\n\n```\n{type(exc).__name__}: {exc}\n```\n")
+        # scrub the forensic artifact: a phase-crash traceback embeds the vLLM endpoint / id / paths.
+        from poc_foundry import scrub
+        scrub.scrub_build_dir(build_dir)
     except Exception:  # noqa: BLE001
         pass
 

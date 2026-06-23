@@ -692,6 +692,13 @@ def p7_emit(state, ctx: Ctx) -> dict:
     (build_dir / "report.md").write_text(report)
     (build_dir / "00_INDEX.md").write_text(_index_md(pa, build_dir))
 
+    # hygiene scrubber (rule #1): rewrite the vLLM host / served-model id / paths to placeholders in
+    # ALL emitted text (artifact JSON, report, index, progress, egress log) so a shared bundle is clean.
+    from poc_foundry import scrub
+    scrubbed = scrub.scrub_build_dir(build_dir)
+    if scrubbed:
+        ctx.say(f"P7 emit: hygiene scrubber rewrote {len(scrubbed)} emitted file(s)")
+
     ctx.say(f"P7 emit: status={status}; artifact + workspace written to {build_dir}")
     return {"phase": "emit", "status": status, "demonstrates_core_value": demonstrates,
             "log": state.log + [f"P7 emit: {status}"]}

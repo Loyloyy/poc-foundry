@@ -600,3 +600,29 @@ RED→GREEN against REAL pgvector; service reaped, ZERO leaks) — but came out 
   workspace `core.py` is `M0 only`, not `BAD`). 43/43 fakes; contract 11/11.
 - **What the run also validated:** out-of-process broker + the sibling-service infra are sound — the
   failure was purely the workspace-pollution bug, downstream of the gates working.
+
+## #18 — M2b S1: emitted-output hygiene scrubber (`scrub.py`) (2026-06-23)
+
+Closes the last open rule-#1 item: a build BUNDLE (shared with a human) must contain no vLLM
+host/IP, served-model id, API key, or NFS/model/workspace path. `builds/` is gitignored (not a
+public-repo risk) but the bundle is the share unit, so the scrubber runs at EMIT.
+
+- **Pure, env-driven, never hardcoded.** `collect_secrets()` reads the sensitive values from the
+  process env (`.env` already loaded by `config`) + the gitignored `build_env.json` sidecar,
+  classifying each `KEY=value` by suffix (`_MODEL` → `<served-model-id>`; `_API_BASE`/`_ENDPOINT` →
+  `<vllm-host:port>` for the full URL + authority and `<vllm-host>` for the bare host; `_API_KEY`/
+  `_TOKEN`/`_PASSWORD` → `<redacted-key>`; `_ALLOW_HOST` → endpoint; `_HOST` → `<service-host>`;
+  `*PATH*`/`_DIR`/`_ROOT`/`*NFS*`/`_SOCKET` → `/path/...`). No value is hardcoded — an unconfigured
+  run is a clean no-op.
+- **Conservative + deterministic.** Only literal values present in the run's config are rewritten
+  (never mangles unrelated prose like `localhost:7860`); the substitution list is deduped and applied
+  **longest-value-first** so `host:port` wins over its bare-`host` substring. Sentinels/generic tokens
+  (`not-needed`, `localhost`, `postgres`, …) and <4-char tokens are skipped to avoid false positives.
+- **Wired at the two emit seams.** `p7_emit` calls `scrub.scrub_build_dir(build_dir)` AFTER writing
+  all outputs (artifact `v*.json`, `report.md`, `00_INDEX.md`, `PROGRESS.md`, `logs/*.log`);
+  `core._emit_failed` scrubs the forensic crash artifact (a phase-crash traceback embeds the
+  endpoint/id/paths). Placeholders are quote-free so the artifact JSON stays valid after scrubbing.
+- **Verified locally (48/48 fakes; +4 in `tests/test_m2b_scrub.py`):** fake host/model/key/paths in →
+  gone, placeholders present, generic URLs untouched, JSON still parseable, no-secrets = no-op.
+  *Server check: run a build, then `scripts/check_hygiene.sh` against a `builds/<id>/` sample (its
+  dynamic layer greps for the real `.env` values) — expect HYGIENE clean on the emitted text.*

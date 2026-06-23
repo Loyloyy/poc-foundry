@@ -173,8 +173,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       (pgvector) build runs end-to-end → `done`; ✅ zero resource leaks after every run.
 
 ## M2b — resilience
+- [x] **S1 hygiene scrubber (2026-06-23, local):** `scrub.py` — pure, env-driven (`.env` +
+      `build_env.json`, never hardcoded) emitted-output scrubber. `collect_secrets()` classifies
+      `KEY=value` by suffix → placeholders (`<served-model-id>`/`<vllm-host:port>`/`<vllm-host>`/
+      `<redacted-key>`/`<service-host>`/`/path/...`); `scrub_build_dir()` rewrites the artifact JSON +
+      report/index/progress + `logs/*.log`, longest-value-first, conservative (literals only, generic
+      tokens skipped, JSON stays valid). Wired into `p7_emit` + `core._emit_failed`. Closes the last
+      open rule-#1 item (DECISIONS #18). Local: **48/48 fakes** (+4 `test_m2b_scrub.py`) + contract
+      11/11 + hygiene clean. *Server: build → `check_hygiene.sh` on a `builds/<id>/` sample = clean.*
 - [ ] budgets/caps/escalation · checkpoint/resume/stop · salvage + descope report · contention
-      indicator · hygiene scrubber
+      indicator
 - **Acceptance:** a killed run resumes from last green commit; a forced descope yields a descope
       report; scrubber leaves no endpoint/id in emitted text.
 
