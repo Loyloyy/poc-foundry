@@ -23,9 +23,12 @@ runtime = [
   "httpx",
   "trafilatura>=1.8",            # vendored Stage-2 scrape tool
 ]
-# Observability — optional self-hosted Langfuse (../service-depot, project stage-3-poc). Lazy-imported
-# + env-gated (PF_TRACING) so the core stays import-light when tracing is off.
-obs = ["langfuse>=3"]
+# Observability — optional self-hosted Langfuse (../service-depot). Lazy-imported + env-gated
+# (PF_TRACING) so the core stays import-light when tracing is off. Pinned to the 4.x line: the on-prem
+# instance is langfuse 4.x and the SDK API changed across the v3→v4 split (start_as_current_span →
+# start_as_current_observation; update_current_trace dropped). tracing.py feature-detects both, but the
+# pin stops a silent resolve onto a future major that breaks the API again.
+obs = ["langfuse>=4,<5"]
 # Web UI (M3) — FastAPI control/presentation over the headless contract; NO pipeline logic.
 ui = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "sse-starlette>=2"]
 test = ["pytest>=8"]

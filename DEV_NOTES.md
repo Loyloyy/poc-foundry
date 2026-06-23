@@ -461,21 +461,43 @@ prior process). The per-iter / per-run CAPS still bound each leg correctly; only
 accounting total is missing. Fix when needed: persist the meter counters in `BuildState` (checkpointed)
 and re-seed `METER.begin_run` from them on resume. Deferred — low impact (resume is the exception path).
 
-## Tracing (`tracing.py`) authored blind for langfuse v3 (M2c S1)
+## Tracing (`tracing.py`) — langfuse 4.x on the server, NOT v3 (M2c S1)
 
-`langfuse` is not installed on the 3.10 dev box (it's the `obs` extra, server/Docker only), so the v3
-API used by `_LangfuseTracer` (`get_client`, `start_as_current_span`, `update_current_trace`,
-`create_event`, `flush`) is authored from docs and CANNOT be run locally. Two consequences:
+`langfuse` isn't installed on the 3.10 dev box (it's the `obs` extra, server/Docker only), so the SDK
+API can't be run locally. It was first authored against **v3**; the server actually resolved
+**langfuse 4.9.1** (because `pyproject` only said `langfuse>=3`), and v4 renamed the API — so every
+span hit a guarded `AttributeError` and no-op'd → **empty trace despite auth/keys/host all OK**. Fixed
++ pinned `langfuse>=4,<5`. The v4/v3 differences that bit us (introspected on the server):
 
-- **Every langfuse call is `try/except`-guarded** → a wrong API name (or a v3.x rename) degrades to a
-  no-op span instead of crashing the build. So locally the green bar can't catch an API mismatch; it
-  shows up only as **missing spans in Langfuse on the server**. If a build's trace is empty in
-  `stage-3-poc` (with `PF_TRACING=1` + keys set), the API names are the first suspect — check the
-  installed `langfuse` version and adjust `_LangfuseTracer`.
-- **`span(name, **attrs)` takes the name positionally** — passing an attr keyed `name=` raises
-  `TypeError: got multiple values for argument 'name'`. The broker spans use `box=`/`svc=` for the
-  sandbox/service name for exactly this reason (a `test_m2c_tracing` case guards it).
+- **Span creator:** v4 `client.start_as_current_observation(name=…, as_type="span"|…, input=…,
+  metadata=…)` (a ctx-mgr yielding a `LangfuseSpan`); v3 was `start_as_current_span`. `_LangfuseTracer`
+  **feature-detects** both (`getattr(... "start_as_current_observation") or ... "start_as_current_span"`)
+  and `test_m2c_tracing` exercises each with a fake client.
+- **No `update_current_trace` / `obs.update_trace` in v4.** The TRACE name therefore comes from the
+  ROOT observation's name → I name the root `build/<id>`. tags/session_id have no v4 setter, so they
+  ride in the root obs `metadata`.
+- **Events:** `client.create_event(name=…, input=…)` — same in both.
+- **Obs methods (v4):** `update(output=…, metadata=…, level=…)`, `end()`, `create_event(…)`,
+  `score`/`score_trace`, `set_trace_io`, `start_(as_current_)observation` (nesting), `id`, `trace_id`.
+
+How to debug an empty trace fast (no langfuse locally, so the green bar can't catch an API drift):
+run the SDK UNGUARDED inside the app container —
+`$DC run --rm -e CK='from langfuse import get_client;import importlib.metadata as M;c=get_client();print(M.version("langfuse"),c.auth_check());s=c.start_observation(name="diag");s.update(output="x");s.end();c.flush();print("OK")' app python -c "import os;exec(os.environ['CK'])"`.
+`auth True` + an `AttributeError` ⇒ API mismatch; a `Read timed out … Failed to export span batch`
+⇒ langfuse-web OTEL ingest is slow/unhealthy (see below), not a code bug.
+
+- **OTEL export timeout (watch this).** Right after langfuse-web recovered from its clickhouse-network
+  crash loop, span export to `langfuse-web:3000` **timed out at 5s** (`Failed to export span batch …
+  Read timed out`). Likely warm-up; if it persists, the OTEL ingest endpoint is too slow and we bump
+  the exporter timeout (langfuse env / `OTEL_*`) or check langfuse-worker→clickhouse health.
+- **`span(name, **attrs)` takes the name positionally** — an attr keyed `name=` raises `TypeError`.
+  Broker spans use `box=`/`svc=` for the sandbox/service name (guarded by a test).
+- **Server is shared, SDK is per-app.** poc-foundry + stage-2 hit the SAME langfuse instance; the SDK
+  version is each app's own pip pin. Mixing 3.x/4.x clients against one 4.x server is supported, but
+  poc-foundry is pinned to 4.x to match. Keys currently map to the `stage-2-research` project (depot
+  reused its init keys) — a dedicated `stage-3-poc` project is a hygiene follow-up (new keys in `.env`,
+  no code change, since `tracing.py` is project-agnostic).
 
 Flush-on-exit is in `core` (`build_poc`/`resume_build` `finally`). The msgpack-registration follow-up
-(above) was NOT folded into this slice despite both being graph/obs wiring — same unverifiable-heavy-
-dep-API reason; shipping it blind risks the working resume path.
+(above) was NOT folded into this slice — same unverifiable-heavy-dep-API reason; shipping it blind
+risks the working resume path.

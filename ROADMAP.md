@@ -232,13 +232,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       **critic**, **cleanroom**, the raw **llm.<role>** call (chat_text — no handler sees it), and a
       **proxy.denials** event (TCP_DENIED count from the egress log). Flush-on-exit in `core` (build +
       resume). Module singleton + `set_tracer`/`reset_tracer` for injection (DECISIONS #22). Local:
-      **71 fakes** (+6 `test_m2c_tracing.py`: no-op when off, dep-absent degrades, broker-layer spans
+      **73 fakes** (+8 `test_m2c_tracing.py`: no-op when off, dep-absent degrades, broker-layer spans
       via a fake `_run`, the phase-pipeline spans + proxy-denial event via the m1 fakes harness, the
-      chat_text llm span) + contract 11/11 + hygiene clean. *Server: spans appear in Langfuse
-      `stage-3-poc` for a build, flush-on-exit confirmed. Langfuse v3 API authored blind (no langfuse
-      on the 3.10 box) — every call guarded → degrades to no-op if an API name is off; confirm/adjust
-      on the server.* msgpack-registration carry-forward NOT folded in (unverifiable API; left as the
-      documented follow-up so the working resume path isn't risked on a guess).
+      chat_text llm span, + the real `_LangfuseTracer` against fake langfuse v4 & v3 clients) + contract
+      11/11 + hygiene clean. **Server iteration (2026-06-23):** first build trace was EMPTY — the server
+      has **langfuse 4.9.1** and the v3-authored API no-op'd under the guards; fixed by feature-detecting
+      v4 `start_as_current_observation` (trace name = root obs `build/<id>`; tags/session in metadata),
+      pinned `langfuse>=4,<5` (langfuse-web was also down in a clickhouse-network crash loop, fixed in
+      service-depot). *Re-validation pending: build trace appears in Langfuse with the span tree +
+      flush-on-exit; watch the 5s OTEL export timeout seen during langfuse-web warm-up.*
+      msgpack-registration carry-forward NOT folded in (unverifiable API; documented follow-up).
 - [ ] S2 tiered evals v1 (spec-eval + plan-eval vs fixtures) · S3 playbook injection + reflection ·
       S4 research-on-gaps (deepagents + SearXNG) · S5 template CI
 - **Acceptance:** spec/plan evals run against fixtures; manual spans appear in Langfuse `stage-3-poc`.

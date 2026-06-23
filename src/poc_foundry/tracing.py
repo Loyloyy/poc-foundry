@@ -94,33 +94,44 @@ class _Tracer:
 
 
 class _LangfuseTracer(_Tracer):
-    """Real tracer over a Langfuse v3 client. Each operation is guarded — on ANY failure it falls back
-    to a no-op span so a tracing problem can never halt a build."""
+    """Real tracer over a Langfuse client. Version-resilient across the v3/v4 SDK split (the on-prem
+    instance resolved langfuse 4.x): the span-creator is `start_as_current_observation` on v4 and
+    `start_as_current_span` on v3 (feature-detected). v4 dropped `update_current_trace`/`update_trace`,
+    so the TRACE name comes from the root observation's name (`build/<id>`) and tags/session ride in
+    `metadata`. Every operation is guarded — on ANY failure it falls back to a no-op span so a tracing
+    problem can never halt a build."""
 
     enabled = True
 
     def __init__(self, client):
         self._client = client
+        # v4: start_as_current_observation (as_type defaults to 'span'); v3: start_as_current_span.
+        self._span_cm = (getattr(client, "start_as_current_observation", None)
+                         or getattr(client, "start_as_current_span", None))
 
     @contextlib.contextmanager
     def build(self, build_id: str, tags=None):
+        if self._span_cm is None:
+            yield _NoopSpan()
+            return
         try:
-            cm = self._client.start_as_current_span(name="build", input={"build_id": build_id})
+            # The root observation's name becomes the TRACE name (v4 has no update_current_trace);
+            # tags/session_id ride in metadata since v4 exposes no trace-tag setter on the obs.
+            cm = self._span_cm(name=f"build/{build_id}", input={"build_id": build_id},
+                               metadata={"session_id": build_id, "tags": list(tags or [])})
         except Exception:  # noqa: BLE001
             yield _NoopSpan()
             return
         with cm as span:
-            try:
-                self._client.update_current_trace(
-                    name=f"build/{build_id}", session_id=build_id, tags=list(tags or []))
-            except Exception:  # noqa: BLE001
-                pass
             yield _LangfuseSpan(span)
 
     @contextlib.contextmanager
     def span(self, name: str, **attrs):
+        if self._span_cm is None:
+            yield _NoopSpan()
+            return
         try:
-            cm = self._client.start_as_current_span(name=name, input=(attrs or None))
+            cm = self._span_cm(name=name, input=(attrs or None))
         except Exception:  # noqa: BLE001
             yield _NoopSpan()
             return

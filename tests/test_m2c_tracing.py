@@ -204,3 +204,96 @@ def test_chat_text_emits_llm_span(monkeypatch):
     assert out == "ECHO: hi"
     assert ("llm.tester", {"role": "tester"}) in fake.spans
     assert any(name == "llm.tester" and kw.get("output") for name, kw in fake.updates)
+
+
+# ── the real _LangfuseTracer wired against a fake langfuse v4 client (no langfuse installed) ───
+class _FakeObs:
+    def __init__(self, rec):
+        self.rec = rec
+
+    def update(self, **kw):
+        self.rec["updates"].append(kw)
+
+    def create_event(self, **kw):
+        self.rec["events"].append(kw)
+
+
+class _FakeObsCM:
+    def __init__(self, rec):
+        self.rec = rec
+
+    def __enter__(self):
+        return _FakeObs(self.rec)
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeV4Client:
+    """Mimics the langfuse 4.x surface we use: start_as_current_observation / create_event / flush."""
+
+    def __init__(self):
+        self.rec = {"obs": [], "events": [], "updates": [], "flushed": 0}
+
+    def start_as_current_observation(self, *, name, input=None, metadata=None, as_type="span", **kw):
+        self.rec["obs"].append({"name": name, "input": input, "metadata": metadata})
+        return _FakeObsCM(self.rec)
+
+    def create_event(self, *, name, input=None, **kw):
+        self.rec["events"].append({"name": name, "input": input})
+
+    def flush(self):
+        self.rec["flushed"] += 1
+
+
+class _FakeV3Client:
+    """Mimics the older v3 surface (only start_as_current_span) — feature-detection must still work."""
+
+    def __init__(self):
+        self.rec = {"obs": [], "events": [], "updates": [], "flushed": 0}
+
+    def start_as_current_span(self, *, name, input=None, metadata=None, **kw):
+        self.rec["obs"].append({"name": name, "input": input, "metadata": metadata})
+        return _FakeObsCM(self.rec)
+
+    def create_event(self, *, name, input=None, **kw):
+        self.rec["events"].append({"name": name, "input": input})
+
+    def flush(self):
+        self.rec["flushed"] += 1
+
+
+def test_langfuse_tracer_targets_v4_observation_api():
+    from poc_foundry.tracing import _LangfuseTracer
+
+    c = _FakeV4Client()
+    t = _LangfuseTracer(c)
+    with t.build("poc-1", tags=["tech-scout", "gradio-chatbot"]) as sp:
+        sp.update(output="ok")
+    with t.span("broker.exec", cmd="pytest -q") as sp:
+        sp.update(output={"rc": 0})
+    t.event("proxy.denials", count=2)
+    t.flush()
+
+    names = [o["name"] for o in c.rec["obs"]]
+    assert "build/poc-1" in names                 # root obs name becomes the trace name (v4 has no update_trace)
+    assert "broker.exec" in names
+    assert c.rec["updates"]                        # span.update reached the obs
+    assert c.rec["events"] and c.rec["events"][0]["name"] == "proxy.denials"
+    assert c.rec["flushed"] == 1
+    # the build obs carries session_id + tags in metadata (v4 exposes no trace-tag setter)
+    build_obs = next(o for o in c.rec["obs"] if o["name"] == "build/poc-1")
+    assert build_obs["metadata"]["session_id"] == "poc-1"
+    assert "tech-scout" in build_obs["metadata"]["tags"]
+
+
+def test_langfuse_tracer_falls_back_to_v3_span_api():
+    from poc_foundry.tracing import _LangfuseTracer
+
+    c = _FakeV3Client()
+    t = _LangfuseTracer(c)
+    with t.span("spec") as sp:
+        sp.update(output="x")
+    t.flush()
+    assert [o["name"] for o in c.rec["obs"]] == ["spec"]
+    assert c.rec["flushed"] == 1

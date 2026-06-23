@@ -753,17 +753,31 @@ exec/VERIFY/gates/critic/clean-room/proxy denials; and our LLM calls go through 
   **gate.diff-scan** spans and **gate.incident** events (diff-scan + ledger-gap); **critic** (adequacy
   review); **cleanroom**; **llm.<role>** (chat_text); and a **proxy.denials** event (TCP_DENIED count
   parsed from the egress log at P7 — the detective egress control surfaced in the trace).
-- **Authored blind (the constraint).** No `langfuse` on the 3.10 box → the v3 API (`get_client`,
-  `start_as_current_span`, `update_current_trace`, `create_event`, `flush`) is authored from docs, not
-  run locally. The guards mean a wrong API name silently degrades to no-op (spans just won't appear) —
-  it can't crash a build — so the **server is the validation**: confirm spans in `stage-3-poc` + flush;
-  adjust API names if the installed version differs. (Same "can't verify a heavy-dep API on 3.10"
-  posture as the langgraph msgpack note.)
+- **Authored blind → corrected on the server (langfuse 4.x, not v3).** No `langfuse` on the 3.10 box,
+  so the API was first authored against v3. The server resolved **langfuse 4.9.1** (`pyproject` said
+  only `langfuse>=3`), and v4 renamed the API — so every guarded span hit an `AttributeError` and
+  no-op'd → an EMPTY trace even though `auth_check`/keys/host were fine. The guards did their job (no
+  crash) but also HID the mismatch from the green bar — confirming "the server is the validation" for
+  heavy-dep APIs. Fixed: `_LangfuseTracer` feature-detects `start_as_current_observation` (v4) vs
+  `start_as_current_span` (v3); v4 has no `update_current_trace`/`update_trace`, so the trace name comes
+  from the root obs name (`build/<id>`) and tags/session ride in `metadata`; `create_event`/`flush`
+  unchanged. Pinned `langfuse>=4,<5` so it can't silently resolve onto another API-breaking major.
+  (DEV_NOTES has the full v4 surface + an unguarded-SDK debug one-liner.)
+- **Shared server, per-app SDK; project hygiene follow-up.** poc-foundry traces to the SAME on-prem
+  langfuse instance as stage-2 (easier to access; a 4.x client against the 4.x server is fine). The
+  depot reused its init keys, so traces currently land in the `stage-2-research` project; a dedicated
+  `stage-3-poc` project is a follow-up — new keys in `.env`, NO code change (`tracing.py` is
+  project-agnostic; the `PROJECT` constant is only a label).
+- **OTEL export timeout observed (non-blocking).** Right after langfuse-web recovered from a
+  clickhouse-network outage, span batch export timed out at 5s (warm-up suspected); if it persists the
+  OTEL ingest path is too slow → bump the exporter timeout / check langfuse-worker→clickhouse.
 - **msgpack-registration carry-forward NOT folded in here.** It's an unverifiable langgraph-version
   API and the working resume path shouldn't be risked on a guess; left as the documented follow-up
   (#21 / DEV_NOTES).
-- **Verified locally (71/71 fakes; +6 `test_m2c_tracing.py`):** no-op when off; PF_TRACING-on-but-dep-
+- **Verified locally (73/73 fakes; +8 `test_m2c_tracing.py`):** no-op when off; PF_TRACING-on-but-dep-
   absent degrades to no-op; `set_tracer`/`reset_tracer`; broker-layer spans via a fake `_run`; the
   phase-pipeline spans + the proxy-denial event via the m1 fakes harness (build still `done` — spans
-  don't perturb it); the chat_text `llm.<role>` span + output update. Contract 11/11; hygiene clean.
-  *Server-validation pending.*
+  don't perturb it); the chat_text `llm.<role>` span; and the real `_LangfuseTracer` wired against
+  fake langfuse **v4 + v3** clients (the feature-detection both ways). Contract 11/11; hygiene clean.
+  *Server: build trace was empty under the v3-authored code (the 4.x mismatch); re-validation pending
+  on the fixed code.*
