@@ -145,7 +145,11 @@ def generate_reply(message: str, history: list | None = None) -> str:
         d = docs[0]
         return f"{cite(d)} {snippet(d)}"          # → e.g. "[1] Retrieval augmented generation grounds ..."
 
-    Extend for the spec's exact criteria (multiple matches → cite each in id order; a `[doc-N]` marker →
-    format `cite` accordingly). The stub below does NO retrieval, so a real criterion test is RED first.
+    IMPORTANT — MATCH THE CITATION FORMAT THE STAGED TEST ASSERTS. Read the test first: it may want
+    ``[1]`` (the default `cite`), ``[doc-1]`` (return ``f"[doc-{d['id']}]"``), or ``[source:<title>]``
+    (return ``f"[source:{d['title']}]"``). Producing the wrong marker shape is the usual reason a first
+    attempt fails — so adapt the marker to the test, don't assume ``[1]``. Extend for the spec's other
+    criteria too (multiple matches → cite each in id order; absent topic → no marker). The stub below
+    does NO retrieval, so a real criterion test is RED first.
     """
     return "I couldn't find any relevant documents."
