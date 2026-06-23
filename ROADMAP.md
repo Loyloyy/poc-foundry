@@ -180,7 +180,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       report/index/progress + `logs/*.log`, longest-value-first, conservative (literals only, generic
       tokens skipped, JSON stays valid). Wired into `p7_emit` + `core._emit_failed`. Closes the last
       open rule-#1 item (DECISIONS #18). Local: **48/48 fakes** (+4 `test_m2b_scrub.py`) + contract
-      11/11 + hygiene clean. *Server: build → `check_hygiene.sh` on a `builds/<id>/` sample = clean.*
+      11/11 + hygiene clean. **Server-validated (2026-06-23):** chatbot build `done`; grep of emitted
+      text incl. `logs/egress.log` for the real host/model-id = `SCRUBBED ✓`.
 - [x] **S2 budget/cap enforcement + contention (2026-06-23, local):** a process-global meter at the
       `models.py` choke point (`METER` in `build_chat_model`/`chat_text`) counts LLM calls per-iter +
       per-run + samples latency. Enforces `max_llm_calls_per_iter/_run` + the (secondary) wall-clock
@@ -189,19 +190,31 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       run) → `core._salvage_run` recovers the checkpointed state, rolls back to last green, records
       `caps_hit[]`, emits honest `incomplete`. `p7_emit` populates `budget` + `caps_hit`; report gains
       a Budget section. Research-escalation rung = M2c stub (DECISIONS #19). Local: **56/56 fakes**
-      (+8 `test_m2b_budget.py`) + contract 11/11 + hygiene clean. *Server: normal build shows
-      `budget.llm_calls`/`contention_indicator`; `PF_MAX_LLM_CALLS_RUN=3` → run-cap salvage to
-      `incomplete` + `caps_hit`, ZERO leaks.*
+      (+8 `test_m2b_budget.py`) + contract 11/11 + hygiene clean. **Server-validated (2026-06-23):**
+      normal build `done` with `budget.llm_calls=42`/`contention_indicator=56s`; `PF_MAX_LLM_CALLS_RUN=3`
+      → run-cap salvage to `incomplete` + `caps_hit` (NO crash — `BudgetExceeded` propagated through
+      LangGraph), ZERO leaks.
 - [x] **S3 run-cap salvage — abandoned.patch + descope + gaps (2026-06-23, local):** the S2 salvage
       path now captures the in-flight (un-merged) coder edits to `builds/<id>/abandoned.patch` BEFORE
       the rollback, appends a `descope_report[]` entry for the in-flight criterion (with a resume-or-
       finish-by-hand `finish_path`), and `final_verdict.gaps` is populated for every build (criteria
-      not `met`). Report gains Gaps + the index advertises the patch (DECISIONS #20). Local: **58/58
-      fakes** (+2 `test_m2b_salvage.py`) + contract 11/11 + hygiene clean. *Server: the
-      `PF_MAX_LLM_CALLS_RUN=3` run now also drops `abandoned.patch` + a Descope/Gaps section.*
-- [ ] checkpoint/resume/stop (S4)
+      not `met`). Report gains Gaps + the index advertises the patch (DECISIONS #20). Descope targets
+      the first UNMET criterion (server-found fix: was naming the already-met core). Local: **59/59
+      fakes** (+3 `test_m2b_salvage.py`) + contract 11/11 + hygiene clean. **Server-validated
+      (2026-06-23):** `PF_MAX_LLM_CALLS_RUN=3` → `incomplete` + Descope + Gaps + `caps_hit`
+      (abandoned.patch correctly absent: cap fired post-commit on the critic call → clean tree).
+- [x] **S4 cooperative stop + resume hardening (2026-06-23, local):** `control.py` (sentinel +
+      `BuildStopped` BaseException); `graph.wrap` checks `raise_if_stopped` at every node boundary →
+      `core._emit_stopped` recovers provenance from the last checkpoint + writes a resumable
+      `status: stopped` artifact. `resume_build` clears the sentinel + re-provisions a FRESH broker
+      over the persisted workspace/state (cattle vs pets). New `stop <id>` CLI + `request_stop_build`.
+      LangGraph msgpack type-registration = a documented forward-compat follow-up (DEV_NOTES, #21).
+      Local: **63/63 fakes** (+4 `test_m2b_stop.py`) + contract 11/11 + hygiene clean. *Server
+      kill-test (the gate): build → `stop`/kill mid-iteration → `resume` completes over the persisted
+      workspace; fresh broker re-provisions; ZERO leaks.*
 - **Acceptance:** a killed run resumes from last green commit; a forced descope yields a descope
-      report; scrubber leaves no endpoint/id in emitted text.
+      report; scrubber leaves no endpoint/id in emitted text. **S1/S2/S3 server-validated; S4 awaits
+      the server kill-test → then M2b COMPLETE → M2c.**
 
 ## M2c — periphery
 - [ ] research-on-gaps · Langfuse + manual spans · tiered evals v1 · CLI · playbook

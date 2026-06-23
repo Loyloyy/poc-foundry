@@ -3,6 +3,7 @@
     python -m poc_foundry.cli build <run-folder-or-artifact-id> [--brief ...] [--driver ...]
     python -m poc_foundry.cli list
     python -m poc_foundry.cli resume <build-id>
+    python -m poc_foundry.cli stop <build-id>
     python -m poc_foundry.cli clean <build-id>
 
 Everything delegates to ``poc_foundry.core``. Argparse only; no heavy imports at module load.
@@ -45,6 +46,15 @@ def _cmd_resume(args) -> int:
     return 0 if artifact.status in ("done", "not-buildable") else 1
 
 
+def _cmd_stop(args) -> int:
+    from poc_foundry.core import request_stop_build
+
+    path = request_stop_build(args.build_id)
+    print(f"stop requested for {args.build_id} (sentinel: {path}); it will checkpoint + exit at the "
+          f"next node boundary — resume with `resume {args.build_id}`")
+    return 0
+
+
 def _cmd_clean(args) -> int:
     from poc_foundry.core import clean_build
 
@@ -74,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("build_id")
     r.add_argument("--runtime", default=None)
     r.set_defaults(func=_cmd_resume)
+
+    s = sub.add_parser("stop", help="request a cooperative stop (checkpoints + exits; resume-able)")
+    s.add_argument("build_id")
+    s.set_defaults(func=_cmd_stop)
 
     c = sub.add_parser("clean", help="remove a build's folder + local workspace")
     c.add_argument("build_id")

@@ -668,10 +668,13 @@ incomplete (design §5.8), not just a bare `incomplete`.
   `builds/<id>/abandoned.patch` (only when non-empty), so a human can apply + finish the abandoned
   iteration. THEN it `git reset --hard HEAD`s the workspace to the last green commit (#17 pattern), so
   the emitted `workspace/` is sound.
-- **Descope entry.** A `descope_report[]` item is appended for the in-flight criterion (resolved from
-  `plan.iterations[state.iteration]`), with `why_failed = "run halted by budget cap: <cap>"` and a
-  `finish_path` that names BOTH options: resume with a higher cap (state + workspace persist), or
-  apply `abandoned.patch` + finish by hand in OpenCode.
+- **Descope entry.** A `descope_report[]` item is appended for the **first not-yet-met** criterion
+  (the natural resume point), NOT `plan.iterations[state.iteration]` — the cap can fire on the critic
+  call AFTER an iteration committed green, so that index may point at an already-met criterion (caught
+  on the first server run: the entry named the `[met]` core — fixed + regression-tested). Spent
+  attempts are charged only when that criterion is the one the in-flight iteration was working (else
+  0). `why_failed = "run halted by budget cap: <cap>"`; `finish_path` names BOTH options: resume with
+  a higher cap (state + workspace persist), or apply `abandoned.patch` + finish by hand in OpenCode.
 - **`final_verdict.gaps`** (now populated for EVERY build, not just salvage): every criterion whose
   status != `met` (descoped / pending / partial). An honest gap list vs the spec — a `done` build has
   none; a `partial`/`incomplete` lists what's missing. Report gains a "Gaps vs spec" section; the
@@ -682,3 +685,31 @@ incomplete (design §5.8), not just a bare `incomplete`.
   criterion + gaps (met criteria excluded); a clean-tree salvage writes no patch. Contract 11/11;
   hygiene clean. *Server: the `PF_MAX_LLM_CALLS_RUN=3` run (S2 case b) should now ALSO drop an
   `abandoned.patch` + a Descope-report / Gaps section in `report.md`.*
+
+## #21 — M2b S4: cooperative stop + resume hardening (2026-06-23)
+
+The M2a residual: checkpoint/resume existed but was untested; Stop was not wired.
+
+- **Cooperative stop via a sentinel.** `poc-foundry stop <id>` (CLI) → `core.request_stop_build` →
+  `control.request_stop` writes `builds/<id>/.stop`. `graph.build_graph`'s node `wrap` calls
+  `control.raise_if_stopped(ctx.build_dir)` at EVERY node boundary → raises `BuildStopped` (a
+  `BaseException`, same rationale as `BudgetExceeded` #19: must escape the phases' broad
+  `except Exception`). The graph checkpoints AFTER each completed node, so a stop at the next node's
+  start loses no state. `core._emit_stopped` recovers provenance from the last checkpoint and writes a
+  lightweight `status: stopped` artifact (+ scrubbed) — the build is `resume`-able.
+- **Resume hardening.** `resume_build` now `clear_stop`s the sentinel first (so a prior stop doesn't
+  immediately re-trip), and the docstring states the model: a FRESH broker/VM is provisioned over the
+  PERSISTED workspace + checkpoint (VMs are cattle; workspace + state are pets — design §5.9). Both
+  fresh and resumed runs go through `_invoke_with_salvage`, so a resumed run is equally stop-/cap-able.
+- **New CLI verb** `stop <id>`; `request_stop_build` added to the headless core.
+- **Forward-compat note (deferred, non-blocking):** LangGraph warns "Deserializing unregistered type
+  poc_foundry.state.Spec/Plan / artifact.IterationRecord … blocked in a future version." Resume WORKS
+  today (server `get_state` succeeded); registering these in `allowed_msgpack_modules` is a small
+  server-testable follow-up (can't `py_compile`-verify a langgraph API change on the 3.10 box → not
+  shipping it blind). Tracked in DEV_NOTES.
+- **Verified locally (63/63 fakes; +4 in `test_m2b_stop.py`):** the sentinel round-trip + node guard;
+  `BuildStopped` escapes `except Exception`; `request_stop_build` writes the sentinel + resume clears
+  it; `_emit_stopped` writes a resumable `stopped` artifact with recovered provenance. Contract 11/11;
+  hygiene clean. *Server kill-test (the M2b acceptance): start a build, `stop <id>` (or kill it)
+  mid-iteration, `resume <id>` → completes over the persisted workspace from the last green commit;
+  fresh broker re-provisions cleanly; ZERO leaks.*

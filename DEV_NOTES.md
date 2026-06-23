@@ -432,3 +432,23 @@ denials still pass). The same spike under runc resolves names fine.
   tester may query words the corpus lacks → a matching-query test that can't pass.
 
 ## (sections appended as slices land)
+
+## LangGraph checkpoint msgpack: register state types (forward-compat, M2b S4)
+
+On `resume`/`get_state` (the salvage + stop paths deserialize the checkpoint), LangGraph logs a
+**non-fatal** warning per run:
+
+```
+Deserializing unregistered type poc_foundry.state.Spec from checkpoint. This will be blocked in a
+future version. Set LANGGRAPH_STRICT_MSGPACK=true to block now, or add to allowed_msgpack_modules
+to allow explicitly: [('poc_foundry.state', 'Spec')]   # also Plan, artifact.schema.IterationRecord
+```
+
+- **Status:** resume/get_state WORK today (proven on the server: `_salvage_run` recovered state and
+  emitted correctly 3×). The "blocked in a future version" is not yet active.
+- **Fix when convenient (server-testable):** register `poc_foundry.state.{Spec,Plan}` +
+  `poc_foundry.artifact.schema.IterationRecord` (and any other pydantic types stored in `BuildState`)
+  in LangGraph's `allowed_msgpack_modules` allowlist where the `SqliteSaver` is built (`graph.py`).
+  NOT shipped blind: it's a langgraph-version-specific API that can't be `py_compile`-verified on the
+  3.10 dev box (rule #3) — author it against the installed langgraph version and confirm the warning
+  is gone on a server resume.

@@ -83,6 +83,37 @@ def test_run_cap_salvage_captures_patch_rolls_back_and_descopes(tmp_path):
     assert "abandoned.patch" in (bd / "00_INDEX.md").read_text()
 
 
+def test_descope_targets_first_unmet_not_an_already_met_criterion(tmp_path):
+    """The server case: the cap fires on the critic call AFTER iter0 committed green, so
+    state.iteration still points at the (now-met) core criterion. The descope entry must name the
+    first NOT-met criterion (the resume point), never the already-met one."""
+    cfg = load_config(tmp_path / "builds")
+    bid = "poc-salvage-0003"
+    ws, stg = tmp_path / "ws", tmp_path / "stg"
+    ws.mkdir(); stg.mkdir()
+    _green_workspace(ws)                                   # iter0 committed → clean tree
+
+    spec = Spec(goal="g", buildable=True, success_criteria=[
+        SuccessCriterion(text="core crit", core=True, status="met"),     # iter0 already met
+        SuccessCriterion(text="second crit", status="pending"),
+        SuccessCriterion(text="third crit", status="pending")])
+    plan = Plan(iterations=[IterationPlan(goal="i0", acceptance=["core crit"]),
+                            IterationPlan(goal="i1", acceptance=["second crit"]),
+                            IterationPlan(goal="i2", acceptance=["third crit"])])
+    state = BuildState(build_id=bid, build_dir=str(cfg.builds_dir / bid), workspace_dir=str(ws),
+                       spec=spec, plan=plan, iteration=0, fix_count=0)   # paused AT iter0 (met)
+
+    M.METER.begin_run(cfg)
+    core._salvage_run(_fake_graph(state), _ctx(cfg, bid, ws, stg), cfg.builds_dir / bid, bid,
+                      {"configurable": {"thread_id": bid}}, cap="max_llm_calls_per_run")
+    M.METER.reset()
+
+    pa = load_artifact(cfg.builds_dir / bid)
+    assert [d.criterion for d in pa.descope_report] == ["second crit"]    # first unmet, NOT core
+    assert pa.descope_report[0].attempts_made == 0       # not the in-flight iteration → 0 charged
+    assert "core crit" not in pa.final_verdict.gaps      # met core is never a gap
+
+
 def test_salvage_with_clean_tree_writes_no_patch(tmp_path):
     cfg = load_config(tmp_path / "builds")
     bid = "poc-salvage-0002"

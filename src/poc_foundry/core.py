@@ -107,6 +107,7 @@ def _invoke_with_salvage(graph, first_input, ctx, cfg, build_dir: Path, build_id
     """Run the graph under the budget meter. ``first_input`` is the initial ``BuildState`` (a fresh
     build) or ``None`` (resume). A ``BudgetExceeded`` cap (design §5.8) escapes the phases' broad
     ``except Exception`` guards (it's a ``BaseException``) → we salvage here rather than crash."""
+    from poc_foundry.control import BuildStopped
     from poc_foundry.models import METER, BudgetExceeded
 
     METER.begin_run(cfg)
@@ -115,6 +116,8 @@ def _invoke_with_salvage(graph, first_input, ctx, cfg, build_dir: Path, build_id
         graph.invoke(first_input, config=gcfg)
     except BudgetExceeded as be:
         _salvage_run(graph, ctx, build_dir, build_id, gcfg, be.cap)
+    except BuildStopped:
+        _emit_stopped(graph, ctx, build_dir, build_id, gcfg)
 
 
 def _salvage_run(graph, ctx, build_dir: Path, build_id: str, gcfg: dict, cap: str) -> None:
@@ -151,16 +154,26 @@ def _salvage_run(graph, ctx, build_dir: Path, build_id: str, gcfg: dict, cap: st
     except Exception:  # noqa: BLE001
         pass
 
-    # Record the cap + a descope-report entry for the in-flight criterion (honest incomplete).
+    # Record the cap + a descope-report entry for the FIRST not-yet-met criterion — the natural resume
+    # point. (Not ``iterations[state.iteration]``: the cap can fire on the critic call AFTER an
+    # iteration already committed green, so that index may point at an already-met criterion.) Charge
+    # the spent attempts only when that criterion is the one the in-flight iteration was working.
     state.caps_hit = list(state.caps_hit) + [cap]
     state.caveats = list(state.caveats) + [
         f"run halted by budget cap: {cap} — salvaged to the last green commit"]
+    crits = state.spec.success_criteria if state.spec else []
+    unmet = [c for c in crits if c.status != "met"]
     it = (state.plan.iterations[state.iteration]
           if state.plan and 0 <= state.iteration < len(state.plan.iterations) else None)
-    criterion = ((it.acceptance[0] if it.acceptance else it.goal) if it
-                 else (state.pending_criterion or "in-flight iteration"))
+    if unmet:
+        criterion = unmet[0].text
+        in_flight = bool(it and criterion in it.acceptance)   # was the loop actively on this criterion?
+        attempts = (state.fix_count + 1) if in_flight else 0
+    else:   # everything met but the run was halted before finishing (e.g. mid clean-room) — rare
+        criterion = (it.goal if it else state.pending_criterion) or "remaining work"
+        attempts = state.fix_count + 1
     state.descope_report = list(state.descope_report) + [{
-        "criterion": criterion, "attempts_made": state.fix_count + 1,
+        "criterion": criterion, "attempts_made": attempts,
         "why_failed": f"run halted by budget cap: {cap}",
         "finish_path": "resume the build (state + workspace persist) with a higher cap, "
                        "or apply abandoned.patch + finish by hand in OpenCode"}]
@@ -194,8 +207,10 @@ def _emit_failed(build_dir: Path, build_id: str, ctx, exc: Exception) -> None:
 
 
 def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime: str | None = None):
-    """Resume a checkpointed build from its last completed node (design §5.9). Returns
-    ``(report_md, PoCBuildArtifact)``."""
+    """Resume a checkpointed build from its last completed node (design §5.9). A FRESH sandbox/broker
+    is provisioned over the PERSISTED workspace + checkpoint (VMs are cattle; the workspace + state are
+    pets). Returns ``(report_md, PoCBuildArtifact)``."""
+    from poc_foundry.control import clear_stop
     from poc_foundry.graph import build_graph
     from poc_foundry.ingest import load_run
 
@@ -204,6 +219,7 @@ def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime
     meta = json.loads((build_dir / "build_meta.json").read_text())
     run_dir = Path(meta["source_dir"])
 
+    clear_stop(build_dir)   # a prior cooperative stop must not immediately re-trip the resumed run
     ctx, broker = _prepare(cfg, build_id, run_dir, meta.get("template", cfg.default_template), runtime)
     ctx.run_folder = load_run(run_dir)   # phases resumed past P0 still need the loaded artifact
 
@@ -215,6 +231,48 @@ def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime
         broker.destroy()
 
     return _result(build_dir)
+
+
+def request_stop_build(build_id: str, builds_dir: str | Path | None = None) -> Path:
+    """Request a cooperative stop (CLI ``stop``): write the sentinel the running build checks at each
+    node boundary. The build checkpoints + exits gracefully and is ``resume``-able. Returns the path."""
+    from poc_foundry.control import request_stop, stop_path
+
+    cfg = load_config(builds_dir)
+    request_stop(cfg.builds_dir / build_id)
+    return stop_path(cfg.builds_dir / build_id)
+
+
+def _emit_stopped(graph, ctx, build_dir: Path, build_id: str, gcfg: dict) -> None:
+    """A cooperative stop fired: recover provenance from the last checkpoint and emit a lightweight
+    ``stopped`` artifact (resumable — ``resume`` overwrites it on completion). The graph already
+    checkpointed the last completed node, so no state is lost."""
+    from datetime import datetime, timezone
+
+    from poc_foundry.artifact import PoCBuildArtifact, SourceArtifact, save
+    from poc_foundry.state import BuildState
+
+    try:
+        snap = graph.get_state(gcfg)
+        state = BuildState(**snap.values) if snap and getattr(snap, "values", None) else None
+    except Exception:  # noqa: BLE001
+        state = None
+    art = ctx.run_folder.artifact if getattr(ctx, "run_folder", None) else None
+    src_id = (art.id if art else (state.artifact_id if state else "")) or ""
+    pa = PoCBuildArtifact(
+        id=build_id, generated_at=datetime.now(timezone.utc).isoformat(),
+        source_artifact=SourceArtifact(id=src_id, version=(art.version if art else 1)),
+        status="stopped",
+        caveats=["build stopped cooperatively at a node boundary — "
+                 "resume with `poc-foundry resume <id>` (state + workspace persist)"])
+    build_dir.mkdir(parents=True, exist_ok=True)
+    save(pa, build_dir)
+    (build_dir / "report.md").write_text(
+        f"# Build {build_id} — STOPPED\n\nStopped cooperatively at a node boundary. "
+        f"Resume with `poc-foundry resume {build_id}`.\n")
+    from poc_foundry import scrub
+    scrub.scrub_build_dir(build_dir)
+    ctx.say(f"STOPPED: checkpointed at the last node boundary; resume `{build_id}` to continue")
 
 
 def _result(build_dir: Path):

@@ -65,10 +65,15 @@ def build_graph(ctx: Ctx, cfg):
 
     from poc_foundry.state import BuildState
 
+    from poc_foundry import control
+
     g = StateGraph(BuildState)
 
     def wrap(fn):
-        return lambda state: fn(state, ctx)
+        def run(state):
+            control.raise_if_stopped(ctx.build_dir)   # cooperative stop at the node boundary (S4)
+            return fn(state, ctx)
+        return run
 
     for name, fn in _NODES:
         g.add_node(name, wrap(fn))
