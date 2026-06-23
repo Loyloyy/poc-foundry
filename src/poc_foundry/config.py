@@ -60,6 +60,11 @@ class BuildConfig:
     stuck_research_after: int
     max_iterations: int
     toolcalls_per_attempt: int
+    # LLM-call + wall-clock caps (M2b S2; primary = call counts, deterministic under load) — 0 disables
+    max_llm_calls_per_iter: int
+    max_llm_calls_per_run: int
+    max_iter_wall_clock_s: int
+    max_run_wall_clock_s: int
 
     # critic gate (pipeline.yaml `critic:`, env-overridable) — design §5.4/§5.8
     fix_limit_k: int
@@ -111,6 +116,10 @@ def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
         stuck_research_after=_int_env("PF_STUCK_RESEARCH_AFTER", int(budgets.get("stuck_research_after", 2))),
         max_iterations=_int_env("PF_MAX_ITERATIONS", int(budgets.get("max_iterations", 8))),
         toolcalls_per_attempt=_int_env("PF_TOOLCALLS_PER_ATTEMPT", int(budgets.get("toolcalls_per_attempt", 25))),
+        max_llm_calls_per_iter=_int_env("PF_MAX_LLM_CALLS_ITER", int(budgets.get("max_llm_calls_per_iter", 60))),
+        max_llm_calls_per_run=_int_env("PF_MAX_LLM_CALLS_RUN", int(budgets.get("max_llm_calls_per_run", 400))),
+        max_iter_wall_clock_s=_int_env("PF_MAX_ITER_WALL_CLOCK_S", int(budgets.get("max_iter_wall_clock_s", 1800))),
+        max_run_wall_clock_s=_int_env("PF_MAX_RUN_WALL_CLOCK_S", int(budgets.get("max_run_wall_clock_s", 14400))),
         fix_limit_k=_int_env("PF_FIX_LIMIT_K", int(critic.get("fix_limit_k", 3))),
         respec_cap=_int_env("PF_RESPEC_CAP", int(critic.get("respec_cap", 1))),
         degraded_fix_limit_k=_int_env("PF_DEGRADED_FIX_LIMIT_K", int(critic.get("degraded_fix_limit_k", 2))),

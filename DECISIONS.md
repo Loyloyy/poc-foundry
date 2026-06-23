@@ -626,3 +626,34 @@ public-repo risk) but the bundle is the share unit, so the scrubber runs at EMIT
   gone, placeholders present, generic URLs untouched, JSON still parseable, no-secrets = no-op.
   *Server check: run a build, then `scripts/check_hygiene.sh` against a `builds/<id>/` sample (its
   dynamic layer greps for the real `.env` values) — expect HYGIENE clean on the emitted text.*
+
+## #19 — M2b S2: budget/cap enforcement + contention indicator (2026-06-23)
+
+The M2a residual: caps were DEFINED but never enforced; `caps_hit[]` / `budget` never populated.
+
+- **One process-global meter at the `models.py` choke point.** Every role call goes through
+  `build_chat_model` (structured) or `chat_text` (coder/tester/scribe raw) — so `models.METER`
+  (`_Meter`) counts there: `count()` BEFORE each call (raises if over cap), `record_latency()` after
+  the `chat_text` HTTP round-trip. `build_chat_model` counts at construction (1:1 with its single
+  `.invoke` in this codebase). `core.build_poc` calls `METER.begin_run(cfg)`; `p4_iterate` calls
+  `METER.begin_iteration()` (fresh per-iter budget; the run counter accumulates).
+- **Primary budgets = call counts (deterministic under load); wall-clock = backstop.** Enforces
+  `max_llm_calls_per_iter`/`_per_run` + `max_iter`/`max_run_wall_clock_s` (all `config`-loaded,
+  env-overridable; 0 disables). `contention_indicator` = the median observed call latency.
+- **`BudgetExceeded` is a `BaseException`, ON PURPOSE.** The phases wrap model calls in broad
+  `except Exception` (the coder loop, the critic-adequacy fallback, the scribe) — a budget breach must
+  ESCAPE those to halt the whole RUN. `core._invoke_with_salvage` catches it and `_salvage_run`
+  recovers the last checkpointed `BuildState` (via `graph.get_state`), rolls the workspace back to the
+  last green commit (`git reset --hard HEAD`, the #17 pattern), records the cap in `caps_hit[]`, and
+  emits an honest `incomplete` (the clean-room never ran → can never be `done`). The forensic
+  `abandoned.patch` + the descope-report entry are S3.
+- **`p7_emit` populates** `budget{wall_s, llm_calls, contention_indicator}` (from `METER.snapshot()`,
+  safe even when the meter was never begun → all-zero) + `caps_hit[]`; the report gains a Budget
+  section. The "targeted research escalation" rung (§5.8) needs the research phase → stays an M2c stub.
+- **Verified locally (56/56 fakes; +8 in `test_m2b_budget.py`):** the run/per-iter/wall-clock caps
+  fire with the right cap name; the per-iter counter resets while the run counter accumulates;
+  `BudgetExceeded` escapes `except Exception`; the disabled meter is a no-op; contention = latency
+  median; `config` loads the 4 caps; `p7_emit` writes `budget` + `caps_hit`. Contract 11/11; hygiene
+  clean. *Server: (a) a normal build shows `budget.llm_calls`/`contention_indicator` populated; (b)
+  `PF_MAX_LLM_CALLS_RUN=3` forces a run-cap salvage → `status=incomplete`,
+  `caps_hit=["max_llm_calls_per_run"]`, rolled back, ZERO leaks.*

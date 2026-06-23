@@ -98,6 +98,9 @@ class BuildState(BaseModel):
     demo_quality: str = ""
     demonstrates_core_value: str = "no"
 
+    # M2b budgets / caps (design §5.8) — additive
+    caps_hit: list[str] = Field(default_factory=list)   # which budget cap(s) fired → PoCBuildArtifact.caps_hit
+
     # bookkeeping
     log: list[str] = Field(default_factory=list)   # human-readable phase trace
     caveats: list[str] = Field(default_factory=list)

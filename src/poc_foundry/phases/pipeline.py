@@ -254,7 +254,9 @@ def _ledger_junit(sbx) -> set[str]:
 
 def p4_iterate(state, ctx: Ctx) -> dict:
     from poc_foundry.artifact import IterationRecord
+    from poc_foundry.models import METER
 
+    METER.begin_iteration()   # fresh per-iteration LLM-call + wall-clock budget (M2b S2)
     spec, plan = state.spec, state.plan
     i = state.iteration
     it = plan.iterations[i]
@@ -623,6 +625,8 @@ def p7_emit(state, ctx: Ctx) -> dict:
                            pinned_tag=(vetted.get(d.get("vetted", d["name"]), {}) or {}).get("pinned_tag"))
                 for d in getattr(ctx.template, "services", [])]
 
+    from poc_foundry.models import METER
+    snap = METER.snapshot()                                  # llm_calls / wall_s / contention_indicator
     art = ctx.run_folder.artifact if ctx.run_folder else None
     status = _final_status(state)
     core_met = bool(state.spec) and any(c.core and c.status == "met" for c in state.spec.success_criteria)
@@ -664,7 +668,9 @@ def p7_emit(state, ctx: Ctx) -> dict:
         security=SecurityInfo(sandbox="kata", egress_allowlist=allowlist,
                               incidents=list(state.incidents),
                               degraded_critic=bool(state.degraded_critic)),
-        budget=Budget(),
+        budget=Budget(wall_s=snap["wall_s"], llm_calls=snap["llm_calls"],
+                      contention_indicator=snap["contention_indicator"]),
+        caps_hit=list(state.caps_hit),
         caveats=state.caveats,
         status=status,
     )
@@ -729,6 +735,11 @@ def _report_md(state, ctx: Ctx, pa) -> str:
         for d in pa.descope_report:
             lines.append(f"- **{d.criterion}** — {d.why_failed} (after {d.attempts_made} attempt(s)); "
                          f"finish: {d.finish_path}")
+    lines += ["", "## Budget (§5.8)", "",
+              f"- llm_calls: {pa.budget.llm_calls}",
+              f"- wall_s: {pa.budget.wall_s}",
+              f"- contention_indicator (median call latency s): {pa.budget.contention_indicator}",
+              f"- caps_hit: {pa.caps_hit or 'none'}"]
     lines += ["", "## Clean-room", "",
               f"- install: {pa.cleanroom.quickstart_ok}",
               f"- suite: {pa.cleanroom.suite_ok}",

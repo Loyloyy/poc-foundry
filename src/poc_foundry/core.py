@@ -93,7 +93,7 @@ def build_poc(source: str | Path, brief: str = "", *, driver: str = "tech-scout"
     try:
         broker.provision()
         graph = build_graph(ctx, cfg)
-        graph.invoke(state, config={"configurable": {"thread_id": build_id}, "recursion_limit": 60})
+        _invoke_with_salvage(graph, state, ctx, cfg, build_dir, build_id)
     except Exception as e:  # noqa: BLE001 — leave a forensic artifact, then surface the error
         _emit_failed(build_dir, build_id, ctx, e)
         raise
@@ -101,6 +101,51 @@ def build_poc(source: str | Path, brief: str = "", *, driver: str = "tech-scout"
         broker.destroy()
 
     return _result(build_dir)
+
+
+def _invoke_with_salvage(graph, first_input, ctx, cfg, build_dir: Path, build_id: str) -> None:
+    """Run the graph under the budget meter. ``first_input`` is the initial ``BuildState`` (a fresh
+    build) or ``None`` (resume). A ``BudgetExceeded`` cap (design §5.8) escapes the phases' broad
+    ``except Exception`` guards (it's a ``BaseException``) → we salvage here rather than crash."""
+    from poc_foundry.models import METER, BudgetExceeded
+
+    METER.begin_run(cfg)
+    gcfg = {"configurable": {"thread_id": build_id}, "recursion_limit": 60}
+    try:
+        graph.invoke(first_input, config=gcfg)
+    except BudgetExceeded as be:
+        _salvage_run(graph, ctx, build_dir, build_id, gcfg, be.cap)
+
+
+def _salvage_run(graph, ctx, build_dir: Path, build_id: str, gcfg: dict, cap: str) -> None:
+    """A budget cap fired mid-run: recover the last checkpointed ``BuildState``, roll the workspace
+    back to the last green commit (discard in-flight edits), record the cap, and emit an honest
+    ``incomplete`` build (the clean-room never ran → it can never be ``done``). The forensic
+    ``abandoned.patch`` + the descope-report entry are added in S3."""
+    from poc_foundry.phases import p7_emit
+    from poc_foundry.state import BuildState
+
+    try:
+        snap = graph.get_state(gcfg)
+        state = BuildState(**snap.values) if snap and getattr(snap, "values", None) else None
+    except Exception:  # noqa: BLE001
+        state = None
+    if state is None:   # cap fired before the first checkpoint — leave a minimal forensic artifact
+        _emit_failed(build_dir, build_id, ctx,
+                     RuntimeError(f"budget cap hit before first checkpoint: {cap}"))
+        return
+
+    try:
+        from poc_foundry.phases.context import git
+        git(Path(state.workspace_dir), "reset", "--hard", "HEAD", check=False)
+    except Exception:  # noqa: BLE001
+        pass
+
+    state.caps_hit = list(state.caps_hit) + [cap]
+    state.caveats = list(state.caveats) + [
+        f"run halted by budget cap: {cap} — salvaged to the last green commit"]
+    ctx.say(f"SALVAGE: budget cap {cap} → rolled back to last green; emitting incomplete")
+    p7_emit(state, ctx)   # writes the artifact + scrubs (status will be incomplete: no clean-room)
 
 
 def _emit_failed(build_dir: Path, build_id: str, ctx, exc: Exception) -> None:
@@ -145,8 +190,7 @@ def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime
     try:
         broker.provision()
         graph = build_graph(ctx, cfg)
-        graph.invoke(None, config={"configurable": {"thread_id": build_id},   # None → resume
-                                   "recursion_limit": 60})
+        _invoke_with_salvage(graph, None, ctx, cfg, build_dir, build_id)   # None → resume
     finally:
         broker.destroy()
 

@@ -13,10 +13,95 @@ from __future__ import annotations
 
 import json as _json
 import os
+import statistics
+import time
 import urllib.request
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+# ── budget meter (M2b S2) ─────────────────────────────────────────────────────
+class BudgetExceeded(BaseException):
+    """A run/iteration LLM-call or wall-clock cap was hit (design §5.8). Subclasses ``BaseException``
+    (NOT ``Exception``) ON PURPOSE: the phases wrap model calls in broad ``except Exception`` guards
+    (the coder loop, the critic-adequacy fallback, the scribe) — a budget breach must ESCAPE those to
+    halt the whole RUN, where ``core`` catches it and salvages (rollback + honest ``incomplete``)."""
+
+    def __init__(self, cap: str):
+        self.cap = cap
+        super().__init__(f"budget cap hit: {cap}")
+
+
+class _Meter:
+    """Process-global LLM-call meter — the natural choke point (every role call goes through this
+    module). Counts calls per-run and per-iteration, samples each call's latency (→ the contention
+    indicator = median observed latency), and ENFORCES the call-count + (secondary, generous)
+    wall-clock caps by raising ``BudgetExceeded`` BEFORE an over-budget call is issued. Primary budgets
+    are deterministic under load (call counts); wall-clock is the backstop (one vLLM serves every
+    role + the PoC runtime). Disabled until ``begin_run`` so direct-phase fakes (no ``build_poc``) and
+    import-time use are no-ops."""
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.enabled = False
+        self.run_calls = 0
+        self.iter_calls = 0
+        self.latencies: list[float] = []
+        self.wall_start: float | None = None
+        self.iter_start: float | None = None
+        self.caps: dict = {}
+
+    def begin_run(self, cfg) -> None:
+        self.reset()
+        self.caps = {
+            "max_iter": int(getattr(cfg, "max_llm_calls_per_iter", 0) or 0),
+            "max_run": int(getattr(cfg, "max_llm_calls_per_run", 0) or 0),
+            "iter_wall_s": int(getattr(cfg, "max_iter_wall_clock_s", 0) or 0),
+            "run_wall_s": int(getattr(cfg, "max_run_wall_clock_s", 0) or 0),
+        }
+        now = time.time()
+        self.wall_start = now
+        self.iter_start = now
+        self.enabled = True
+
+    def begin_iteration(self) -> None:
+        """Reset the per-iteration counters at the start of each P4 iteration (fresh per-iter budget)."""
+        self.iter_calls = 0
+        self.iter_start = time.time()
+
+    def count(self) -> None:
+        """Called BEFORE each LLM call; raises ``BudgetExceeded`` if issuing it would exceed a cap."""
+        if not self.enabled:
+            return
+        now = time.time()
+        c = self.caps
+        if c.get("max_run") and self.run_calls >= c["max_run"]:
+            raise BudgetExceeded("max_llm_calls_per_run")
+        if c.get("max_iter") and self.iter_calls >= c["max_iter"]:
+            raise BudgetExceeded("max_llm_calls_per_iter")
+        if c.get("run_wall_s") and self.wall_start and (now - self.wall_start) >= c["run_wall_s"]:
+            raise BudgetExceeded("max_run_wall_clock_s")
+        if c.get("iter_wall_s") and self.iter_start and (now - self.iter_start) >= c["iter_wall_s"]:
+            raise BudgetExceeded("max_iter_wall_clock_s")
+        self.run_calls += 1
+        self.iter_calls += 1
+
+    def record_latency(self, dt: float) -> None:
+        if self.enabled:
+            self.latencies.append(dt)
+
+    def snapshot(self) -> dict:
+        """For ``budget`` at emit (safe even if ``begin_run`` was never called → all-zero)."""
+        med = statistics.median(self.latencies) if self.latencies else None
+        wall = (time.time() - self.wall_start) if self.wall_start else 0.0
+        return {"llm_calls": self.run_calls, "wall_s": round(wall, 1),
+                "contention_indicator": (round(med, 2) if med is not None else None)}
+
+
+METER = _Meter()
 
 
 def _load_dotenv() -> None:
@@ -60,6 +145,7 @@ def build_chat_model(role: str, *, temperature: float | None = None, max_tokens:
     (architect/critic/scribe). Use `.with_structured_output(Model)` for typed extraction."""
     from langchain_openai import ChatOpenAI  # lazy — heavy
 
+    METER.count()   # one constructed model == one intended invoke in this codebase (cap choke point)
     model, base, key = resolve_role(role)
     temp = _ROLE_TEMP.get(role.lower(), 0.2) if temperature is None else temperature
     to = timeout if timeout is not None else int(os.environ.get("PF_LLM_TIMEOUT_S", "300"))
@@ -81,7 +167,10 @@ def chat_text(role: str, prompt: str, system: str | None = None, *,
         data=_json.dumps(body).encode(), method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
     )
+    METER.count()                       # cap choke point (raises BudgetExceeded before an over-budget call)
+    t0 = time.time()
     with urllib.request.urlopen(req, timeout=timeout) as r:
         data = _json.loads(r.read())
+    METER.record_latency(time.time() - t0)
     msg = (data.get("choices") or [{}])[0].get("message", {}) or {}
     return msg.get("content") or msg.get("reasoning") or ""

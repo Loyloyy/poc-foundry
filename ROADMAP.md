@@ -181,8 +181,18 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       tokens skipped, JSON stays valid). Wired into `p7_emit` + `core._emit_failed`. Closes the last
       open rule-#1 item (DECISIONS #18). Local: **48/48 fakes** (+4 `test_m2b_scrub.py`) + contract
       11/11 + hygiene clean. *Server: build → `check_hygiene.sh` on a `builds/<id>/` sample = clean.*
-- [ ] budgets/caps/escalation · checkpoint/resume/stop · salvage + descope report · contention
-      indicator
+- [x] **S2 budget/cap enforcement + contention (2026-06-23, local):** a process-global meter at the
+      `models.py` choke point (`METER` in `build_chat_model`/`chat_text`) counts LLM calls per-iter +
+      per-run + samples latency. Enforces `max_llm_calls_per_iter/_run` + the (secondary) wall-clock
+      caps (config-loaded, env-overridable, 0 disables); `contention_indicator` = median call latency.
+      `BudgetExceeded` is a `BaseException` (escapes the phases' broad `except Exception` to halt the
+      run) → `core._salvage_run` recovers the checkpointed state, rolls back to last green, records
+      `caps_hit[]`, emits honest `incomplete`. `p7_emit` populates `budget` + `caps_hit`; report gains
+      a Budget section. Research-escalation rung = M2c stub (DECISIONS #19). Local: **56/56 fakes**
+      (+8 `test_m2b_budget.py`) + contract 11/11 + hygiene clean. *Server: normal build shows
+      `budget.llm_calls`/`contention_indicator`; `PF_MAX_LLM_CALLS_RUN=3` → run-cap salvage to
+      `incomplete` + `caps_hit`, ZERO leaks.*
+- [ ] checkpoint/resume/stop · salvage abandoned.patch + descope-report polish (S3/S4)
 - **Acceptance:** a killed run resumes from last green commit; a forced descope yields a descope
       report; scrubber leaves no endpoint/id in emitted text.
 
