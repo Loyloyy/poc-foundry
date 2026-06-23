@@ -103,11 +103,14 @@ def p1_spec(state, ctx: Ctx) -> dict:
     from poc_foundry.models import build_chat_model
     from poc_foundry.state import Spec
 
+    from poc_foundry import tracing
+
     art = ctx.run_folder.artifact
     svcs = getattr(ctx.template, "services", [])
     llm = build_chat_model("architect").with_structured_output(Spec)
-    spec = llm.invoke([("system", prompts.spec_system(bool(svcs))),
-                       ("human", prompts.spec_prompt(art, ctx.template.interface, svcs))])
+    with tracing.span("spec", artifact=art.id):
+        spec = llm.invoke([("system", prompts.spec_system(bool(svcs))),
+                           ("human", prompts.spec_prompt(art, ctx.template.interface, svcs))])
     if isinstance(spec, dict):
         spec = Spec(**spec)
     spec = _normalize_spec(spec, ctx.template)
@@ -294,17 +297,23 @@ def p4_iterate(state, ctx: Ctx) -> dict:
         authored = _ledger_collect(sbx)                  # cumulative authored set (all /staged)
 
         def verify():
+            from poc_foundry import tracing
             # DIFF SCANNER (per-attempt): a tampering edit fails the attempt BEFORE the test runs, so
             # a repeat trips the coder's forced-strategy-change (error-signature) path.
-            incs = integrity.scan_diff(git_diff(ctx.workspace_dir, base_sha), staged_names)
+            with tracing.span("gate.diff-scan", iteration=i):
+                incs = integrity.scan_diff(git_diff(ctx.workspace_dir, base_sha), staged_names)
             if integrity.blocking(incs):
                 for inc in incs:
                     if str(inc) not in [str(x) for x in incidents]:
                         incidents.append(inc)
+                tracing.event("gate.incident", iteration=i, kind="diff-scan",
+                              detail="; ".join(str(x) for x in incs if x.severity == "high")[:300])
                 return False, "INTEGRITY: " + "; ".join(str(x) for x in incs if x.severity == "high")
             # CUMULATIVE regression gate: ALL staged tests must pass (the new one + every prior one).
-            r = sbx.exec("cd /work && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/work "
-                         "python -m pytest /staged -q", timeout_s=300)
+            with tracing.span("iterate.verify", iteration=i) as _sp:
+                r = sbx.exec("cd /work && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/work "
+                             "python -m pytest /staged -q", timeout_s=300)
+                _sp.update(output={"ok": r.ok, "tail": r.combined[-400:]})
             return r.ok, r.combined
 
         new_is_green = _verify_file(sbx, test_file)       # red-first probe on THIS iteration's new test
@@ -341,6 +350,8 @@ def p4_iterate(state, ctx: Ctx) -> dict:
                     gap = sorted(integrity.inventory_gap(authored, passed))
                     note = f"inventory ledger gap: {gap} recorded but not passed"
                     incidents.append(integrity.Incident("ledger-gap", note, severity="high"))
+                    from poc_foundry import tracing
+                    tracing.event("gate.incident", iteration=i, kind="ledger-gap", detail=note[:300])
                     it_status, crit_status = "incident", "descoped"
                     ctx.say(f"P4 iter{i}: LEDGER FAIL — {note}")
             else:
@@ -386,6 +397,7 @@ def _critic_adequacy(ctx: Ctx, criterion: str, test_src: str):
     """Critic adequacy review: is passing this staged test trustworthy evidence for the criterion?
     Defaults to adequate if the critic endpoint is unreachable (the ledger/red-first/scanner walls
     still gate — the critic is an ADDED layer, never the sole gate)."""
+    from poc_foundry import tracing
     from poc_foundry.state import AdequacyReview
     try:
         from poc_foundry.models import build_chat_model
@@ -393,9 +405,12 @@ def _critic_adequacy(ctx: Ctx, criterion: str, test_src: str):
         # hit finish_reason=length mid-JSON (→ LengthFinishReasonError) on the default budget. The
         # verdict is short; the extra ceiling just avoids truncation + a wasted call.
         llm = build_chat_model("critic", max_tokens=8000).with_structured_output(AdequacyReview)
-        rv = llm.invoke([("system", prompts.CRITIC_SYSTEM),
-                         ("human", prompts.critic_adequacy_prompt(criterion, test_src, ctx.template.interface))])
-        return AdequacyReview(**rv) if isinstance(rv, dict) else rv
+        with tracing.span("critic", criterion=criterion[:200]) as _sp:
+            rv = llm.invoke([("system", prompts.CRITIC_SYSTEM),
+                             ("human", prompts.critic_adequacy_prompt(criterion, test_src, ctx.template.interface))])
+            review = AdequacyReview(**rv) if isinstance(rv, dict) else rv
+            _sp.update(output={"adequate": review.adequate, "reason": (review.reason or "")[:300]})
+            return review
     except Exception as e:  # noqa: BLE001 — critic is additive; never crash the build on its absence
         return AdequacyReview(adequate=True, reason=f"critic unavailable ({type(e).__name__}); defaulting adequate")
 
@@ -546,29 +561,33 @@ def p6_cleanroom(state, ctx: Ctx) -> dict:
                     str(ctx.workspace_dir), str(clone)], check=True)
     chown_to_builder(clone)   # the clean-room VM (uid 1000) installs deps + writes caches here
 
+    from poc_foundry import tracing
+
     blocks = parse_run_blocks((clone / "RUN.md").read_text())
     result = {"quickstart_ok": False, "suite_ok": False, "demo_ok": False}
     fails: list[str] = []
-    sbx = ctx.broker.create(mounts=[ws_mount(clone)], name="cleanroom",
-                            env_extra=dict(ctx.service_env))   # clean-room reaches the same sibling(s)
-    try:
-        if "install" in blocks:
-            r = sbx.exec(f"cd /work && {blocks['install']}", timeout_s=1800)
-            result["quickstart_ok"] = r.ok
-            if not r.ok:
-                fails.append("install:\n" + r.combined[-700:])
-        if "test" in blocks and result["quickstart_ok"]:
-            r = sbx.exec(f"cd /work && {blocks['test']}", timeout_s=600)
-            result["suite_ok"] = r.ok
-            if not r.ok:
-                fails.append("test:\n" + r.combined[-700:])
-        if "demo" in blocks and result["quickstart_ok"]:
-            r = sbx.exec(f"cd /work && {blocks['demo']}", timeout_s=300)
-            result["demo_ok"] = r.ok
-            if not r.ok:
-                fails.append("demo:\n" + r.combined[-700:])
-    finally:
-        sbx.destroy()
+    with tracing.span("cleanroom") as _sp:
+        sbx = ctx.broker.create(mounts=[ws_mount(clone)], name="cleanroom",
+                                env_extra=dict(ctx.service_env))   # clean-room reaches the same sibling(s)
+        try:
+            if "install" in blocks:
+                r = sbx.exec(f"cd /work && {blocks['install']}", timeout_s=1800)
+                result["quickstart_ok"] = r.ok
+                if not r.ok:
+                    fails.append("install:\n" + r.combined[-700:])
+            if "test" in blocks and result["quickstart_ok"]:
+                r = sbx.exec(f"cd /work && {blocks['test']}", timeout_s=600)
+                result["suite_ok"] = r.ok
+                if not r.ok:
+                    fails.append("test:\n" + r.combined[-700:])
+            if "demo" in blocks and result["quickstart_ok"]:
+                r = sbx.exec(f"cd /work && {blocks['demo']}", timeout_s=300)
+                result["demo_ok"] = r.ok
+                if not r.ok:
+                    fails.append("demo:\n" + r.combined[-700:])
+        finally:
+            sbx.destroy()
+        _sp.update(output=result)
 
     for f in fails:
         ctx.say("P6 cleanroom FAILED step — " + f)
@@ -691,7 +710,12 @@ def p7_emit(state, ctx: Ctx) -> dict:
     logs = build_dir / "logs"
     logs.mkdir(exist_ok=True)
     try:
-        (logs / "egress.log").write_text(ctx.broker.proxy_log())
+        from poc_foundry import tracing
+        egress = ctx.broker.proxy_log()
+        (logs / "egress.log").write_text(egress)
+        denied = egress.count("TCP_DENIED")
+        if denied:
+            tracing.event("proxy.denials", count=denied)   # egress-security evidence (the detective control)
     except Exception:  # noqa: BLE001
         pass
     (build_dir / "PROGRESS.md").write_text(

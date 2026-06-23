@@ -172,7 +172,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       out-of-process (`no docker.sock in app`); ✅ multi-iteration build completes; ✅ sibling-service
       (pgvector) build runs end-to-end → `done`; ✅ zero resource leaks after every run.
 
-## M2b — resilience
+## M2b — resilience ✅ COMPLETE (2026-06-23, all slices server-validated)
 - [x] **S1 hygiene scrubber (2026-06-23, local):** `scrub.py` — pure, env-driven (`.env` +
       `build_env.json`, never hardcoded) emitted-output scrubber. `collect_secrets()` classifies
       `KEY=value` by suffix → placeholders (`<served-model-id>`/`<vllm-host:port>`/`<vllm-host>`/
@@ -211,16 +211,36 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       LangGraph msgpack type-registration = a documented forward-compat follow-up (DEV_NOTES, #21).
       Live phase trace to stderr (`PF_PROGRESS`) + a deterministic `PF_STOP_AT_NODE` test hook so the
       kill/resume gate needs no manual-timing. Local: **64/64 fakes** (+5 `test_m2b_stop.py`) +
-      contract 11/11 + hygiene clean. *Server kill-test (the gate): `PF_STOP_AT_NODE=iterate
-      PF_STOP_AT_NODE_HITS=2` build → `stopped` after iter0 → `resume` (no env) completes over the
-      persisted workspace; fresh broker re-provisions; ZERO leaks.*
-- **Acceptance:** a killed run resumes from last green commit; a forced descope yields a descope
-      report; scrubber leaves no endpoint/id in emitted text. **S1/S2/S3 server-validated; S4 awaits
-      the server kill-test → then M2b COMPLETE → M2c.**
+      contract 11/11 + hygiene clean. **Server-validated (2026-06-23):** `PF_STOP_AT_NODE=iterate:2`
+      build → `stopped` after iter0 → `resume` (no env) continued from the iter0 checkpoint over the
+      persisted workspace → `done` (all 5 criteria met, clean-room green, output scrubbed); fresh
+      broker re-provisioned; ZERO leaks. (Known minor: the in-memory meter resets per process, so a
+      resumed run's `budget.llm_calls` counts only the resume leg — DEV_NOTES.)
+- **Acceptance — ALL MET (server-validated 2026-06-23):** ✅ scrubber leaves no endpoint/id in emitted
+      text (S1); ✅ budgets enforced + recorded, run-cap salvages instead of running away (S2);
+      ✅ a forced run-cap yields `incomplete` + descope report + `abandoned.patch` + gaps (S3);
+      ✅ a stopped/killed run resumes from the last green commit and completes (S4); ✅ ZERO leaks,
+      green bar stays green, both templates still build `done`. **M2b COMPLETE → M2c.**
 
 ## M2c — periphery
-- [ ] research-on-gaps · Langfuse + manual spans · tiered evals v1 · CLI · playbook
-      injection + reflection · template CI
+- [~] **S1 observability — `tracing.py` + manual spans (2026-06-23, local):** tolerated-absent
+      `tracing.py` (Stage-2 pattern: env-gated `PF_TRACING`, lazy langfuse, no-op when off/absent —
+      a tracing hiccup can never crash a build). Manual spans around the half the LangChain handler
+      can't see: a **build** root span (core), **broker** provision/create/create_service/exec/destroy
+      (both in-process `Broker` + the out-of-process `RemoteBroker`/`RemoteSandbox`), **spec**, the
+      **iterate.verify** + **gate.diff-scan** spans, **gate.incident** events (diff-scan + ledger-gap),
+      **critic**, **cleanroom**, the raw **llm.<role>** call (chat_text — no handler sees it), and a
+      **proxy.denials** event (TCP_DENIED count from the egress log). Flush-on-exit in `core` (build +
+      resume). Module singleton + `set_tracer`/`reset_tracer` for injection (DECISIONS #22). Local:
+      **71 fakes** (+6 `test_m2c_tracing.py`: no-op when off, dep-absent degrades, broker-layer spans
+      via a fake `_run`, the phase-pipeline spans + proxy-denial event via the m1 fakes harness, the
+      chat_text llm span) + contract 11/11 + hygiene clean. *Server: spans appear in Langfuse
+      `stage-3-poc` for a build, flush-on-exit confirmed. Langfuse v3 API authored blind (no langfuse
+      on the 3.10 box) — every call guarded → degrades to no-op if an API name is off; confirm/adjust
+      on the server.* msgpack-registration carry-forward NOT folded in (unverifiable API; left as the
+      documented follow-up so the working resume path isn't risked on a guess).
+- [ ] S2 tiered evals v1 (spec-eval + plan-eval vs fixtures) · S3 playbook injection + reflection ·
+      S4 research-on-gaps (deepagents + SearXNG) · S5 template CI
 - **Acceptance:** spec/plan evals run against fixtures; manual spans appear in Langfuse `stage-3-poc`.
 
 ## M3 — web UI

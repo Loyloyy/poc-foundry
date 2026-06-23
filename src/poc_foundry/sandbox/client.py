@@ -20,9 +20,12 @@ class RemoteSandbox:
         self._alive = True
 
     def exec(self, cmd: str, *, timeout_s: int = 600) -> ExecResult:
-        r = self._broker._call("exec", sandbox=self.name, cmd=cmd, timeout_s=timeout_s,
-                               _timeout=timeout_s + 120)
-        return ExecResult(rc=r["rc"], stdout=r["stdout"], stderr=r["stderr"])
+        from poc_foundry import tracing   # manual span around the (out-of-process) VERIFY/exec round-trip
+        with tracing.span("broker.exec", sandbox=self.name, cmd=cmd[:300]) as _sp:
+            r = self._broker._call("exec", sandbox=self.name, cmd=cmd, timeout_s=timeout_s,
+                                   _timeout=timeout_s + 120)
+            _sp.update(output={"rc": r["rc"], "tail": (r["stdout"] + r["stderr"])[-500:]})
+            return ExecResult(rc=r["rc"], stdout=r["stdout"], stderr=r["stderr"])
 
     def destroy(self) -> None:
         if self._alive:
@@ -59,22 +62,28 @@ class RemoteBroker:
 
     # ── lifecycle ───────────────────────────────────────────────────────────────
     def provision(self) -> None:
-        r = self._call("provision", allowed_images=sorted(self._allowed_images),
-                       runtime=self._runtime, vllm_key=self._vllm_key)
-        self.proxy_url = r.get("proxy_url")
+        from poc_foundry import tracing
+        with tracing.span("broker.provision", build_id=self.build_id):
+            r = self._call("provision", allowed_images=sorted(self._allowed_images),
+                           runtime=self._runtime, vllm_key=self._vllm_key)
+            self.proxy_url = r.get("proxy_url")
 
     def create(self, *, mounts, caps=(), name: str = "sbx", image: str | None = None,
                env_extra: dict | None = None) -> RemoteSandbox:
-        r = self._call("create", name=name, image=image, caps=list(caps), env_extra=env_extra,
-                       mounts=[{"source": m.source, "target": m.target, "read_only": m.read_only}
-                               for m in mounts])
-        return RemoteSandbox(self, r["name"])
+        from poc_foundry import tracing
+        with tracing.span("broker.create", box=name, image=image):
+            r = self._call("create", name=name, image=image, caps=list(caps), env_extra=env_extra,
+                           mounts=[{"source": m.source, "target": m.target, "read_only": m.read_only}
+                                   for m in mounts])
+            return RemoteSandbox(self, r["name"])
 
     def create_service(self, *, image: str, name: str, env: dict | None = None,
                        pinned_tag: str | None = None, ready_cmd: str | None = None) -> RemoteSandbox:
-        r = self._call("create_service", image=image, name=name, env=env, pinned_tag=pinned_tag,
-                       ready_cmd=ready_cmd, _timeout=180)
-        return RemoteSandbox(self, r["name"])
+        from poc_foundry import tracing
+        with tracing.span("broker.create_service", svc=name, image=image):
+            r = self._call("create_service", image=image, name=name, env=env, pinned_tag=pinned_tag,
+                           ready_cmd=ready_cmd, _timeout=180)
+            return RemoteSandbox(self, r["name"])
 
     def service_ip(self, sandbox: RemoteSandbox) -> str:
         return self._call("service_ip", sandbox=sandbox.name).get("ip", "")
@@ -86,7 +95,9 @@ class RemoteBroker:
             return ""
 
     def destroy(self) -> None:
-        try:
-            self._call("destroy")
-        except Exception:  # noqa: BLE001 — teardown must not raise out of a finally
-            pass
+        from poc_foundry import tracing
+        with tracing.span("broker.destroy", build_id=self.build_id):
+            try:
+                self._call("destroy")
+            except Exception:  # noqa: BLE001 — teardown must not raise out of a finally
+                pass

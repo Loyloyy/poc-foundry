@@ -24,7 +24,13 @@ notes below are Claude-Code-specific.
 
 ## Status
 
-**M0 ✅ · M1 ✅ · M2a ✅ COMPLETE** (all server-validated, 2026-06-23). Next: **M2b — resilience**
-(budgets/caps/escalation, checkpoint/resume/stop, salvage + descope report, contention indicator,
-hygiene scrubber). Local checks: `python3 scripts/run_spine_tests.py` (44) + `run_contract_checks.py`
-(11). See `ROADMAP.md` for live milestone state and `DECISIONS.md` for the rationale log (newest: #17).
+**M0 ✅ · M1 ✅ · M2a ✅ · M2b ✅ COMPLETE** (all server-validated, 2026-06-23). M2b shipped the
+hygiene scrubber, budget/cap enforcement + contention indicator, run-cap salvage (abandoned.patch +
+descope report + gaps), and cooperative stop/resume. Next: **M2c — periphery** (research-on-gaps,
+Langfuse spans, tiered evals v1, playbook injection + reflection, template CI). Local checks:
+`python3 scripts/run_spine_tests.py` (65) + `run_contract_checks.py` (11). See `ROADMAP.md` for live
+milestone state and `DECISIONS.md` for the rationale log (newest: #22).
+
+**M2c in progress:** S1 observability (`tracing.py` + manual spans) shipped locally (2026-06-23) —
+tolerated-absent Langfuse spans at the broker/VERIFY/gate/critic/clean-room/LLM/proxy-denial seams,
+flush-on-exit; server-validation pending. Local checks now: `run_spine_tests.py` (71) + contract (11).

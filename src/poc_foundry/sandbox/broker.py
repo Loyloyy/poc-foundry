@@ -107,7 +107,11 @@ class Sandbox:
         LLM-derived content (rule #8); it runs inside the isolated VM, not on the host."""
         if not self._alive:
             raise BrokerError(f"sandbox {self.name} already destroyed")
-        return _run(["docker", "exec", self.name, "bash", "-lc", cmd], check=False, timeout_s=timeout_s)
+        from poc_foundry import tracing   # manual span — the LangChain handler can't see VERIFY/exec
+        with tracing.span("broker.exec", sandbox=self.name, cmd=cmd[:300]) as _sp:
+            res = _run(["docker", "exec", self.name, "bash", "-lc", cmd], check=False, timeout_s=timeout_s)
+            _sp.update(output={"rc": res.rc, "tail": res.combined[-500:]})
+            return res
 
     def destroy(self) -> None:
         if self._alive:
@@ -176,21 +180,23 @@ class Broker:
         if proxy_image not in self.allowed_images:
             raise BrokerInvariantError(f"proxy image {proxy_image!r} not in allowlist")
 
+        from poc_foundry import tracing
         # Atomic: if ANY step fails (e.g. the proxy doesn't come up after the networks/volume were
         # created), tear down the partial state so a failed provision never leaks docker resources.
-        try:
-            _run(["docker", "network", "create", "--internal", self.net_internal], check=True)
-            _run(["docker", "network", "create", self.net_egress], check=True)
-            _run(["docker", "volume", "create", self.uv_volume], check=True)
+        with tracing.span("broker.provision", build_id=self.build_id):
+            try:
+                _run(["docker", "network", "create", "--internal", self.net_internal], check=True)
+                _run(["docker", "network", "create", self.net_egress], check=True)
+                _run(["docker", "volume", "create", self.uv_volume], check=True)
 
-            vllm_host = getattr(self.cfg, "vllm_allow_host", "") or ""
-            _run(["docker", "run", "-d", "--name", self.proxy_name, "--network", self.net_egress,
-                  "-e", f"PF_VLLM_ALLOW_HOST={vllm_host}", proxy_image], check=True)
-            _run(["docker", "network", "connect", self.net_internal, self.proxy_name], check=True)
-            self.proxy_url = self._await_proxy()
-        except Exception:
-            self.destroy()
-            raise
+                vllm_host = getattr(self.cfg, "vllm_allow_host", "") or ""
+                _run(["docker", "run", "-d", "--name", self.proxy_name, "--network", self.net_egress,
+                      "-e", f"PF_VLLM_ALLOW_HOST={vllm_host}", proxy_image], check=True)
+                _run(["docker", "network", "connect", self.net_internal, self.proxy_name], check=True)
+                self.proxy_url = self._await_proxy()
+            except Exception:
+                self.destroy()
+                raise
 
         self._provisioned = True
         self._log(f"provisioned net={self.net_internal}/{self.net_egress} proxy={self.proxy_url}")
@@ -270,7 +276,9 @@ class Broker:
             argv += ["-v", m.to_arg()]
         argv += ["-v", f"{self.uv_volume}:/uv-cache", "-w", "/work", image, "sleep", "infinity"]
 
-        _run(argv, check=True)
+        from poc_foundry import tracing
+        with tracing.span("broker.create", box=name, image=image, runtime=self.runtime):
+            _run(argv, check=True)
         sbx = Sandbox(self, full)
         self._sandboxes[full] = sbx
         self._log(f"created sandbox {full} (runtime={self.runtime})")
@@ -293,10 +301,12 @@ class Broker:
         for k, v in (env or {}).items():
             argv += ["-e", f"{k}={v}"]
         argv += [ref]
-        _run(argv, check=True)
-        sbx = Sandbox(self, full)
-        self._sandboxes[full] = sbx
-        self._await_service(full, ready_cmd)
+        from poc_foundry import tracing
+        with tracing.span("broker.create_service", svc=name, image=ref):
+            _run(argv, check=True)
+            sbx = Sandbox(self, full)
+            self._sandboxes[full] = sbx
+            self._await_service(full, ready_cmd)
         self._log(f"created service {full} ({ref})")
         return sbx
 
@@ -333,6 +343,11 @@ class Broker:
 
     # ── teardown ─────────────────────────────────────────────────────────────
     def destroy(self) -> None:
+        from poc_foundry import tracing
+        with tracing.span("broker.destroy", build_id=self.build_id):
+            self._destroy()
+
+    def _destroy(self) -> None:
         for sbx in list(self._sandboxes.values()):
             sbx.destroy()
         # Always attempt teardown of the named resources (rm/network rm/volume rm are idempotent —

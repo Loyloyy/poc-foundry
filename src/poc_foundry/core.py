@@ -90,15 +90,18 @@ def build_poc(source: str | Path, brief: str = "", *, driver: str = "tech-scout"
     state = BuildState(build_id=build_id, brief=brief, driver=driver, source_dir=str(run_dir),
                        build_dir=str(build_dir), workspace_dir=str(ctx.workspace_dir))
 
+    from poc_foundry import tracing
     try:
-        broker.provision()
-        graph = build_graph(ctx, cfg)
-        _invoke_with_salvage(graph, state, ctx, cfg, build_dir, build_id)
+        with tracing.build(build_id, tags=[driver, template]):   # root span (manual; §5.11)
+            broker.provision()
+            graph = build_graph(ctx, cfg)
+            _invoke_with_salvage(graph, state, ctx, cfg, build_dir, build_id)
     except Exception as e:  # noqa: BLE001 — leave a forensic artifact, then surface the error
         _emit_failed(build_dir, build_id, ctx, e)
         raise
     finally:
         broker.destroy()
+        tracing.flush()   # mandatory: flush queued spans before the ephemeral process exits
 
     return _result(build_dir)
 
@@ -223,12 +226,15 @@ def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime
     ctx, broker = _prepare(cfg, build_id, run_dir, meta.get("template", cfg.default_template), runtime)
     ctx.run_folder = load_run(run_dir)   # phases resumed past P0 still need the loaded artifact
 
+    from poc_foundry import tracing
     try:
-        broker.provision()
-        graph = build_graph(ctx, cfg)
-        _invoke_with_salvage(graph, None, ctx, cfg, build_dir, build_id)   # None → resume
+        with tracing.build(build_id, tags=["resume", meta.get("template", cfg.default_template)]):
+            broker.provision()
+            graph = build_graph(ctx, cfg)
+            _invoke_with_salvage(graph, None, ctx, cfg, build_dir, build_id)   # None → resume
     finally:
         broker.destroy()
+        tracing.flush()
 
     return _result(build_dir)
 

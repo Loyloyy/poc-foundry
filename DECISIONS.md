@@ -716,6 +716,54 @@ The M2a residual: checkpoint/resume existed but was untested; Stop was not wired
 - **Verified locally (63/63 fakes; +4 in `test_m2b_stop.py`):** the sentinel round-trip + node guard;
   `BuildStopped` escapes `except Exception`; `request_stop_build` writes the sentinel + resume clears
   it; `_emit_stopped` writes a resumable `stopped` artifact with recovered provenance. Contract 11/11;
-  hygiene clean. *Server kill-test (the M2b acceptance): start a build, `stop <id>` (or kill it)
-  mid-iteration, `resume <id>` → completes over the persisted workspace from the last green commit;
-  fresh broker re-provisions cleanly; ZERO leaks.*
+  hygiene clean. **Server-validated (2026-06-23):** `PF_STOP_AT_NODE=iterate:2` build → `stopped`
+  after iter0; `resume` (no env) continued from the iter0 checkpoint over the persisted workspace →
+  `done` (5/5 criteria, clean-room green, output scrubbed); fresh broker re-provisioned; ZERO leaks.
+- **Known minor (meter resets per process).** `budget.llm_calls` on a RESUMED run counts only the
+  resume leg (the in-memory `METER` starts fresh per process; the pre-stop calls were in the prior
+  process). Accurate cross-resume budgeting would persist the meter in `BuildState` — deferred (the
+  caps still bound EACH leg; the cross-resume total is the only gap). Tracked in DEV_NOTES.
+
+**M2b — resilience COMPLETE (2026-06-23):** S1 scrubber + S2 budgets/caps/contention + S3 run-cap
+salvage (abandoned.patch + descope + gaps) + S4 stop/resume, all server-validated. → M2c.
+
+## #22 — M2c S1: observability — `tracing.py` + manual spans (2026-06-23)
+
+Design §5.11: Langfuse project `stage-3-poc` (separate keys from Stage-2) via the **tolerated-absent**
+`tracing.py` pattern + **manual spans around the half a LangChain callback handler can't see** (broker/
+exec/VERIFY/gates/critic/clean-room/proxy denials; and our LLM calls go through raw urllib in
+`chat_text`, which no handler sees either).
+
+- **Tolerated-absent (Stage-2 discipline).** `PF_TRACING` gates it (OFF by default); `langfuse` is
+  lazy-imported (module stays `py_compile`-able + import-light on the 3.10 box); if disabled / dep
+  absent / creds misconfigured, `get_tracer()` returns a no-op tracer and **every** `span`/`event`/
+  `build`/`flush` is a safe no-op. Every real-langfuse call is additionally wrapped in `try/except` →
+  a tracing fault degrades to no-op rather than crashing a build (rule: tracing must never take down a
+  run). Flush-on-exit is mandatory (ephemeral `docker compose run`): `core.build_poc`/`resume_build`
+  call `tracing.flush()` in `finally`.
+- **Module singleton + injection.** A process-global `_current` tracer (lazy `_init_tracer`), with
+  `set_tracer`/`reset_tracer` so the fakes inject a recording `FakeTracer` and assert spans fire at the
+  right seams. Callers use module-level delegators `tracing.span(name, **attrs)` / `event` / `build` /
+  `flush`. **Gotcha baked into the API:** `span(name, ...)` takes the span name positionally, so attrs
+  must not be keyed `name=` (use `box=`/`svc=` for sandbox/service names) — caught by the broker test.
+- **Seams instrumented.** root **build** (core, tags=[driver, template] / ["resume", template]);
+  **broker.provision/create/create_service/exec/destroy** in BOTH the in-process `Broker`/`Sandbox`
+  and the out-of-process `RemoteBroker`/`RemoteSandbox` (the server path — exec spans the RPC
+  round-trip incl. VERIFY); **spec** (P1 architect); **iterate.verify** (cumulative pytest) +
+  **gate.diff-scan** spans and **gate.incident** events (diff-scan + ledger-gap); **critic** (adequacy
+  review); **cleanroom**; **llm.<role>** (chat_text); and a **proxy.denials** event (TCP_DENIED count
+  parsed from the egress log at P7 — the detective egress control surfaced in the trace).
+- **Authored blind (the constraint).** No `langfuse` on the 3.10 box → the v3 API (`get_client`,
+  `start_as_current_span`, `update_current_trace`, `create_event`, `flush`) is authored from docs, not
+  run locally. The guards mean a wrong API name silently degrades to no-op (spans just won't appear) —
+  it can't crash a build — so the **server is the validation**: confirm spans in `stage-3-poc` + flush;
+  adjust API names if the installed version differs. (Same "can't verify a heavy-dep API on 3.10"
+  posture as the langgraph msgpack note.)
+- **msgpack-registration carry-forward NOT folded in here.** It's an unverifiable langgraph-version
+  API and the working resume path shouldn't be risked on a guess; left as the documented follow-up
+  (#21 / DEV_NOTES).
+- **Verified locally (71/71 fakes; +6 `test_m2c_tracing.py`):** no-op when off; PF_TRACING-on-but-dep-
+  absent degrades to no-op; `set_tracer`/`reset_tracer`; broker-layer spans via a fake `_run`; the
+  phase-pipeline spans + the proxy-denial event via the m1 fakes harness (build still `done` — spans
+  don't perturb it); the chat_text `llm.<role>` span + output update. Contract 11/11; hygiene clean.
+  *Server-validation pending.*

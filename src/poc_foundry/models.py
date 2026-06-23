@@ -167,10 +167,14 @@ def chat_text(role: str, prompt: str, system: str | None = None, *,
         data=_json.dumps(body).encode(), method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
     )
-    METER.count()                       # cap choke point (raises BudgetExceeded before an over-budget call)
-    t0 = time.time()
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = _json.loads(r.read())
-    METER.record_latency(time.time() - t0)
-    msg = (data.get("choices") or [{}])[0].get("message", {}) or {}
-    return msg.get("content") or msg.get("reasoning") or ""
+    from poc_foundry import tracing   # import-light; lazy here so models.py import stays cheap
+    with tracing.span(f"llm.{role}", role=role) as _sp:
+        METER.count()                   # cap choke point (raises BudgetExceeded before an over-budget call)
+        t0 = time.time()
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = _json.loads(r.read())
+        METER.record_latency(time.time() - t0)
+        msg = (data.get("choices") or [{}])[0].get("message", {}) or {}
+        out = msg.get("content") or msg.get("reasoning") or ""
+        _sp.update(output=out[:2000])
+        return out

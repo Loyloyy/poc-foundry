@@ -452,3 +452,30 @@ to allow explicitly: [('poc_foundry.state', 'Spec')]   # also Plan, artifact.sch
   NOT shipped blind: it's a langgraph-version-specific API that can't be `py_compile`-verified on the
   3.10 dev box (rule #3) — author it against the installed langgraph version and confirm the warning
   is gone on a server resume.
+
+## Budget meter resets per process (cross-resume undercount, M2b S4)
+
+`models.METER` is process-global and in-memory. On a `resume`, it starts fresh, so the resumed run's
+`budget.llm_calls` / `wall_s` count only the resume leg — NOT the pre-stop calls (those ran in the
+prior process). The per-iter / per-run CAPS still bound each leg correctly; only the cross-resume
+accounting total is missing. Fix when needed: persist the meter counters in `BuildState` (checkpointed)
+and re-seed `METER.begin_run` from them on resume. Deferred — low impact (resume is the exception path).
+
+## Tracing (`tracing.py`) authored blind for langfuse v3 (M2c S1)
+
+`langfuse` is not installed on the 3.10 dev box (it's the `obs` extra, server/Docker only), so the v3
+API used by `_LangfuseTracer` (`get_client`, `start_as_current_span`, `update_current_trace`,
+`create_event`, `flush`) is authored from docs and CANNOT be run locally. Two consequences:
+
+- **Every langfuse call is `try/except`-guarded** → a wrong API name (or a v3.x rename) degrades to a
+  no-op span instead of crashing the build. So locally the green bar can't catch an API mismatch; it
+  shows up only as **missing spans in Langfuse on the server**. If a build's trace is empty in
+  `stage-3-poc` (with `PF_TRACING=1` + keys set), the API names are the first suspect — check the
+  installed `langfuse` version and adjust `_LangfuseTracer`.
+- **`span(name, **attrs)` takes the name positionally** — passing an attr keyed `name=` raises
+  `TypeError: got multiple values for argument 'name'`. The broker spans use `box=`/`svc=` for the
+  sandbox/service name for exactly this reason (a `test_m2c_tracing` case guards it).
+
+Flush-on-exit is in `core` (`build_poc`/`resume_build` `finally`). The msgpack-registration follow-up
+(above) was NOT folded into this slice despite both being graph/obs wiring — same unverifiable-heavy-
+dep-API reason; shipping it blind risks the working resume path.
