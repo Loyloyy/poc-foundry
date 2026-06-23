@@ -702,6 +702,12 @@ The M2a residual: checkpoint/resume existed but was untested; Stop was not wired
   PERSISTED workspace + checkpoint (VMs are cattle; workspace + state are pets — design §5.9). Both
   fresh and resumed runs go through `_invoke_with_salvage`, so a resumed run is equally stop-/cap-able.
 - **New CLI verb** `stop <id>`; `request_stop_build` added to the headless core.
+- **Operability (found while server-testing):** (1) `ctx.say` now streams the phase trace to stderr
+  (`PF_PROGRESS=0` silences it; the fakes runner sets it) so a long run is observable instead of dumping
+  everything at the end. (2) A deterministic stop hook `PF_STOP_AT_NODE` (+ `PF_STOP_AT_NODE_HITS`)
+  in `raise_if_stopped` stops at the Nth entry of a named node — so the kill/resume acceptance test is
+  reproducible WITHOUT racing a manual Ctrl-C (the host can't write the root-owned `.stop` sentinel
+  anyway). `resume` run without the env continues to completion.
 - **Forward-compat note (deferred, non-blocking):** LangGraph warns "Deserializing unregistered type
   poc_foundry.state.Spec/Plan / artifact.IterationRecord … blocked in a future version." Resume WORKS
   today (server `get_state` succeeded); registering these in `allowed_msgpack_modules` is a small

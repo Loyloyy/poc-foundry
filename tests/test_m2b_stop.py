@@ -33,6 +33,34 @@ def test_stop_sentinel_roundtrip_and_guard(tmp_path):
     control.raise_if_stopped(bd)                 # cleared → no raise again
 
 
+def test_deterministic_stop_hook_fires_on_nth_node_visit(tmp_path, monkeypatch):
+    bd = tmp_path / "poc-hook"
+    control.reset_visits()
+    monkeypatch.setenv("PF_STOP_AT_NODE", "iterate")
+    monkeypatch.setenv("PF_STOP_AT_NODE_HITS", "2")
+    control.raise_if_stopped(bd, "iterate")      # 1st visit → no stop
+    control.raise_if_stopped(bd, "scaffold")     # a different node → never counts
+    try:
+        control.raise_if_stopped(bd, "iterate")  # 2nd visit → stop
+        raise AssertionError("expected BuildStopped on the 2nd visit")
+    except BuildStopped:
+        pass
+    control.reset_visits()
+
+
+def test_deterministic_stop_hook_accepts_combined_node_colon_hits(tmp_path, monkeypatch):
+    bd = tmp_path / "poc-hook2"
+    control.reset_visits()
+    monkeypatch.setenv("PF_STOP_AT_NODE", "iterate:2")   # combined form (one env var)
+    control.raise_if_stopped(bd, "iterate")              # 1st → no stop
+    try:
+        control.raise_if_stopped(bd, "iterate")          # 2nd → stop
+        raise AssertionError("expected BuildStopped on the 2nd visit")
+    except BuildStopped:
+        pass
+    control.reset_visits()
+
+
 def test_buildstopped_escapes_except_exception():
     assert issubclass(BuildStopped, BaseException)
     assert not issubclass(BuildStopped, Exception)

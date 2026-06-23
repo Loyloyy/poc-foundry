@@ -69,14 +69,14 @@ def build_graph(ctx: Ctx, cfg):
 
     g = StateGraph(BuildState)
 
-    def wrap(fn):
+    def wrap(name, fn):
         def run(state):
-            control.raise_if_stopped(ctx.build_dir)   # cooperative stop at the node boundary (S4)
+            control.raise_if_stopped(ctx.build_dir, name)   # cooperative stop at the node boundary (S4)
             return fn(state, ctx)
         return run
 
     for name, fn in _NODES:
-        g.add_node(name, wrap(fn))
+        g.add_node(name, wrap(name, fn))
 
     g.add_edge(START, "ingest")
     g.add_conditional_edges("ingest", _after_ingest, {"spec": "spec", "emit": "emit"})

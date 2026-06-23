@@ -209,9 +209,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       `status: stopped` artifact. `resume_build` clears the sentinel + re-provisions a FRESH broker
       over the persisted workspace/state (cattle vs pets). New `stop <id>` CLI + `request_stop_build`.
       LangGraph msgpack type-registration = a documented forward-compat follow-up (DEV_NOTES, #21).
-      Local: **63/63 fakes** (+4 `test_m2b_stop.py`) + contract 11/11 + hygiene clean. *Server
-      kill-test (the gate): build → `stop`/kill mid-iteration → `resume` completes over the persisted
-      workspace; fresh broker re-provisions; ZERO leaks.*
+      Live phase trace to stderr (`PF_PROGRESS`) + a deterministic `PF_STOP_AT_NODE` test hook so the
+      kill/resume gate needs no manual-timing. Local: **64/64 fakes** (+5 `test_m2b_stop.py`) +
+      contract 11/11 + hygiene clean. *Server kill-test (the gate): `PF_STOP_AT_NODE=iterate
+      PF_STOP_AT_NODE_HITS=2` build → `stopped` after iter0 → `resume` (no env) completes over the
+      persisted workspace; fresh broker re-provisions; ZERO leaks.*
 - **Acceptance:** a killed run resumes from last green commit; a forced descope yields a descope
       report; scrubber leaves no endpoint/id in emitted text. **S1/S2/S3 server-validated; S4 awaits
       the server kill-test → then M2b COMPLETE → M2c.**

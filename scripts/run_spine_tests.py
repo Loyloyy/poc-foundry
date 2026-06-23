@@ -27,6 +27,9 @@ from types import ModuleType, SimpleNamespace
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
 
+import os as _os
+_os.environ.setdefault("PF_PROGRESS", "0")   # keep the fakes' phase-trace chatter off the green bar
+
 
 # ── the minimal pytest shim (registered before any test module imports `pytest`) ──────────────────
 class _Raises:

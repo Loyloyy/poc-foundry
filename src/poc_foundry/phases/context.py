@@ -75,6 +75,11 @@ class Ctx:
 
     def say(self, line: str) -> None:
         self.report.append(line)
+        # live progress to stderr (stdout stays the final report) so a long run is observable — and an
+        # operator can see WHEN to stop/kill it. Silenced with PF_PROGRESS=0 (set by the fakes runner).
+        if os.environ.get("PF_PROGRESS", "1") != "0":
+            import sys
+            print(f"  · {line}", file=sys.stderr, flush=True)
 
 
 # ── workspace git (the sanctioned deterministic commits, AGENTS rule #2) ─────
