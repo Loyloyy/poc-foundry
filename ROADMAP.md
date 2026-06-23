@@ -248,8 +248,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       running `restart:always` containers), then a post-recreate `:3000` connection-refused — each fixed
       in service-depot via `./depot down/up` + a prune guard; the poc-foundry code never changed after
       the v4 fix. msgpack-registration carry-forward NOT folded in (unverifiable API; documented).
-- [ ] S2 tiered evals v1 (spec-eval + plan-eval vs fixtures) · S3 playbook injection + reflection ·
-      S4 research-on-gaps (deepagents + SearXNG) · S5 template CI
+- [~] **S2 tiered evals v1 (2026-06-24, local):** `evals.py` (pure) — the CHEAPEST eval rung: run
+      P0 ingest → P1 spec → P2 plan on a committed fixture (NO sandbox/clean-room/Langfuse), score with
+      deterministic structural checks (`score_spec`/`score_plan`: count 3–6, one core, met-by-test,
+      core-first plan, interface pinned, …) → 0..1 + an `overall_score`, plus a structured
+      human-grading rubric recorded UNGRADED (Tier-2 seam; degraded-critic = no auto-LLM-judge). No
+      broker constructed (P0/P1/P2 don't touch it); only the real architect call in P1 → server-run.
+      `cli eval [--fixture/--template/--min-score/--json]` + `scripts/run_evals.py` (server; mirrors
+      `run_contract_checks.py`). Metrics structured for stratification (`metadata.degraded_critic` +
+      `stratify`). DECISIONS #23. Local: **81 fakes** (+6 `test_m2c_evals.py`) + contract 11/11 +
+      hygiene clean. *Server (pending): `cli eval` on the fixture → scored report with the real architect.*
+- [ ] S3 playbook injection + reflection · S4 research-on-gaps (deepagents + SearXNG) · S5 template CI
 - **Acceptance:** spec/plan evals run against fixtures; manual spans appear in Langfuse `stage-3-poc`.
 
 ## M3 — web UI
@@ -259,4 +268,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
 ## M4 — breadth
 - [ ] security red-team demo (both beats) + vLLM key-proxy (ship together) · `refine` flow · JS
       template (if npm granted) · multi-service composition · eval harness v2 · `docs/PLATFORM.md`
+- [ ] **daemon-side invariant-rejection audit log** (from the M2c S1 design review): the broker daemon
+      (trust boundary / rule-#8 enforcer) should durably record rejected `create*` (+ provision/destroy)
+      append-only, read independently of the orchestrator, feeding `security.incidents[]` (§5.2 posture).
+      NOT trace propagation; planning-chat consult first (DECISIONS #22 follow-up).
 - **Acceptance:** the security demo runs both beats with proxy logs as evidence; `demo-security` CLI.

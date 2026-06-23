@@ -5,6 +5,7 @@
     python -m poc_foundry.cli resume <build-id>
     python -m poc_foundry.cli stop <build-id>
     python -m poc_foundry.cli clean <build-id>
+    python -m poc_foundry.cli eval [--fixture PATH ...] [--template NAME] [--min-score F] [--json PATH]
 
 Everything delegates to ``poc_foundry.core``. Argparse only; no heavy imports at module load.
 """
@@ -66,6 +67,29 @@ def _cmd_clean(args) -> int:
     return 0
 
 
+def _cmd_eval(args) -> int:
+    from pathlib import Path
+
+    from poc_foundry.evals import format_report, run_evals, save_reports
+
+    repo_root = Path(__file__).resolve().parents[2]
+    fixtures = args.fixture or [str(repo_root / "tests" / "fixtures" / "sample_artifact")]
+    reports = run_evals(fixtures, template_name=args.template)
+
+    for rep in reports:
+        print(format_report(rep))
+        print()
+
+    if args.json:
+        save_reports(reports, Path(args.json))
+        print(f"→ wrote {len(reports)} report(s) to {args.json}")
+
+    failed = [r for r in reports if not r.ok or r.overall_score < args.min_score]
+    print(f"\nSUMMARY: {len(reports) - len(failed)}/{len(reports)} fixture(s) "
+          f"at/above min-score {args.min_score}")
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="poc-foundry", description="Stage-3 PoC foundry (headless core)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -93,6 +117,15 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("build_id")
     c.add_argument("--keep-workspace", action="store_true", help="keep the local-disk workspace")
     c.set_defaults(func=_cmd_clean)
+
+    e = sub.add_parser("eval", help="cheap spec+plan evals against fixture artifacts (no sandbox)")
+    e.add_argument("--fixture", action="append", default=[],
+                   help="run-folder path (repeatable; default the committed sample fixture)")
+    e.add_argument("--template", default=None, help="template name (default from pipeline.yaml)")
+    e.add_argument("--min-score", type=float, default=0.0,
+                   help="exit nonzero if any fixture's overall score is below this (default 0 = report only)")
+    e.add_argument("--json", default=None, help="also write the structured reports to this JSON path")
+    e.set_defaults(func=_cmd_eval)
 
     args = p.parse_args(argv)
     return args.func(args)

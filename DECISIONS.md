@@ -813,5 +813,58 @@ exec/VERIFY/gates/critic/clean-room/proxy denials; and our LLM calls go through 
   no-op tracer for a process) called at the top of `daemon.main()` — the daemon never traces; the
   orchestrator side remains the single source of broker spans, nested under `build/<id>`. (The
   in-process broker.py spans still help the local no-daemon path, where they DO share the build
-  process/context.) +1 fakes test (`disable()` silences even an injected tracer). *Server re-validation
-  of the single-clean-trace shape in flight.*
+  process/context.) +1 fakes test (`disable()` silences even an injected tracer). **SERVER-VALIDATED
+  (2026-06-24): one clean trace per build — no scattered `broker.*` rows.** S1 fully closed.
+- **DESIGN-REVIEW of the daemon-silence decision (2026-06-24) → KEEP (option a).** A spec-grounded
+  review (against §5.11/§5.2/§5.5/§10) confirmed orchestrator-side-only broker tracing is correct. Key
+  reframe: **Langfuse is NOT the security system-of-record** — the design assigns security evidence to
+  named sinks (the egress proxy's own CONNECT log → `logs/`; `security.incidents[]`; the deterministic
+  diff-scanner), and §5.11 groups Langfuse with EVALS/observability. So silencing the daemon's Langfuse
+  removes zero authoritative security evidence (it only held context-less duplicate build-flow spans).
+  The orchestrator is the right altitude because the observability/eval telemetry needs build context
+  (iteration, role, the `build/<id>` tree, stratification) that only it has. RPC trace-context
+  propagation (option b) was rejected: real complexity (OTEL context across the socket, per-build root
+  in the daemon, v3/v4 resilience, cross-process flush) for build-flow telemetry the orchestrator
+  already covers — not a correctness/security need. No §10 conflict (keeping the daemon as the
+  authoritative enforcer IS the §10 broker decision; observability isn't a §10 item).
+- **FOLLOW-UP (separate, real — for the planning chat).** The daemon is the trust boundary + rule-#8
+  enforcer, but a rejected `create*` today only raises `BrokerInvariantError` over RPC — **nothing
+  durable is recorded daemon-side**, which §5.2's "full logging → logs/ + `security.incidents[]`"
+  posture implies the enforcer should leave. Fix is NOT trace propagation: a small **daemon-owned,
+  append-only audit record of invariant rejections (and provision/destroy), read independently of the
+  orchestrator, feeding `security.incidents[]`** — the trusted-side security evidence belongs in a
+  trusted-side security log, not the build's evals trace. Independent of S1; flag to the planning chat
+  (scope, not a §10 re-open). Likely M4 security-hardening territory; tracked, not built now.
+
+## #23 — M2c S2: tiered evals v1 — spec + plan evals against fixtures (2026-06-24)
+
+Design §5.11's CHEAPEST eval rung (the headline M2c acceptance): run **only** P0 ingest → P1 spec →
+P2 plan on a committed Stage-2 fixture (NO sandbox, NO clean-room, NO Langfuse — minutes, not a
+half-hour build), then score the products. New `evals.py` (pure: stdlib + pydantic, phases
+lazy-imported inside the runner so it stays `py_compile`-able + import-light on the 3.10 box).
+
+- **Two scoring layers.** (1) **Deterministic structural checks** — `score_spec` (criteria count
+  3–6, exactly-one-core, goal/demo non-empty, non_goals present, all `met-by-test`, substantive +
+  non-duplicate criterion text) and `score_plan` (≥1 iteration, within the iteration cap, **core-first**,
+  acceptance + interface pinned per iteration); each → a 0..1 fraction-passed score, `overall_score`
+  a `computed_field` (mean; plan omitted for NOT_BUILDABLE). (2) A **structured human-grading rubric**
+  (`default_rubric`: faithfulness / verifiability / core-centrality / scope-realism / decomposition)
+  recorded **ungraded** (`grade=null`) — the Tier-2 seam (the server reality is degraded-critic / one
+  model for all roles, so we deliberately do NOT auto-judge with an LLM here; §5.4 independence).
+- **No broker constructed.** P0/P1/P2 never touch the broker, so the runner builds a `Ctx` with
+  `broker=None, coder=None` and a temp staging dir (cleaned up). The only external call is the real
+  **architect** LLM in P1 — so the runner runs **on the server**; the deterministic SCORING is proven
+  locally by `tests/test_m2c_evals.py` with a FAKE architect.
+- **Scoring vs normalization (subtle).** `p1_spec._normalize_spec` already forces one core +
+  `met-by-test` typing, so the harness path can never fail `exactly_one_core`/`all_met_by_test` — those
+  scorer branches are asserted **directly** on hand-built specs (`test_score_spec_catches_structural_defects`).
+  What the harness path CAN catch (and the weak-spec test asserts): count, demo, non_goals, duplicates.
+- **Entry points.** `cli eval [--fixture … --template … --min-score F --json PATH]` (server) +
+  `scripts/run_evals.py` (plain no-pytest runner, mirrors `run_contract_checks.py` but calls the
+  architect → server-only). A crash inside a single eval is caught and recorded as `ok=False` (an eval
+  RESULT, not a green-bar break); `--min-score`/`--json` make it usable as a regression gate + a
+  persisted artifact (under gitignored `builds/evals/`). Metrics recorded structured
+  (`metadata.degraded_critic`, a `stratify` dict) for later stratification.
+- **Local: 81 fakes** (+6 `test_m2c_evals.py`: good-spec→full marks, weak-spec→specific fails,
+  NOT_BUILDABLE, the two direct scorers, format/save round-trip) + contract 11/11 + hygiene clean.
+  *Server (pending): `cli eval` on the fixture → a scored report with the real architect.*
