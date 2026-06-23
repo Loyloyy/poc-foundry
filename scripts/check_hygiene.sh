@@ -10,7 +10,9 @@ cd "$(dirname "$0")/.." || exit 2
 fail=0
 hit() { echo "  LEAK: $1"; fail=1; }
 
-tracked() { git ls-files 2>/dev/null; }
+# This script literally CONTAINS the leak patterns it greps for, so exclude it from its own scan
+# (a scanner matching its own rule set is a false positive, not a leak).
+tracked() { git ls-files 2>/dev/null | grep -vx 'scripts/check_hygiene.sh'; }
 
 echo "== static patterns =="
 # real *_MODEL/_API_BASE/_API_KEY values in tracked files (placeholders use <...>; blanks end in =)
