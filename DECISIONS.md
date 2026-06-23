@@ -867,4 +867,47 @@ lazy-imported inside the runner so it stays `py_compile`-able + import-light on 
   (`metadata.degraded_critic`, a `stratify` dict) for later stratification.
 - **Local: 81 fakes** (+6 `test_m2c_evals.py`: good-spec→full marks, weak-spec→specific fails,
   NOT_BUILDABLE, the two direct scorers, format/save round-trip) + contract 11/11 + hygiene clean.
-  *Server (pending): `cli eval` on the fixture → a scored report with the real architect.*
+  **Server-validated (2026-06-24):** `cli eval --json …` on `sample_artifact` → spec_score=1.0,
+  plan_score=1.0, overall=1.0 (all 13 checks PASS), JSON written; the real architect produced a
+  4-criterion RAG-citation spec + a core-first plan (fast `.env` caps `max_iterations=1`). **S2 DONE.**
+
+## #24 — M2c S3: experience loop — playbook injection + Tier-1 reflection (2026-06-24)
+
+Design §5.9 two-tier playbooks + the §5.3 P4.f close-step interrogation. New `playbooks.py` (pure
+stdlib + the tracked `playbooks/` tree) + an injection seam in `prompts.py`/`coder.py` + a per-iteration
+reflection step in `p4_iterate` + a post-build hint-distil in `p7_emit`.
+
+- **Two tiers.** Tier 2 = curated tracked `playbooks/{building,testing,research,gotchas}.md`, full
+  authority, hand-maintained. Tier 1 = low-authority EXPIRING auto-hints under `playbooks/hints/`
+  (**gitignored** — LLM-generated, may echo incident text, scrubbed-but-untrusted → never pushed; only
+  `hints/README.md` is tracked). Promotion Tier-1→Tier-2 is a human merge (out of scope; the structure
+  + expiry are left in place).
+- **Injection (the seam).** `ROLE_PLAYBOOKS` maps architect→[building], tester→[testing],
+  coder→[building,gotchas], research→[research]. `playbook_section(role)` concatenates the curated
+  bodies + matching non-expired hints (framed **"Unverified hint (low authority, expires …)"**), capped
+  to a per-role char budget. `compose(body, role, suffix)` orders it **body → playbook → suffix**, so the
+  code-appended **hard-rule / output-format suffix stays LAST and can't be displaced** (the load-bearing
+  invariant — asserted by a test that checks the format-suffix index > the playbook index).
+  `prompts.spec_prompt`/`tester_prompt` were split into body+suffix to use it; the coder threads
+  `playbook=` through `BespokeCoder.run` → `_prompt` (lands before its `# Task` format block).
+- **Hint matching + caps.** A hint's `applies_to:` pins match the role name OR its playbook names (so a
+  hint pinned to `gotchas` reaches the coder). The injector skips expired (`expires:` < today),
+  oversized (> `HINT_MAX_CHARS`=600), or pin-mismatched hints. `write_hint` caps on write **reserving
+  the truncation-marker length** so a written hint is always readable back (the one bug found locally:
+  cap + marker first pushed it over the read threshold → the injector skipped its own fresh hint).
+- **Tier-1 reflection.** `_reflect` runs ONLY on a STRUGGLING iteration (`attempts≥2 OR incidents OR
+  status∈{abandoned,incident,red-first-failed}`) — a lesson must cite a concrete incident, so a clean
+  first-try-green iteration writes nothing (no wasted LLM call). It interrogates the **coder** role
+  ("what would have helped?", `prompts.reflection_prompt`/`REFLECTION_SYSTEM`) and writes
+  `builds/<id>/iterations/<i>/lessons.md` with the incident citation + the answer. Best-effort
+  (`except Exception` → skip), but `BudgetExceeded` (a `BaseException`) still escapes to salvage, as
+  everywhere. `p7_emit` then distils all `iterations/*/lessons.md` into ONE scrubbed, size-capped,
+  expiring hint (`playbooks/hints/<build-id>.md`, `applies_to=[coder,gotchas]`).
+- **Hygiene.** `scrub.scrub_build_dir` now also scrubs `iterations/*/*.md` (lessons + S4 research); the
+  hint body is scrubbed again via `scrub_text` before it lands in the tree. `PF_PLAYBOOKS_DIR` /
+  `PF_HINTS_DIR` env overrides added; the local fakes runner points `PF_HINTS_DIR` at a tempdir so a
+  fakes-driven `p7` never writes into the tracked tree.
+- **Validation hook.** `PF_FORCE_REFLECT=1` (mirrors `PF_STOP_AT_NODE`) forces `_reflect` on a clean
+  fast build so the lessons→hint seam is provable server-side without a genuinely struggling 30-min run.
+- **Local: 90 fakes** (+9 `test_m2c_playbooks.py`) + contract 11/11 + hygiene clean. *Server (pending):
+  a build emits lessons.md + a hints/ entry; a seeded playbook visibly shapes a recorded prompt.*

@@ -25,6 +25,13 @@ dist/
 .venv/
 venv/
 
+# ── Experience loop (M2c S3) ─────────────────────────────────────────────────
+# Tier-1 auto-hints are low-authority, EXPIRING, machine-local + LLM-generated (could echo an
+# incident traceback) → never committed. Tier-2 promotion is a human merge INTO a curated playbook
+# (scrubbed + reviewed). The curated playbooks + the hints/ README stay tracked.
+playbooks/hints/*.md
+!playbooks/hints/README.md
+
 # ── Misc ──────────────────────────────────────────────────────────────────────
 .DS_Store
 *.log

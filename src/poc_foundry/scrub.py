@@ -163,6 +163,7 @@ def scrub_build_dir(build_dir: str | Path, secrets: list[tuple[str, str]] | None
     targets: list[Path] = [bd / n for n in _TEXT_FILES]
     targets += sorted(bd.glob("v*.json"))
     targets += sorted((bd / "logs").glob("*.log"))
+    targets += sorted(bd.glob("iterations/*/*.md"))   # M2c: per-iteration lessons.md / research.md
     changed: list[str] = []
     for t in targets:
         if scrub_file(t, secrets):

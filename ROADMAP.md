@@ -248,7 +248,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       running `restart:always` containers), then a post-recreate `:3000` connection-refused — each fixed
       in service-depot via `./depot down/up` + a prune guard; the poc-foundry code never changed after
       the v4 fix. msgpack-registration carry-forward NOT folded in (unverifiable API; documented).
-- [~] **S2 tiered evals v1 (2026-06-24, local):** `evals.py` (pure) — the CHEAPEST eval rung: run
+- [x] **S2 tiered evals v1 (2026-06-24, server-validated):** `evals.py` (pure) — the CHEAPEST eval rung: run
       P0 ingest → P1 spec → P2 plan on a committed fixture (NO sandbox/clean-room/Langfuse), score with
       deterministic structural checks (`score_spec`/`score_plan`: count 3–6, one core, met-by-test,
       core-first plan, interface pinned, …) → 0..1 + an `overall_score`, plus a structured
@@ -258,7 +258,19 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       `run_contract_checks.py`). Metrics structured for stratification (`metadata.degraded_critic` +
       `stratify`). DECISIONS #23. Local: **81 fakes** (+6 `test_m2c_evals.py`) + contract 11/11 +
       hygiene clean. *Server (pending): `cli eval` on the fixture → scored report with the real architect.*
-- [ ] S3 playbook injection + reflection · S4 research-on-gaps (deepagents + SearXNG) · S5 template CI
+- [~] **S3 experience loop — playbook injection + Tier-1 reflection (2026-06-24, local):** `playbooks.py`
+      (pure) + tracked `playbooks/{building,testing,research,gotchas}.md` + gitignored low-authority
+      EXPIRING auto-hints under `playbooks/hints/` (only `hints/README.md` tracked). Injection seam in
+      `prompts.py`/`coder.py`: `compose(body, role, suffix)` orders body→playbook→suffix so the
+      hard-rule/format suffix stays LAST (can't be displaced); per-role curated bodies + matching
+      non-expired hints (framed "unverified hint"), char-budgeted; hints pin via `applies_to` (role OR
+      playbook name), skip expired/oversized/mismatched. Tier-1: `_reflect` interrogates the coder on a
+      STRUGGLING iteration → `builds/<id>/iterations/<i>/lessons.md` (cites the incident); `p7_emit`
+      distils lessons → one scrubbed expiring `playbooks/hints/<id>.md`. Scrubber extended to
+      `iterations/*/*.md`. DECISIONS #24. Local: **90 fakes** (+9 `test_m2c_playbooks.py`) + contract
+      11/11 + hygiene clean. *Server (pending): a build emits lessons.md + a hints/ entry; a seeded
+      playbook shapes a recorded prompt.*
+- [ ] S4 research-on-gaps (deepagents + SearXNG) · S5 template CI
 - **Acceptance:** spec/plan evals run against fixtures; manual spans appear in Langfuse `stage-3-poc`.
 
 ## M3 — web UI

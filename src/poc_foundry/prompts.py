@@ -7,6 +7,8 @@ external services or network in the gated path (M1).
 """
 from __future__ import annotations
 
+from poc_foundry import playbooks
+
 
 def summarize_artifact(art) -> str:
     """Compact, hygiene-safe digest of a DeepResearchArtifact for the architect."""
@@ -60,9 +62,8 @@ def spec_prompt(art, interface: str, services: list | None = None) -> str:
                     "service). Do NOT require GPUs or any service beyond the provided one.\n")
     else:
         svc_line = "- Do NOT require networks, GPUs, databases, or services.\n"
-    return (
-        f"{summarize_artifact(art)}\n\n"
-        f"Target interface (fixed): {interface}\n\n"
+    body = f"{summarize_artifact(art)}\n\nTarget interface (fixed): {interface}"
+    suffix = (
         "Produce a PoC spec with:\n"
         "- goal: one sentence describing what the chatbot demonstrates.\n"
         "- success_criteria: 3 to 6 criteria. EXACTLY ONE has core=true (the single thing that, if it "
@@ -77,6 +78,7 @@ def spec_prompt(art, interface: str, services: list | None = None) -> str:
         "artifact — then give not_buildable_reasons.\n"
         "Keep every criterion small enough to satisfy with a few lines of Python."
     )
+    return playbooks.compose(body, "architect", suffix)
 
 
 TESTER_SYSTEM = (
@@ -92,17 +94,20 @@ def tester_prompt(criteria, goal: str, interface: str, core_module: str = "core"
         criteria = [criteria]
     crit_block = "\n".join(f"{i}. {c}" for i, c in enumerate(criteria, 1))
     plural = "these criteria" if len(criteria) > 1 else "this criterion"
-    return (
+    body = (
         f"# PoC goal\n{goal}\n\n"
         f"# Interface under test (fixed)\n{interface}\n"
         f"(import it as `from {core_module} import generate_reply`)\n\n"
-        f"# Success criteria to encode as tests\n{crit_block}\n\n"
+        f"# Success criteria to encode as tests\n{crit_block}"
+    )
+    suffix = (
         "# Task\n"
         f"Write ONE pytest file (functions named `test_*`, one or more per criterion) that asserts "
         f"{plural} against `generate_reply`. Make the assertions specific and deterministic so a "
         "naive echo stub would FAIL them. Use only the stdlib + pytest. Do not import gradio or open "
         "any network connection. Output only the file in a single ```python block."
     )
+    return playbooks.compose(body, "tester", suffix)
 
 
 CRITIC_SYSTEM = (
@@ -144,4 +149,28 @@ def scribe_demo_prompt(goal: str, demo_scenario: str, criteria: list[str]) -> st
         f"Success criteria:\n{crit}\n\n"
         "Include: a one-line what-this-is, the exact steps to launch (refer to RUN.md), and what to "
         "type to see the core criterion succeed. Markdown only."
+    )
+
+
+# ── Tier-1 reflection: the P4 close-step coder-interrogation (design §5.3 P4.f, §5.9) ──
+REFLECTION_SYSTEM = (
+    "You are the engineer who just worked an iteration of a PoC build, doing a brief blameless "
+    "retro. You name what would have helped you reach green faster, grounded in the CONCRETE incident "
+    "you were given — not generic advice. The notes feed a low-authority hint for FUTURE builds, so "
+    "make them specific and reusable. Never include secrets, hostnames, endpoints, file paths, or "
+    "model ids. Output 2–5 terse markdown bullets, no preamble."
+)
+
+
+def reflection_prompt(goal: str, criterion: str, status: str, attempts: int,
+                      incident: str) -> str:
+    return (
+        f"# Iteration goal\n{goal}\n\n"
+        f"# Criterion\n{criterion}\n\n"
+        f"# Outcome\nstatus={status}, attempts={attempts}\n\n"
+        f"# Concrete incident (cite this)\n{incident[:1200] or '(repeated failures; see attempts)'}\n\n"
+        "# Task\n"
+        "In 2–5 bullets: what would have helped you pass this faster? Cite the concrete incident "
+        "above. Be specific and reusable (a rule, a gotcha, an approach) — not 'try harder'. No "
+        "secrets/hostnames/paths."
     )

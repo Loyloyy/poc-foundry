@@ -28,7 +28,10 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
 
 import os as _os
+import tempfile as _tf
 _os.environ.setdefault("PF_PROGRESS", "0")   # keep the fakes' phase-trace chatter off the green bar
+# Keep any Tier-1 auto-hints written by a fakes-driven p7_emit out of the tracked playbooks/ tree.
+_os.environ.setdefault("PF_HINTS_DIR", _tf.mkdtemp(prefix="pf-hints-"))
 
 
 # ── the minimal pytest shim (registered before any test module imports `pytest`) ──────────────────
@@ -175,6 +178,7 @@ def main(argv: list[str]) -> int:
         _REPO / "tests" / "test_m2b_stop.py",
         _REPO / "tests" / "test_m2c_tracing.py",
         _REPO / "tests" / "test_m2c_evals.py",
+        _REPO / "tests" / "test_m2c_playbooks.py",
     ]
     tp = tf = 0
     for t in targets:

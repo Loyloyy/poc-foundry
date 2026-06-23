@@ -15,6 +15,7 @@ Phase map:
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -255,7 +256,42 @@ def _ledger_junit(sbx) -> set[str]:
     return passed
 
 
+def _reflect(ctx: Ctx, i: int, it, it_status: str, attempts: int, incidents: list, note: str) -> None:
+    """Tier-1 reflection (design §5.3 P4.f, §5.9): on a STRUGGLING iteration, interrogate the coder
+    ("what would have helped?") and write ``builds/<id>/iterations/<i>/lessons.md`` grounded in the
+    concrete incident. Skipped when the iteration was clean (no incident, first-try green) — a lesson
+    MUST cite a real struggle. Best-effort: never fails a build (a ``BudgetExceeded`` is a
+    ``BaseException`` and still escapes to the salvage path, as everywhere)."""
+    # PF_FORCE_REFLECT=1 is a deterministic validation hook (mirrors PF_STOP_AT_NODE): exercise the
+    # reflection seam on a clean fast build without needing a genuinely struggling (slow) one.
+    forced = os.environ.get("PF_FORCE_REFLECT") == "1"
+    struggled = (forced or attempts >= 2 or bool(incidents)
+                 or it_status in ("abandoned", "incident", "red-first-failed"))
+    if not struggled:
+        return
+    incident = ("; ".join(str(x) for x in incidents) or note
+                or ("(forced reflection — validation hook)" if forced else "(repeated failures)"))
+    try:
+        from poc_foundry.models import chat_text
+        criterion = it.acceptance[0] if it.acceptance else it.goal
+        body = chat_text("coder",
+                         prompts.reflection_prompt(it.goal, criterion, it_status, attempts, incident),
+                         system=prompts.REFLECTION_SYSTEM)
+    except Exception:  # noqa: BLE001 — bookkeeping; BudgetExceeded (BaseException) still propagates
+        return
+    if not body.strip():
+        return
+    dest = Path(ctx.build_dir) / "iterations" / str(i)
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "lessons.md").write_text(
+        f"# Lessons — iteration {i} ({it_status}, {attempts} attempt(s))\n\n"
+        f"**Concrete incident:** {incident[:600]}\n\n"
+        f"## What would have helped\n{body.strip()}\n")
+    ctx.say(f"P4 iter{i}: reflection → iterations/{i}/lessons.md")
+
+
 def p4_iterate(state, ctx: Ctx) -> dict:
+    from poc_foundry import playbooks
     from poc_foundry.artifact import IterationRecord
     from poc_foundry.models import METER
 
@@ -333,7 +369,8 @@ def p4_iterate(state, ctx: Ctx) -> dict:
             res = ctx.coder.run(
                 workspace=ctx.workspace_dir, goal=it.goal, editable_files=it.files,
                 test_sources={test_file: test_src}, verify=verify,
-                edit_format="whole", max_attempts=getattr(ctx.cfg, "max_fix_attempts", 3))
+                edit_format="whole", max_attempts=getattr(ctx.cfg, "max_fix_attempts", 3),
+                playbook=playbooks.playbook_section("coder"))   # curated building+gotchas + matching hints
             attempts = res.attempts
             if integrity.blocking(incidents):
                 it_status, crit_status = "incident", "descoped"
@@ -376,6 +413,8 @@ def p4_iterate(state, ctx: Ctx) -> dict:
 
     for c in targets:                                    # reflect the outcome on THIS iteration's criteria
         c.status = crit_status
+
+    _reflect(ctx, i, it, it_status, attempts, incidents, note)   # Tier-1 lessons on a struggling iter
 
     rec = IterationRecord(goal=it.goal, status=it_status, attempts=attempts,
                           tests_added=len(authored - set(state.authored_test_ids)))
@@ -730,6 +769,19 @@ def p7_emit(state, ctx: Ctx) -> dict:
     scrubbed = scrub.scrub_build_dir(build_dir)
     if scrubbed:
         ctx.say(f"P7 emit: hygiene scrubber rewrote {len(scrubbed)} emitted file(s)")
+
+    # experience loop (M2c S3): distil this build's Tier-1 lessons into ONE low-authority EXPIRING
+    # hint for future builds. The lessons are already scrubbed on disk (above); scrub again defensively
+    # before it lands in the (gitignored) playbooks/hints/ tree — it's LLM-generated + untrusted.
+    from poc_foundry import playbooks
+    iters_dir = build_dir / "iterations"
+    lessons = sorted(iters_dir.glob("*/lessons.md")) if iters_dir.exists() else []
+    if lessons:
+        raw = "\n\n".join(p.read_text() for p in lessons)
+        clean = scrub.scrub_text(raw, scrub.collect_secrets())
+        hint = playbooks.write_hint(clean, source_build=ctx.build_id, applies_to=["coder", "gotchas"])
+        if hint:
+            ctx.say(f"P7 emit: distilled {len(lessons)} lesson(s) → low-authority hint {hint.name}")
 
     ctx.say(f"P7 emit: status={status}; artifact + workspace written to {build_dir}")
     return {"phase": "emit", "status": status, "demonstrates_core_value": demonstrates,

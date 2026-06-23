@@ -53,7 +53,7 @@ class CoderEngine(Protocol):
 
     def run(self, *, workspace: Path, goal: str, editable_files: list[str],
             test_sources: dict[str, str], verify: VerifyFn,
-            edit_format: str = "whole", max_attempts: int = 3) -> CoderResult: ...
+            edit_format: str = "whole", max_attempts: int = 3, playbook: str = "") -> CoderResult: ...
 
 
 # ── edit parsing / application (host-side, no shell) ─────────────────────────
@@ -134,11 +134,13 @@ def _fmt_instruction(editable: list[str], edit_format: str) -> str:
 
 
 def _prompt(workspace: Path, goal: str, editable: list[str], test_sources: dict[str, str],
-            edit_format: str, failure: str | None, repeated: bool) -> str:
+            edit_format: str, failure: str | None, repeated: bool, playbook: str = "") -> str:
     tests = "\n\n".join(f"# Test (DO NOT EDIT) — {name}\n```python\n{src}\n```"
                         for name, src in test_sources.items())
+    # playbook guidance lands in the BODY, BEFORE the "# Task" format suffix, so its hard rules win.
+    pb = f"{playbook}\n\n" if playbook else ""
     head = (f"# Goal\n{goal}\n\n{tests}\n\n# Current source of editable files\n"
-            f"{_read_sources(workspace, editable)}\n\n# Task\n")
+            f"{_read_sources(workspace, editable)}\n\n{pb}# Task\n")
     if failure is None:
         return head + f"Make the test(s) pass. {_fmt_instruction(editable, edit_format)}"
     strat = ("\nYou produced the SAME failure as before — change your APPROACH structurally; do not "
@@ -164,7 +166,7 @@ class BespokeCoder:
 
     def run(self, *, workspace: Path, goal: str, editable_files: list[str],
             test_sources: dict[str, str], verify: VerifyFn,
-            edit_format: str = "whole", max_attempts: int = 3) -> CoderResult:
+            edit_format: str = "whole", max_attempts: int = 3, playbook: str = "") -> CoderResult:
         t0 = time.time()
         editable = list(editable_files)
         editable_set = set(editable)
@@ -178,7 +180,7 @@ class BespokeCoder:
             repeated = bool(failure) and _signature(failure) in sigs
             try:
                 resp = self._chat(_prompt(workspace, goal, editable, test_sources,
-                                          edit_format, failure, repeated))
+                                          edit_format, failure, repeated, playbook))
             except Exception as e:  # noqa: BLE001 — record, never crash the build
                 return CoderResult(False, attempt, round(time.time() - t0, 1), edit_format,
                                    last_output, sigs, note=f"model error: {e!r}", edited=edited)
