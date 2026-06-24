@@ -14,7 +14,7 @@ def main() -> None:
     import uvicorn
 
     host = os.environ.get("PF_WEB_HOST", "127.0.0.1")
-    port = int(os.environ.get("PF_WEB_PORT", "8770"))
+    port = int(os.environ.get("PF_WEB_PORT", "8181"))   # 8770/8008 are vLLM on the shared box — keep clear
     if host not in ("127.0.0.1", "localhost", "::1"):
         # Loud, non-fatal: §5.12 says localhost + SSH tunnel only. Respect the override but warn.
         print(f"WARNING: PF_WEB_HOST={host!r} is not loopback — the web service holds the secrets; "

@@ -9,7 +9,7 @@ This module imports the ``ui`` extra (fastapi/uvicorn) at top level, so it is im
 imported by the no-pytest fakes (which exercise ``runmanager``/``events`` directly on the 3.10 box).
 It stays ``py_compile``-able regardless (compile doesn't execute imports).
 
-Run it:  ``python -m poc_foundry.web``  (see ``__main__.py``; uvicorn on 127.0.0.1:8770).
+Run it:  ``python -m poc_foundry.web``  (see ``__main__.py``; uvicorn on 127.0.0.1:8181).
 """
 from __future__ import annotations
 

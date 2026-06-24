@@ -1026,7 +1026,7 @@ is a SECOND thin presentation over the unchanged headless contract — it only c
   suffix-allowlisted + traversal-guarded `file` reader (serves already-scrubbed build files), `status`,
   and the `events` SSE stream (async generator, `asyncio.to_thread` on the queue + client-disconnect
   check). Serves the committed `dist/` (placeholder until S2). **Binds localhost ONLY** (`web/__main__`
-  on 127.0.0.1:8770; warns on a non-loopback override) — the process holds the secrets, so the SSH
+  on 127.0.0.1:8181; warns on a non-loopback override) — the process holds the secrets, so the SSH
   tunnel is the boundary; **no in-app auth, and we don't claim one** (rule #1 / §5.12). New `web` compose
   service (localhost port; override mirrors `app`'s broker socket + `PF_WORKSPACE_DIR`).
 - **Local: 118 fakes** (+11 `test_m3_events.py`: `say→sink→sse_format`; snapshot projection + empty-state
