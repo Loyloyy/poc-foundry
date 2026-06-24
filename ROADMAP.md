@@ -258,7 +258,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       `run_contract_checks.py`). Metrics structured for stratification (`metadata.degraded_critic` +
       `stratify`). DECISIONS #23. Local: **81 fakes** (+6 `test_m2c_evals.py`) + contract 11/11 +
       hygiene clean. *Server (pending): `cli eval` on the fixture → scored report with the real architect.*
-- [~] **S3 experience loop — playbook injection + Tier-1 reflection (2026-06-24, local):** `playbooks.py`
+- [x] **S3 experience loop — playbook injection + Tier-1 reflection (2026-06-24, server-validated):** `playbooks.py`
       (pure) + tracked `playbooks/{building,testing,research,gotchas}.md` + gitignored low-authority
       EXPIRING auto-hints under `playbooks/hints/` (only `hints/README.md` tracked). Injection seam in
       `prompts.py`/`coder.py`: `compose(body, role, suffix)` orders body→playbook→suffix so the
@@ -269,8 +269,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       distils lessons → one scrubbed expiring `playbooks/hints/<id>.md`. Scrubber extended to
       `iterations/*/*.md`. DECISIONS #24. Local: **90 fakes** (+9 `test_m2c_playbooks.py`) + contract
       11/11 + hygiene clean. *Server (pending): a build emits lessons.md + a hints/ entry; a seeded
-      playbook shapes a recorded prompt.*
-- [~] **S4 research-on-gaps (2026-06-24, local):** the §5.8 ladder's last rung, per the planning-chat
+      playbook shapes a recorded prompt.* **Server-validated (2026-06-24):** the `## Playbook` block
+      injects with the format suffix LAST; reflection wrote a grounded lessons.md. Hint write was
+      crashing the build at P7 on NFS root-squash → fixed tolerated-absent (`write_hint`→None on OSError
+      + guarded p7/reflect/research writes); hint PERSISTENCE needs `chmod 777 playbooks/hints` on the
+      host (NFS), else "hint NOT persisted" + build still `done`. (107 fakes; +1 unwritable-dir test.)
+- [x] **S4 research-on-gaps (2026-06-24, server-validated):** the §5.8 ladder's last rung, per the planning-chat
       DECISION MEMO (orchestrator locus; SHARED depot SearXNG, not a per-build sibling; minimal-real =
       prove the rung, not research quality). New `research/` pkg: vendored Stage-2 tools
       (search/fetch/GitHub/PyPI; lazy httpx+trafilatura; app-level `research_hosts` gate; injection
@@ -283,13 +287,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       allowlist UNTOUCHED. DECISIONS #25. Local: **101 fakes** (+11 `test_m2c_research.py`) + contract
       11/11 + hygiene clean. *Server (pending): the fixture's open question → a cited research.md the
       coder consumes via depot SearXNG; ZERO leaks. Depot-side (user): digest-pin searxng + pin engines.*
-- [~] **S5 template CI (2026-06-24, local):** `core.template_ci` + `core.preflight_templates` +
+      **Server-validated (2026-06-24):** the fixture's open question → `iterations/0/research.md` with 4
+      REAL SearXNG sources, synthesized + cited (+ honest "inconclusive"); coder consumed it; build `done`;
+      ZERO leaks. SearXNG JSON format works on the depot instance.
+- [x] **S5 template CI (2026-06-24, server-validated):** `core.template_ci` + `core.preflight_templates` +
       `cli template-ci [--preflight]` (§5.3 P3). Preflight = dockerless static check (enumerate
       `templates/*/template.json`, resolve each, assert declared services pinned in `vetted_services`).
       `template_ci` = scaffold+smoke each template in a FRESH Kata VM (ONE broker, fresh VM per template,
       all reaped); workspaces on local disk for the Kata bind. DECISIONS #26. Local: **106 fakes**
-      (+5 `test_m2c_template_ci.py`) + contract 11/11 + hygiene clean. *Server (pending): `template-ci`
-      scaffold+smokes both templates GREEN in fresh VMs; ZERO leaks.*
+      (+5 `test_m2c_template_ci.py`) + contract 11/11 + hygiene clean. **Server-validated (2026-06-24):**
+      preflight 2/2; `template-ci` scaffold+smoked BOTH templates GREEN in fresh Kata VMs; ZERO leaks.
 - **Acceptance:** spec/plan evals run against fixtures (S2 ✅ server-validated) · manual spans in Langfuse
       `stage-3-poc` (S1 ✅) · playbook injection + Tier-1 reflection → lessons.md + hints/ + a seeded
       playbook shapes a prompt (S3, server re-validate pending the playbooks mount) · research-on-gaps

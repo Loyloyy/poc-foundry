@@ -28,6 +28,10 @@ services:
       # M2c S3 experience loop: mount the curated playbooks so they inject into agent prompts AND so
       # Tier-1 auto-hints written at emit (playbooks/hints/<id>.md) PERSIST to the host across the
       # ephemeral `docker compose run --rm` (otherwise the loop never loops). hints/*.md are gitignored.
+      # On NFS (root-squash maps the container's root → nobody), PRE-CREATE the hints dir writable so
+      # the emit step can persist hints (same as builds/): `mkdir -p ../playbooks/hints && chmod 777
+      # ../playbooks/hints`. Without it the build still succeeds — the hint is just skipped (tolerated-
+      # absent) — but the loop won't persist. Curated playbooks still inject (read-only) regardless.
       - ../playbooks:/app/playbooks
 
   # ---- Out-of-process broker daemon. The ONLY holder of the host docker socket; enforces the

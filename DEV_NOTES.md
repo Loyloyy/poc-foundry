@@ -520,3 +520,21 @@ dir regardless. Fix: (a) `COPY playbooks ./playbooks` in the Dockerfile (fresh-c
 curated-playbook injection AND for auto-hints to persist to the host across builds. The override is
 gitignored, so the server's `docker-compose.override.yml` must add the line by hand (the tracked
 `.example` now shows it). No image rebuild is needed for the fix (the mount shadows `/app/playbooks`).
+
+## M2c S4/S5 server-validated + the NFS hint-write fix (2026-06-24)
+
+Server run validated S2 (eval 1.0/1.0), S3 injection (the `## Playbook` block lands with the format
+suffix last) + reflection (grounded lessons.md), **S4 research-on-gaps** (real SearXNG JSON works on
+the depot instance — `research.md` with 4 cited sources + honest "inconclusive"; coder consumed it;
+build `done`), and **S5 template-ci** (both templates GREEN in fresh VMs, zero leaks).
+
+**BUG found + fixed — the Tier-1 hint write crashed a build at P7 (NFS root-squash).** The repo is on
+NFS; the app runs as root; root-squash maps root→nobody, so writing `/app/playbooks/hints/<id>.md`
+(the mounted NFS dir, not 777) raised `PermissionError` — and the write was NOT guarded, so an
+otherwise-successful build died at emit. Fix: `playbooks.write_hint` now catches `OSError` → returns
+None (tolerated-absent at the source); `p7_emit`'s hint block + `_reflect`/`_maybe_research` disk
+writes are wrapped too. The experience loop is a nice-to-have and must NEVER fail a build. For the loop
+to actually PERSIST hints on NFS, pre-create the dir writable (same as builds/):
+`mkdir -p playbooks/hints && chmod 777 playbooks/hints` (documented in the override example). Without
+it the build succeeds and just logs "hint NOT persisted". +1 fakes test (write_hint → None on an
+unwritable dir).

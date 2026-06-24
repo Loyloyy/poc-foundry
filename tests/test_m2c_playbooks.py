@@ -103,6 +103,15 @@ def test_write_hint_caps_and_is_read_back(monkeypatch, tmp_path):
     assert not playbooks.load_hints("tester", ["testing"], hints_dir=h_dir)
 
 
+def test_write_hint_tolerated_absent_on_unwritable_dir(tmp_path):
+    # a hints_dir whose parent is a FILE → mkdir raises OSError → write_hint returns None, no crash
+    # (mirrors NFS root-squash: the experience loop must never fail a build).
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a dir")
+    assert playbooks.write_hint("body", source_build="poc-x", applies_to=["coder"],
+                                hints_dir=blocker / "hints") is None
+
+
 # ── Tier-1 reflection (P4 close-step) ────────────────────────────────────────
 def _fake_ctx(tmp_path):
     return SimpleNamespace(build_dir=tmp_path / "build", say=lambda *a, **k: None)

@@ -31,12 +31,14 @@ Langfuse spans, tiered evals v1, playbook injection + reflection, template CI). 
 `python3 scripts/run_spine_tests.py` (65) + `run_contract_checks.py` (11). See `ROADMAP.md` for live
 milestone state and `DECISIONS.md` for the rationale log (newest: #22).
 
-**M2c in progress (all 5 slices BUILT locally; 2026-06-24):** S1 observability ✅ server-validated ·
-S2 tiered evals ✅ server-validated (`cli eval`/`run_evals.py`; spec/plan scored vs fixtures) · S3
-experience loop (`playbooks.py` injection + Tier-1 reflection → lessons.md + expiring hints; server:
-reflection/hint ✅, curated-playbook injection pending the `../playbooks:/app/playbooks` override mount)
-· S4 research-on-gaps (`research/` pkg: vendored tools + bespoke search→fetch→synthesize agent; triggers
-= open-questions + stuck-loop; shared depot SearXNG; tolerated-absent; DECISIONS #25 logs the
-bespoke-vs-deepagents call; server pending) · S5 template CI (`core.template_ci`/`preflight_templates` +
-`cli template-ci`; server pending). Local checks now: `run_spine_tests.py` (**106**) + contract (11).
-Newest DECISIONS: #26. **Next: server-validate S3 re-run / S4 / S5, then M2c → M3.**
+**M2c ✅ ALL 5 SLICES SERVER-VALIDATED (2026-06-24):** S1 observability (Langfuse spans) · S2 tiered
+evals (`cli eval`/`run_evals.py`; spec/plan 1.0 vs fixtures) · S3 experience loop (`playbooks.py`
+injection lands with the format suffix LAST + Tier-1 reflection → lessons.md; hint write made
+tolerated-absent after an NFS root-squash crash — hint PERSISTENCE needs `chmod 777 playbooks/hints`
+on the host, else build still `done` + "hint NOT persisted") · S4 research-on-gaps (`research/` pkg:
+vendored tools + BESPOKE search→fetch→synthesize agent, deepagents-swappable; triggers = open-questions
++ stuck-loop; shared depot SearXNG — real cited research.md, coder consumes it; DECISIONS #25) · S5
+template CI (`core.template_ci`/`preflight_templates` + `cli template-ci` — both templates GREEN in
+fresh VMs). ZERO leaks throughout. Local checks: `run_spine_tests.py` (**107**) + contract (11).
+DECISIONS #23–#26. **Next: M3 (web UI). Residual: confirm hint persists after `chmod 777
+playbooks/hints` + the depot-side SearXNG digest/engine pins (user's service-depot repo).**

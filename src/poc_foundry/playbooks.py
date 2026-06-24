@@ -119,8 +119,10 @@ def write_hint(body: str, *, source_build: str, applies_to: list[str],
                lifetime_days: int = HINT_LIFETIME_DAYS, now: date | None = None,
                hints_dir: Path | None = None) -> Path | None:
     """Write ONE low-authority expiring hint (``<source_build>.md``). Body is size-capped on write so a
-    written hint is never skipped as oversized. Caller MUST scrub the body first (rule #1). Returns the
-    path, or None for an empty body."""
+    written hint is never skipped as oversized. Caller MUST scrub the body first (rule #1). TOLERATED-
+    ABSENT: a non-writable hints dir (e.g. NFS root-squash) returns None — the experience loop is a
+    nice-to-have and must NEVER crash a build. Returns the path, or None on an empty body / write
+    failure."""
     body = (body or "").strip()
     if not body:
         return None
@@ -129,13 +131,16 @@ def write_hint(body: str, *, source_build: str, applies_to: list[str],
         body = body[:HINT_MAX_CHARS - len(marker)].rstrip() + marker   # final body stays ≤ cap (readable back)
     now = now or date.today()
     expires = now + timedelta(days=lifetime_days)
-    hd = Path(hints_dir or HINTS_DIR)
-    hd.mkdir(parents=True, exist_ok=True)
     fm = (f"---\ndate: {now.isoformat()}\nsource_build: {source_build}\n"
           f"applies_to: {', '.join(applies_to)}\nexpires: {expires.isoformat()}\n---\n")
-    path = hd / f"{source_build}.md"
-    path.write_text(fm + body + "\n")
-    return path
+    try:
+        hd = Path(hints_dir or HINTS_DIR)
+        hd.mkdir(parents=True, exist_ok=True)
+        path = hd / f"{source_build}.md"
+        path.write_text(fm + body + "\n")
+        return path
+    except OSError:   # read-only / NFS root-squash / perms — degrade, never crash the build
+        return None
 
 
 # ── composition (the injection seam) ───────────────────────────────────────────

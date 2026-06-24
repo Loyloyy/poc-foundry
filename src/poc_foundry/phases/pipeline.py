@@ -286,13 +286,16 @@ def _reflect(ctx: Ctx, i: int, it, it_status: str, attempts: int, incidents: lis
         return
     if not body.strip():
         return
-    dest = Path(ctx.build_dir) / "iterations" / str(i)
-    dest.mkdir(parents=True, exist_ok=True)
-    (dest / "lessons.md").write_text(
-        f"# Lessons — iteration {i} ({it_status}, {attempts} attempt(s))\n\n"
-        f"**Concrete incident:** {incident[:600]}\n\n"
-        f"## What would have helped\n{body.strip()}\n")
-    ctx.say(f"P4 iter{i}: reflection → iterations/{i}/lessons.md")
+    try:   # advisory bookkeeping — a write failure must never crash the build
+        dest = Path(ctx.build_dir) / "iterations" / str(i)
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "lessons.md").write_text(
+            f"# Lessons — iteration {i} ({it_status}, {attempts} attempt(s))\n\n"
+            f"**Concrete incident:** {incident[:600]}\n\n"
+            f"## What would have helped\n{body.strip()}\n")
+        ctx.say(f"P4 iter{i}: reflection → iterations/{i}/lessons.md")
+    except OSError:
+        pass
 
 
 # ── research-on-gaps (design §5.3 P4.a, §5.8) ────────────────────────────────
@@ -325,9 +328,12 @@ def _maybe_research(ctx: Ctx, state, i: int, it, fresh: bool):
         from poc_foundry import tracing
         tracing.event("research.injection", iteration=i, markers="; ".join(rr.injection_hits[:5])[:300])
     if rr.markdown:
-        dest = Path(ctx.build_dir) / "iterations" / str(i)
-        dest.mkdir(parents=True, exist_ok=True)
-        (dest / "research.md").write_text(rr.markdown)
+        try:   # advisory — never crash the build on a write failure
+            dest = Path(ctx.build_dir) / "iterations" / str(i)
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "research.md").write_text(rr.markdown)
+        except OSError:
+            pass
         ctx.say(f"P4 iter{i}: research ({kind}) → iterations/{i}/research.md "
                 f"({len(rr.citations)} source(s), {rr.calls} call(s)"
                 f"{'; INJECTION FLAGGED' if rr.injection_hits else ''})")
@@ -854,15 +860,19 @@ def p7_emit(state, ctx: Ctx) -> dict:
     # experience loop (M2c S3): distil this build's Tier-1 lessons into ONE low-authority EXPIRING
     # hint for future builds. The lessons are already scrubbed on disk (above); scrub again defensively
     # before it lands in the (gitignored) playbooks/hints/ tree — it's LLM-generated + untrusted.
-    from poc_foundry import playbooks
-    iters_dir = build_dir / "iterations"
-    lessons = sorted(iters_dir.glob("*/lessons.md")) if iters_dir.exists() else []
-    if lessons:
-        raw = "\n\n".join(p.read_text() for p in lessons)
-        clean = scrub.scrub_text(raw, scrub.collect_secrets())
-        hint = playbooks.write_hint(clean, source_build=ctx.build_id, applies_to=["coder", "gotchas"])
-        if hint:
-            ctx.say(f"P7 emit: distilled {len(lessons)} lesson(s) → low-authority hint {hint.name}")
+    try:   # the experience loop is a nice-to-have — a hint-write failure must NEVER fail the build
+        from poc_foundry import playbooks
+        iters_dir = build_dir / "iterations"
+        lessons = sorted(iters_dir.glob("*/lessons.md")) if iters_dir.exists() else []
+        if lessons:
+            raw = "\n\n".join(p.read_text() for p in lessons)
+            clean = scrub.scrub_text(raw, scrub.collect_secrets())
+            hint = playbooks.write_hint(clean, source_build=ctx.build_id, applies_to=["coder", "gotchas"])
+            ctx.say(f"P7 emit: distilled {len(lessons)} lesson(s) → "
+                    + (f"low-authority hint {hint.name}" if hint
+                       else "hint NOT persisted (hints dir not writable — chmod 777 playbooks/hints)"))
+    except Exception as e:  # noqa: BLE001
+        ctx.say(f"P7 emit: experience-loop hint skipped ({type(e).__name__})")
 
     ctx.say(f"P7 emit: status={status}; artifact + workspace written to {build_dir}")
     return {"phase": "emit", "status": status, "demonstrates_core_value": demonstrates,
