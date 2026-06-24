@@ -69,17 +69,32 @@ def _safe_build_file(build_id: str, rel: str) -> Path:
     return target
 
 
+def _langfuse_public_url() -> str:
+    """The BROWSER-facing Langfuse URL for the 'Traces' link. ``LANGFUSE_HOST`` is the IN-NETWORK target
+    the orchestrator pushes to (e.g. ``langfuse-web:3000``) — a laptop browser can't resolve it. Prefer
+    an explicit ``PF_LANGFUSE_PUBLIC_URL``; otherwise rewrite the host to ``localhost`` (preserving
+    scheme+port) so the link works through the standard SSH tunnel out of the box."""
+    explicit = os.environ.get("PF_LANGFUSE_PUBLIC_URL", "").strip()
+    if explicit:
+        return explicit
+    host = os.environ.get("LANGFUSE_HOST", "").strip()
+    if not host:
+        return ""
+    from urllib.parse import urlparse
+    u = urlparse(host if "://" in host else f"http://{host}")
+    if u.hostname in ("localhost", "127.0.0.1"):
+        return host if "://" in host else f"http://{host}"
+    port = f":{u.port}" if u.port else ""
+    return f"{u.scheme or 'http'}://localhost{port}"
+
+
 def _build_detail(build_id: str) -> dict:
     from poc_foundry.artifact import load as load_artifact
 
     root = _builds_root() / build_id
     if not root.is_dir():
         raise HTTPException(404, "no such build")
-    # The browser-facing Langfuse URL. LANGFUSE_HOST is the IN-NETWORK hostname (e.g. langfuse-web:3000)
-    # the orchestrator pushes traces to — a browser on the laptop can't resolve it. Set
-    # PF_LANGFUSE_PUBLIC_URL to whatever you tunnel (e.g. http://localhost:3000) for a working link.
-    lf = os.environ.get("PF_LANGFUSE_PUBLIC_URL", "").strip() or os.environ.get("LANGFUSE_HOST", "")
-    detail: dict = {"id": build_id, "files": [], "langfuse_host": lf}
+    detail: dict = {"id": build_id, "files": [], "langfuse_host": _langfuse_public_url()}
     try:
         detail["artifact"] = load_artifact(root).model_dump()
     except Exception as e:  # noqa: BLE001 — half-written / failed build: still inspectable

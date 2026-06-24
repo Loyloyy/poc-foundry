@@ -42,10 +42,19 @@ services:
       - broker
     environment:
       - PF_BROKER_SOCKET=/var/tmp/pf-broker/broker.sock
+      # Browser-facing Langfuse URL for the UI "Traces" link (LANGFUSE_HOST is the in-network name a
+      # laptop can't resolve). Optional — unset, the UI rewrites LANGFUSE_HOST's host to localhost.
+      - PF_LANGFUSE_PUBLIC_URL=http://localhost:3000
+      # Point the build-form source picker at the Stage-2 run folders (artifacts/<id>/vNN.json) so it
+      # lists REAL research topics, not just the committed fixture. Must match the mount target below.
+      - PF_ARTIFACTS_ROOT=/app/artifacts
     volumes:
       - /var/tmp/pf-workspaces:/var/tmp/pf-workspaces
       - /var/tmp/pf-broker:/var/tmp/pf-broker
       - ../playbooks:/app/playbooks
+      # Stage-2 artifacts (READ-ONLY input, rule #6) — mount the ai-engineer-research artifacts dir so
+      # the picker can read each run's topic. Adjust the host path to where Stage 2 writes them.
+      - /mnt/nfsdata/aloysius/ai-engineer-research/artifacts:/app/artifacts:ro
 
   # ---- Out-of-process broker daemon. The ONLY holder of the host docker socket; enforces the
   #      create-param invariant (rule #8) broker-side. Reuses the app image (has the docker CLI). ----

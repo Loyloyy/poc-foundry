@@ -18,6 +18,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState("");
   const [detail, setDetail] = useState<BuildDetail | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [stopping, setStopping] = useState(false);
   const prevActive = useRef("");
 
   const activeId = status.busy ? status.build_id || live.buildId : "";
@@ -42,8 +43,14 @@ export default function App() {
     if (activeId && activeId !== prevActive.current) {
       setSelectedId(activeId);
       prevActive.current = activeId;
+      setStopping(false); // a fresh run clears any leftover stopping state
     }
   }, [activeId]);
+
+  // once the build is no longer running, the cooperative stop has landed — clear the "Stopping…" state
+  useEffect(() => {
+    if (!status.busy) setStopping(false);
+  }, [status.busy]);
 
   // refresh history + the active build's detail when a run ends
   useEffect(() => {
@@ -91,7 +98,10 @@ export default function App() {
   const canResume = !status.busy && !!art && RESUMABLE.has(art.status);
   const hasAbandoned = !!detail?.files.includes("abandoned.patch");
 
-  const onStop = () => api.stop().catch(() => {}).finally(() => setRefreshKey((k) => k + 1));
+  const onStop = () => {
+    setStopping(true); // immediate feedback — the cooperative stop lands at the next node boundary
+    api.stop().catch(() => setStopping(false));
+  };
   const onResume = () =>
     api.resume(selectedId).then(() => setRefreshKey((k) => k + 1)).catch(() => {});
 
@@ -135,8 +145,8 @@ export default function App() {
               </div>
               <div className="run-controls">
                 {isLiveView && status.busy && (
-                  <button className="ghost" onClick={onStop}>
-                    ■ Stop
+                  <button className="ghost" onClick={onStop} disabled={stopping}>
+                    {stopping ? "Stopping…" : "■ Stop"}
                   </button>
                 )}
                 {canResume && <button onClick={onResume}>▶ Resume</button>}
@@ -148,6 +158,12 @@ export default function App() {
               </div>
             </header>
 
+            {stopping && status.busy && (
+              <div className="banner">
+                Stop requested — the build finishes the current step, then checkpoints at the next node
+                boundary (an in-flight model call can take a minute). It then becomes resumable.
+              </div>
+            )}
             {live.error && isLiveView && <p className="error">build error: {live.error}</p>}
             {detail?.artifact_error && !isLiveView && (
               <p className="muted small">artifact not loaded: {detail.artifact_error}</p>
@@ -161,6 +177,31 @@ export default function App() {
             />
 
             <DescopePanel items={board.descope} hasAbandonedPatch={hasAbandoned} capsHit={board.caps} />
+
+            {!isLiveView && art && (art.caveats.length > 0 || art.security?.degraded_critic) && (
+              <section className="card">
+                <div className="card-head">
+                  <h2>Caveats &amp; quality notes</h2>
+                  {art.security?.degraded_critic && (
+                    <span className="pill warn" title="critic shared the coder's model family → adequacy gate was advisory, not blocking">
+                      degraded critic
+                    </span>
+                  )}
+                </div>
+                {art.security?.degraded_critic && (
+                  <p className="muted small">
+                    The reviewer ran on the same model family as the coder, so its adequacy checks were
+                    advisory (it couldn't block). Bind a different model to the <code>critic</code> role
+                    for a stronger gate.
+                  </p>
+                )}
+                <ul className="caveats">
+                  {art.caveats.map((c, i) => (
+                    <li key={i}>{c}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             {isLiveView ? (
               <LogPanel lines={live.log} live={status.busy} />
