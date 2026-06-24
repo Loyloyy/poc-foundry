@@ -75,7 +75,11 @@ def _build_detail(build_id: str) -> dict:
     root = _builds_root() / build_id
     if not root.is_dir():
         raise HTTPException(404, "no such build")
-    detail: dict = {"id": build_id, "files": [], "langfuse_host": os.environ.get("LANGFUSE_HOST", "")}
+    # The browser-facing Langfuse URL. LANGFUSE_HOST is the IN-NETWORK hostname (e.g. langfuse-web:3000)
+    # the orchestrator pushes traces to — a browser on the laptop can't resolve it. Set
+    # PF_LANGFUSE_PUBLIC_URL to whatever you tunnel (e.g. http://localhost:3000) for a working link.
+    lf = os.environ.get("PF_LANGFUSE_PUBLIC_URL", "").strip() or os.environ.get("LANGFUSE_HOST", "")
+    detail: dict = {"id": build_id, "files": [], "langfuse_host": lf}
     try:
         detail["artifact"] = load_artifact(root).model_dump()
     except Exception as e:  # noqa: BLE001 — half-written / failed build: still inspectable

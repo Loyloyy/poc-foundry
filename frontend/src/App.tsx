@@ -153,7 +153,12 @@ export default function App() {
               <p className="muted small">artifact not loaded: {detail.artifact_error}</p>
             )}
 
-            <SliceBoard goal={board.goal} criteria={board.criteria} records={board.records} />
+            <SliceBoard
+              goal={board.goal}
+              criteria={board.criteria}
+              records={board.records}
+              final={!isLiveView}
+            />
 
             <DescopePanel items={board.descope} hasAbandonedPatch={hasAbandoned} capsHit={board.caps} />
 

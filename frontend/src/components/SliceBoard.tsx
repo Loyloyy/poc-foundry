@@ -6,6 +6,7 @@ interface Props {
   goal?: string;
   criteria: Criterion[];
   records: IterationRecord[];
+  final?: boolean; // true once the build has finished — relabel un-met criteria as "gap", not "pending"
 }
 
 function critClass(status: string): string {
@@ -13,7 +14,16 @@ function critClass(status: string): string {
   if (s === "met") return "pill ok";
   if (s === "descoped") return "pill warn";
   if (s === "partial") return "pill info";
+  if (s === "gap") return "pill warn";
   return "pill muted"; // pending / transient
+}
+
+// On a FINISHED build, a still-"pending" criterion was never built — it's an honest GAP (the report's
+// "Gaps vs spec"), not work-in-progress. Relabel so the board reads truthfully once the run is done.
+function critLabel(status: string, final: boolean): string {
+  const s = (status || "pending").toLowerCase();
+  if (final && (s === "pending" || s === "")) return "gap";
+  return s;
 }
 
 function recClass(status: string): string {
@@ -42,13 +52,16 @@ export default function SliceBoard(p: Props) {
         <p className="muted small">Waiting for the spec…</p>
       ) : (
         <ul className="board">
-          {p.criteria.map((c, i) => (
-            <li key={i} className="board-row">
-              <span className={critClass(c.status)}>{c.status || "pending"}</span>
-              {c.core && <span className="pill core" title="core criterion (DONE floor)">core</span>}
-              <span className="board-text">{c.text}</span>
-            </li>
-          ))}
+          {p.criteria.map((c, i) => {
+            const label = critLabel(c.status, !!p.final);
+            return (
+              <li key={i} className="board-row">
+                <span className={critClass(label)}>{label}</span>
+                {c.core && <span className="pill core" title="core criterion (DONE floor)">core</span>}
+                <span className="board-text">{c.text}</span>
+              </li>
+            );
+          })}
         </ul>
       )}
 
