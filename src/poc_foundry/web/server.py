@@ -142,6 +142,12 @@ def stop_build(build_id: str) -> dict:
     return manager.stop(build_id)
 
 
+@app.post("/api/stop")
+def stop_current() -> dict:
+    """Stop whatever build is currently running — the Stop button needs no id (single-slot)."""
+    return manager.stop()
+
+
 @app.get("/api/events")
 async def events(request: Request):
     """SSE stream of the current run's structured events (replayed from the run's start on connect)."""
