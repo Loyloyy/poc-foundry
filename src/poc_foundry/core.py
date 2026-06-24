@@ -309,6 +309,94 @@ def list_builds(builds_dir: str | Path | None = None) -> list[dict]:
     return out
 
 
+# ── template CI (M2c S5, design §5.3 P3) ─────────────────────────────────────
+def _discover_templates() -> list[str]:
+    """Every template under ``templates/`` (a dir with a ``template.json``)."""
+    from poc_foundry.phases.context import TEMPLATES_ROOT
+    return sorted(p.parent.name for p in TEMPLATES_ROOT.glob("*/template.json"))
+
+
+def preflight_templates(template_names: list[str] | None = None, *,
+                        builds_dir: str | Path | None = None) -> list[dict]:
+    """DOCKERLESS static check (the part provable in the fakes suite): every template resolves +
+    every service it declares is PINNED in ``vetted_services`` (rule #8 — an unpinned service can't be
+    spun, so the template would fail mid-build). Returns one row per template."""
+    cfg = load_config(builds_dir)
+    names = template_names or _discover_templates()
+    out: list[dict] = []
+    for name in names:
+        r = {"template": name, "resolves": False, "services_pinned": True,
+             "suite": "", "services": [], "error": ""}
+        try:
+            t = load_template(name)
+            r["resolves"] = True
+            r["suite"] = t.suite
+            for decl in t.services:
+                r["services"].append(decl["name"])
+                vetted = cfg.vetted_services.get(decl.get("vetted", decl["name"]))
+                if not vetted or str(vetted.get("pinned_tag", "")).startswith("<"):
+                    r["services_pinned"] = False
+                    r["error"] = f"service {decl['name']!r} → not pinned in vetted_services"
+        except Exception as e:  # noqa: BLE001 — a broken template is a CI finding, not a crash
+            r["error"] = f"load failed: {type(e).__name__}: {e}"
+        out.append(r)
+    return out
+
+
+def template_ci(template_names: list[str] | None = None, *, runtime: str | None = None,
+                builds_dir: str | Path | None = None) -> list[dict]:
+    """Scaffold + smoke each template in a FRESH Kata VM (design §5.3 P3) so template rot (a yanked
+    pin, a smoke regression) is caught at maintenance time, not mid-build. Reuses P3's
+    ``stamp_template`` + the broker smoke path; ONE broker (net+proxy+uv-vol) for the run, a fresh VM
+    per template, everything reaped. Returns per-template rows (preflight + ``smoke_ok``)."""
+    from datetime import datetime, timezone
+
+    from poc_foundry.phases.context import (chown_to_builder, git_commit, git_init,
+                                            stamp_template, ws_mount)
+
+    cfg = load_config(builds_dir)
+    rows = preflight_templates(template_names, builds_dir=builds_dir)
+    ci_id = "template-ci-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    base = cfg.workspace_dir / ci_id            # workspaces on local disk (host==container path for Kata)
+    broker = _make_broker(cfg, ci_id, runtime)
+
+    from poc_foundry import tracing
+    try:
+        with tracing.build(ci_id, tags=["template-ci"]):
+            broker.provision()
+            try:
+                for r in rows:
+                    r["smoke_ok"] = False
+                    if not r["resolves"] or not r["services_pinned"]:
+                        continue            # preflight already failed — don't waste a VM
+                    name = r["template"]
+                    t = load_template(name)
+                    ws = base / name / "workspace"
+                    ws.mkdir(parents=True, exist_ok=True)
+                    try:
+                        stamp_template(t, ws)
+                        git_init(ws)
+                        git_commit(ws, f"template-ci: stamp {name}")
+                        chown_to_builder(ws)
+                        with tracing.span("template-ci.smoke", template=name):
+                            sbx = broker.create(mounts=[ws_mount(ws)], name=f"tci-{name[:12]}")
+                            try:
+                                res = sbx.exec(f"cd /work && python -m pytest {t.suite} -q", timeout_s=300)
+                            finally:
+                                sbx.destroy()
+                        r["smoke_ok"] = res.ok
+                        if not res.ok:
+                            r["error"] = "smoke RED:\n" + res.combined[-700:]
+                    except Exception as e:  # noqa: BLE001 — record, keep CI'ing the rest
+                        r["error"] = f"{type(e).__name__}: {e}"
+            finally:
+                broker.destroy()
+    finally:
+        tracing.flush()
+        shutil.rmtree(base, ignore_errors=True)
+    return rows
+
+
 def clean_build(build_id: str, builds_dir: str | Path | None = None,
                 *, workspaces: bool = True) -> list[str]:
     """Remove a build's emitted folder (and its local-disk workspace/staging). Returns removed paths."""

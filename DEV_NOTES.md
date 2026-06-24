@@ -507,3 +507,16 @@ run the SDK UNGUARDED inside the app container —
 Flush-on-exit is in `core` (`build_poc`/`resume_build` `finally`). The msgpack-registration follow-up
 (above) was NOT folded into this slice — same unverifiable-heavy-dep-API reason; shipping it blind
 risks the working resume path.
+
+## M2c S3 — the `playbooks/` mount gotcha (2026-06-24)
+
+The app container mounts `config/src/scripts/templates/tests/builds` but historically NOT
+`playbooks/`, and the image was built before S3 → on the first server run the curated playbooks did
+NOT inject (the tester-prompt one-liner showed no `## Playbook` block) and, worse, the Tier-1 hint
+was written to the container's EPHEMERAL `/app/playbooks/hints` (lost on `docker compose run --rm`),
+so the experience loop never actually persisted. `write_hint` masks this because it `mkdir -p`s the
+dir regardless. Fix: (a) `COPY playbooks ./playbooks` in the Dockerfile (fresh-clone fallback), and
+(b) **mount `../playbooks:/app/playbooks` in the app override** — that mount is REQUIRED for both
+curated-playbook injection AND for auto-hints to persist to the host across builds. The override is
+gitignored, so the server's `docker-compose.override.yml` must add the line by hand (the tracked
+`.example` now shows it). No image rebuild is needed for the fix (the mount shadows `/app/playbooks`).

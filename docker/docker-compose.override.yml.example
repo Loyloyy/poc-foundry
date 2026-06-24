@@ -25,6 +25,10 @@ services:
       # The broker RPC socket dir (NOT docker.sock). This is all the orchestrator gets.
       - /var/tmp/pf-broker:/var/tmp/pf-broker
       # NOTE: NO /var/run/docker.sock here anymore — the daemon below holds it (M2a S4).
+      # M2c S3 experience loop: mount the curated playbooks so they inject into agent prompts AND so
+      # Tier-1 auto-hints written at emit (playbooks/hints/<id>.md) PERSIST to the host across the
+      # ephemeral `docker compose run --rm` (otherwise the loop never loops). hints/*.md are gitignored.
+      - ../playbooks:/app/playbooks
 
   # ---- Out-of-process broker daemon. The ONLY holder of the host docker socket; enforces the
   #      create-param invariant (rule #8) broker-side. Reuses the app image (has the docker CLI). ----

@@ -115,6 +115,9 @@ def p1_spec(state, ctx: Ctx) -> dict:
     if isinstance(spec, dict):
         spec = Spec(**spec)
     spec = _normalize_spec(spec, ctx.template)
+    # carry the artifact's open questions onto the spec → the research-on-gaps rung (a) (design §5.8)
+    if not spec.open_questions:
+        spec.open_questions = list(getattr(art, "open_questions", []) or [])
     lint = _lint_spec(spec)
 
     # A buildable spec with no testable criteria can't drive P4 (and would crash on criteria[0]) —
@@ -154,7 +157,9 @@ def p2_plan(state, ctx: Ctx) -> dict:
 
     iterations = [IterationPlan(goal=(spec.goal if i == 0 else c.text), acceptance=[c.text],
                                 interface=ctx.template.interface,
-                                files=list(ctx.template.editable_files))
+                                files=list(ctx.template.editable_files),
+                                # open questions matter most at the baseline → attach to iteration 0 (S4 rung a)
+                                research_questions=(list(spec.open_questions) if i == 0 else []))
                   for i, c in enumerate(ordered)]
 
     # Reset the iteration loop (first pass OR a replan re-entry) + clear staged tests on disk.
@@ -224,9 +229,9 @@ def p3_scaffold(state, ctx: Ctx) -> dict:
 
 
 # ── P4 iterate (red-first tester + CoderEngine + cumulative staged VERIFY) ───
-def _tester_write(ctx: Ctx, criteria, goal: str, interface: str) -> str:
+def _tester_write(ctx: Ctx, criteria, goal: str, interface: str, research: str = "") -> str:
     from poc_foundry.models import chat_text
-    resp = chat_text("tester", prompts.tester_prompt(criteria, goal, interface),
+    resp = chat_text("tester", prompts.tester_prompt(criteria, goal, interface, research=research),
                      system=prompts.TESTER_SYSTEM)
     return _extract_code(resp)
 
@@ -290,6 +295,50 @@ def _reflect(ctx: Ctx, i: int, it, it_status: str, attempts: int, incidents: lis
     ctx.say(f"P4 iter{i}: reflection → iterations/{i}/lessons.md")
 
 
+# ── research-on-gaps (design §5.3 P4.a, §5.8) ────────────────────────────────
+def _maybe_research(ctx: Ctx, state, i: int, it, fresh: bool):
+    """Run the targeted research rung if triggered. Returns ``(research_md, incidents, calls, upd)``:
+      • trigger (b) STUCK — ``state.research_pending`` set by p_critic after a repeated-error abandon;
+      • trigger (a) OPEN QUESTIONS — a fresh iteration carrying ``it.research_questions``.
+    Tolerated-absent: SearXNG/deps down → empty md + a caveat, never a crash. Writes a cited
+    ``iterations/<i>/research.md``; an injection tripwire hit becomes a medium incident."""
+    from poc_foundry import research
+    from poc_foundry.phases import integrity
+
+    if state.research_pending and state.research_error:
+        query, kind = state.research_error, "error"
+    elif fresh and it.research_questions and state.last_research_iteration != i:
+        query, kind = "; ".join(it.research_questions[:5]), "questions"
+    else:
+        return "", [], 0, {}
+
+    cfg = ctx.cfg
+    allow = list(getattr(cfg, "research_hosts", []) or [])
+    rr = research.run_research(query=query, kind=kind, allow_hosts=allow,
+                               max_results=int(getattr(cfg, "max_research_results", 4) or 4))
+    incidents: list = []
+    if rr.injection_hits:
+        incidents.append(integrity.Incident(
+            "research-injection",
+            "prompt-injection markers in fetched content: " + ", ".join(rr.injection_hits[:3]),
+            severity="medium"))
+        from poc_foundry import tracing
+        tracing.event("research.injection", iteration=i, markers="; ".join(rr.injection_hits[:5])[:300])
+    if rr.markdown:
+        dest = Path(ctx.build_dir) / "iterations" / str(i)
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "research.md").write_text(rr.markdown)
+        ctx.say(f"P4 iter{i}: research ({kind}) → iterations/{i}/research.md "
+                f"({len(rr.citations)} source(s), {rr.calls} call(s)"
+                f"{'; INJECTION FLAGGED' if rr.injection_hits else ''})")
+    elif rr.ran:
+        ctx.say(f"P4 iter{i}: research ({kind}) — no usable sources ({rr.note})")
+
+    upd = {"last_research_iteration": i, "research_pending": False,
+           "research_calls": state.research_calls + rr.calls}
+    return rr.markdown, incidents, rr.calls, upd
+
+
 def p4_iterate(state, ctx: Ctx) -> dict:
     from poc_foundry import playbooks
     from poc_foundry.artifact import IterationRecord
@@ -306,7 +355,13 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     staging_tests = ctx.staging_dir / "tests"
     staging_tests.mkdir(parents=True, exist_ok=True)     # ACCUMULATE: prior iterations' tests stay (cumulative suite)
     test_path = staging_tests / test_file
-    if test_path.exists():
+    fresh = not test_path.exists()
+
+    # research-on-gaps rung (design §5.8): trigger (b) a prior stuck-abandon, or (a) open questions on a
+    # fresh iteration. Produces cited research notes injected into the tester (fresh) + the coder.
+    research_md, research_incidents, _research_calls, research_upd = _maybe_research(ctx, state, i, it, fresh)
+
+    if not fresh:
         # FIX-RETRY of this iteration (the critic granted another go): REUSE the same staged test —
         # don't re-author it. Saves a tester call and keeps the coder's target STABLE so it converges
         # instead of chasing a freshly-generated (possibly different) test each round. The workspace was
@@ -315,16 +370,17 @@ def p4_iterate(state, ctx: Ctx) -> dict:
         test_src = test_path.read_text()
         ctx.say(f"P4 iter{i}: reusing the staged test (fix-retry — no re-author)")
     else:
-        test_src = _tester_write(ctx, it.acceptance, it.goal, it.interface)
+        test_src = _tester_write(ctx, it.acceptance, it.goal, it.interface, research=research_md)
         test_path.write_text(test_src)
     chown_to_builder(staging_tests)
 
     base_sha = state.commit_sha or state.scaffold_sha or "HEAD"
     staged_names = set(state.staged_tests) | {test_file}
-    incidents: list = []
+    incidents: list = list(research_incidents)
     authored: set[str] = set()
     red_first_ok, inv_ok = True, True
     crit_status, it_status, attempts, note = "pending", "pending", 0, ""
+    coder_stuck, coder_error = False, ""   # → the research rung (b): a repeated-error abandon
 
     sbx = ctx.broker.create(
         mounts=[ws_mount(ctx.workspace_dir), staged_tests_mount(staging_tests)], name=f"iter{i}",
@@ -366,11 +422,15 @@ def p4_iterate(state, ctx: Ctx) -> dict:
             note = "criterion already met by a prior iteration's implementation"
             ctx.say(f"P4 iter{i}: criterion already met by existing implementation (no code change)")
         else:
+            guidance = playbooks.playbook_section("coder")   # curated building+gotchas + matching hints
+            if research_md:                                  # advisory research notes (before "# Task")
+                guidance = ((guidance + "\n\n" if guidance else "")
+                            + "# Research notes (advisory, from fetched sources)\n" + research_md)
             res = ctx.coder.run(
                 workspace=ctx.workspace_dir, goal=it.goal, editable_files=it.files,
                 test_sources={test_file: test_src}, verify=verify,
                 edit_format="whole", max_attempts=getattr(ctx.cfg, "max_fix_attempts", 3),
-                playbook=playbooks.playbook_section("coder"))   # curated building+gotchas + matching hints
+                playbook=guidance)
             attempts = res.attempts
             if integrity.blocking(incidents):
                 it_status, crit_status = "incident", "descoped"
@@ -394,7 +454,14 @@ def p4_iterate(state, ctx: Ctx) -> dict:
             else:
                 it_status, crit_status = "abandoned", "descoped"
                 note = res.note or "coder did not reach green"
-                ctx.say(f"P4 iter{i}: criterion DESCOPED after {attempts} attempt(s) ({note})")
+                # STUCK = a repeated error signature (≥ stuck_research_after, default 2 → a dup in the
+                # signature trail) OR the deterministic PF_FORCE_RESEARCH validation hook. Drives the
+                # research rung (b): p_critic escalates to targeted research before descope/replan.
+                dup = len(res.signatures) != len(set(res.signatures))
+                coder_stuck = dup or os.environ.get("PF_FORCE_RESEARCH") == "1"
+                coder_error = (res.last_output or note)[-1200:]
+                ctx.say(f"P4 iter{i}: criterion DESCOPED after {attempts} attempt(s) "
+                        f"({note}{'; STUCK' if coder_stuck else ''})")
     finally:
         sbx.destroy()
 
@@ -418,17 +485,21 @@ def p4_iterate(state, ctx: Ctx) -> dict:
 
     rec = IterationRecord(goal=it.goal, status=it_status, attempts=attempts,
                           tests_added=len(authored - set(state.authored_test_ids)))
-    return {"phase": "iterate", "spec": spec, "commit_sha": sha,
-            "iteration_records": state.iteration_records + [rec],
-            "staged_tests": sorted(staged_names),
-            "green_test_files": state.green_test_files + ([test_file] if met else []),
-            "pending_test_src": test_src, "pending_criterion": it.goal,
-            "authored_test_ids": sorted(set(state.authored_test_ids) | authored),
-            "inventory_ok": state.inventory_ok and inv_ok,
-            "red_first_ok": state.red_first_ok and red_first_ok,
-            "incidents": state.incidents + [str(inc) for inc in incidents],
-            "caveats": state.caveats + ([note] if note else []),
-            "log": state.log + [f"P4 iter{i}: {it_status} (attempts={attempts})"]}
+    out = {"phase": "iterate", "spec": spec, "commit_sha": sha,
+           "iteration_records": state.iteration_records + [rec],
+           "staged_tests": sorted(staged_names),
+           "green_test_files": state.green_test_files + ([test_file] if met else []),
+           "pending_test_src": test_src, "pending_criterion": it.goal,
+           "authored_test_ids": sorted(set(state.authored_test_ids) | authored),
+           "inventory_ok": state.inventory_ok and inv_ok,
+           "red_first_ok": state.red_first_ok and red_first_ok,
+           "incidents": state.incidents + [str(inc) for inc in incidents],
+           "caveats": state.caveats + ([note] if note else []),
+           # research-rung bookkeeping: stuck signal for p_critic (b) + clear any pending request
+           "last_coder_stuck": coder_stuck, "last_coder_error": coder_error,
+           "log": state.log + [f"P4 iter{i}: {it_status} (attempts={attempts})"]}
+    out.update(research_upd)   # last_research_iteration / research_pending=False / research_calls
+    return out
 
 
 # ── critic gate + verdict ladder (design §5.4, §5.8) ─────────────────────────
@@ -502,7 +573,17 @@ def p_critic(state, ctx: Ctx) -> dict:
                                if state.fix_count < K else
                                ("descope", "red-first failures exhausted fix budget"))
     else:  # abandoned — coder did not reach green
-        if state.fix_count < K:
+        # ESCALATION LADDER (design §5.8): a STUCK abandon (repeated error) not yet researched THIS
+        # iteration → grant a fix BUT request targeted research first (p4 runs it on re-entry). The
+        # rung fires at most once per iteration (last_research_iteration guard) before the normal
+        # fix → replan → descope budget ladder resumes.
+        can_research = (state.last_coder_stuck and not state.research_pending
+                        and state.last_research_iteration != state.iteration)
+        if can_research and state.fix_count < K:
+            disposition, reason = "fix", "stuck on a repeated error — escalating to targeted research"
+            upd["research_pending"] = True
+            upd["research_error"] = state.last_coder_error or "coder stuck (repeated error)"
+        elif state.fix_count < K:
             disposition, reason = "fix", "coder did not reach green — another iteration"
         elif state.replan_count < cfg.replan_cap:
             disposition, reason = "replan", "fix budget exhausted — replan remaining"

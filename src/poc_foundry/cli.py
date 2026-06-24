@@ -6,6 +6,7 @@
     python -m poc_foundry.cli stop <build-id>
     python -m poc_foundry.cli clean <build-id>
     python -m poc_foundry.cli eval [--fixture PATH ...] [--template NAME] [--min-score F] [--json PATH]
+    python -m poc_foundry.cli template-ci [--template NAME ...] [--preflight]
 
 Everything delegates to ``poc_foundry.core``. Argparse only; no heavy imports at module load.
 """
@@ -67,6 +68,33 @@ def _cmd_clean(args) -> int:
     return 0
 
 
+def _cmd_template_ci(args) -> int:
+    from poc_foundry.core import preflight_templates, template_ci
+
+    if args.preflight:
+        rows = preflight_templates(args.template or None)
+        for r in rows:
+            mark = "OK" if (r["resolves"] and r["services_pinned"]) else "FAIL"
+            print(f"{r['template']:<24} [{mark}] resolves={r['resolves']} "
+                  f"services_pinned={r['services_pinned']} suite={r['suite']}")
+            if r["error"]:
+                print(f"    {r['error'][:200]}")
+        bad = [r for r in rows if not (r["resolves"] and r["services_pinned"])]
+        print(f"\nPREFLIGHT: {len(rows) - len(bad)}/{len(rows)} template(s) OK")
+        return 1 if bad else 0
+
+    rows = template_ci(args.template or None, runtime=args.runtime)
+    for r in rows:
+        green = r["resolves"] and r["services_pinned"] and r.get("smoke_ok")
+        print(f"{r['template']:<24} [{'GREEN' if green else 'RED'}] "
+              f"resolves={r['resolves']} services_pinned={r['services_pinned']} smoke={r.get('smoke_ok')}")
+        if r["error"]:
+            print(f"    {r['error'][:300]}")
+    bad = [r for r in rows if not (r["resolves"] and r["services_pinned"] and r.get("smoke_ok"))]
+    print(f"\nTEMPLATE-CI: {len(rows) - len(bad)}/{len(rows)} template(s) GREEN")
+    return 1 if bad else 0
+
+
 def _cmd_eval(args) -> int:
     from pathlib import Path
 
@@ -126,6 +154,14 @@ def main(argv: list[str] | None = None) -> int:
                    help="exit nonzero if any fixture's overall score is below this (default 0 = report only)")
     e.add_argument("--json", default=None, help="also write the structured reports to this JSON path")
     e.set_defaults(func=_cmd_eval)
+
+    t = sub.add_parser("template-ci", help="scaffold+smoke every template in a fresh VM (catch template rot)")
+    t.add_argument("--template", action="append", default=[],
+                   help="template name (repeatable; default = all under templates/)")
+    t.add_argument("--preflight", action="store_true",
+                   help="dockerless static check only (resolves + services pinned; no VM)")
+    t.add_argument("--runtime", default=None, help="sandbox runtime (kata|runc); default kata")
+    t.set_defaults(func=_cmd_template_ci)
 
     args = p.parse_args(argv)
     return args.func(args)

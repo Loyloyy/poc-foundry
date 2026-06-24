@@ -270,8 +270,32 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       `iterations/*/*.md`. DECISIONS #24. Local: **90 fakes** (+9 `test_m2c_playbooks.py`) + contract
       11/11 + hygiene clean. *Server (pending): a build emits lessons.md + a hints/ entry; a seeded
       playbook shapes a recorded prompt.*
-- [ ] S4 research-on-gaps (deepagents + SearXNG) · S5 template CI
-- **Acceptance:** spec/plan evals run against fixtures; manual spans appear in Langfuse `stage-3-poc`.
+- [~] **S4 research-on-gaps (2026-06-24, local):** the §5.8 ladder's last rung, per the planning-chat
+      DECISION MEMO (orchestrator locus; SHARED depot SearXNG, not a per-build sibling; minimal-real =
+      prove the rung, not research quality). New `research/` pkg: vendored Stage-2 tools
+      (search/fetch/GitHub/PyPI; lazy httpx+trafilatura; app-level `research_hosts` gate; injection
+      tripwire) + a BESPOKE search→fetch→synthesize agent (deepagents-swappable via the seam; bespoke
+      keeps the budget meter exact). Triggers: (a) `art.open_questions`→`Spec`/`IterationPlan`→research
+      at top of p4 (feeds tester+coder); (b) stuck repeated-signature abandon → `p_critic` routes to
+      research (+ `PF_FORCE_RESEARCH=1` hook), replacing the #19 stub. Containment: Finding-0 tool
+      surface + citation-only `research.md` air-gap + untrusted-data framing + tripwire→`security.incidents[]`
+      + unchanged gates. Tolerated-absent (no SEARX_URL → no-op). `vetted_services` + the build-VM
+      allowlist UNTOUCHED. DECISIONS #25. Local: **101 fakes** (+11 `test_m2c_research.py`) + contract
+      11/11 + hygiene clean. *Server (pending): the fixture's open question → a cited research.md the
+      coder consumes via depot SearXNG; ZERO leaks. Depot-side (user): digest-pin searxng + pin engines.*
+- [~] **S5 template CI (2026-06-24, local):** `core.template_ci` + `core.preflight_templates` +
+      `cli template-ci [--preflight]` (§5.3 P3). Preflight = dockerless static check (enumerate
+      `templates/*/template.json`, resolve each, assert declared services pinned in `vetted_services`).
+      `template_ci` = scaffold+smoke each template in a FRESH Kata VM (ONE broker, fresh VM per template,
+      all reaped); workspaces on local disk for the Kata bind. DECISIONS #26. Local: **106 fakes**
+      (+5 `test_m2c_template_ci.py`) + contract 11/11 + hygiene clean. *Server (pending): `template-ci`
+      scaffold+smokes both templates GREEN in fresh VMs; ZERO leaks.*
+- **Acceptance:** spec/plan evals run against fixtures (S2 ✅ server-validated) · manual spans in Langfuse
+      `stage-3-poc` (S1 ✅) · playbook injection + Tier-1 reflection → lessons.md + hints/ + a seeded
+      playbook shapes a prompt (S3, server re-validate pending the playbooks mount) · research-on-gaps
+      spins/reaches SearXNG → cited research.md the coder uses, ladder routes on a stuck loop (S4, server
+      pending) · template CI scaffold+smokes every template GREEN (S5, server pending). Plus always: zero
+      leaks, green bar green, both templates build `done`, hygiene clean on emitted output.
 
 ## M3 — web UI
 - [ ] slice board · Stop/Resume · history · descope report view (Stage-2 SSE seam)

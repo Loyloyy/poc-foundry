@@ -39,6 +39,10 @@ RUN pip install --upgrade pip && pip install -e ".[runtime,obs,test]"
 COPY config ./config
 COPY scripts ./scripts
 COPY templates ./templates
+# playbooks/ = the curated two-tier experience-loop guidance injected into agent prompts (M2c S3).
+# compose ALSO mounts it for live curated edits + so Tier-1 auto-hints persist to the host (the
+# image copy is the fresh-clone / no-override fallback). hints/*.md are gitignored (machine-local).
+COPY playbooks ./playbooks
 # tests/ carries the committed contract fixtures + suite — needed for the in-container M0(c) check
 # (`run_contract_checks.py`) and the pytest suite. compose also mounts it for live edits.
 COPY tests ./tests

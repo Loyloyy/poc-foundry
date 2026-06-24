@@ -31,7 +31,12 @@ Langfuse spans, tiered evals v1, playbook injection + reflection, template CI). 
 `python3 scripts/run_spine_tests.py` (65) + `run_contract_checks.py` (11). See `ROADMAP.md` for live
 milestone state and `DECISIONS.md` for the rationale log (newest: #22).
 
-**M2c in progress:** S1 observability ✅ **server-validated (2026-06-24)** — tolerated-absent Langfuse
-spans (langfuse v4 API) at the broker/VERIFY/gate/critic/clean-room/LLM/proxy-denial seams, flush-on-
-exit; trace `build/poc-…` with 21 observation levels in the `stage-3-poc` project. Local checks now:
-`run_spine_tests.py` (74) + contract (11). Next: S2 (tiered evals v1).
+**M2c in progress (all 5 slices BUILT locally; 2026-06-24):** S1 observability ✅ server-validated ·
+S2 tiered evals ✅ server-validated (`cli eval`/`run_evals.py`; spec/plan scored vs fixtures) · S3
+experience loop (`playbooks.py` injection + Tier-1 reflection → lessons.md + expiring hints; server:
+reflection/hint ✅, curated-playbook injection pending the `../playbooks:/app/playbooks` override mount)
+· S4 research-on-gaps (`research/` pkg: vendored tools + bespoke search→fetch→synthesize agent; triggers
+= open-questions + stuck-loop; shared depot SearXNG; tolerated-absent; DECISIONS #25 logs the
+bespoke-vs-deepagents call; server pending) · S5 template CI (`core.template_ci`/`preflight_templates` +
+`cli template-ci`; server pending). Local checks now: `run_spine_tests.py` (**106**) + contract (11).
+Newest DECISIONS: #26. **Next: server-validate S3 re-run / S4 / S5, then M2c → M3.**

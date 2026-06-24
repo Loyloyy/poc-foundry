@@ -65,12 +65,16 @@ class BuildConfig:
     max_llm_calls_per_run: int
     max_iter_wall_clock_s: int
     max_run_wall_clock_s: int
+    max_research_results: int     # M2c S4: research-on-gaps fetch breadth per run
 
     # critic gate (pipeline.yaml `critic:`, env-overridable) — design §5.4/§5.8
     fix_limit_k: int
     respec_cap: int
     degraded_fix_limit_k: int
     replan_cap: int
+
+    # research-on-gaps (M2c S4) — app-level fetch allowlist (advisory; NOT the build-VM allowlist)
+    research_hosts: list
 
     # templates
     default_template: str
@@ -101,6 +105,7 @@ def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
     templates = y.get("templates", {})
     critic = y.get("critic", {})
     vetted = {s["name"]: s for s in (y.get("vetted_services", []) or []) if s.get("name")}
+    research_hosts = list((y.get("egress_allowlist", {}) or {}).get("research_hosts", []) or [])
 
     ws = os.environ.get("PF_WORKSPACE_DIR", "").strip() or "/var/tmp/pf-workspaces"
     return BuildConfig(
@@ -120,10 +125,12 @@ def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
         max_llm_calls_per_run=_int_env("PF_MAX_LLM_CALLS_RUN", int(budgets.get("max_llm_calls_per_run", 400))),
         max_iter_wall_clock_s=_int_env("PF_MAX_ITER_WALL_CLOCK_S", int(budgets.get("max_iter_wall_clock_s", 1800))),
         max_run_wall_clock_s=_int_env("PF_MAX_RUN_WALL_CLOCK_S", int(budgets.get("max_run_wall_clock_s", 14400))),
+        max_research_results=_int_env("PF_MAX_RESEARCH_RESULTS", int(budgets.get("max_research_results", 4))),
         fix_limit_k=_int_env("PF_FIX_LIMIT_K", int(critic.get("fix_limit_k", 3))),
         respec_cap=_int_env("PF_RESPEC_CAP", int(critic.get("respec_cap", 1))),
         degraded_fix_limit_k=_int_env("PF_DEGRADED_FIX_LIMIT_K", int(critic.get("degraded_fix_limit_k", 2))),
         replan_cap=_int_env("PF_REPLAN_CAP", int(critic.get("replan_cap", 1))),
+        research_hosts=research_hosts,
         default_template=str(templates.get("default", "gradio-chatbot")),
         vetted_services=vetted,
     )

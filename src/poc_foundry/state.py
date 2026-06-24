@@ -21,6 +21,7 @@ class Spec(BaseModel):
     template: str = "gradio-chatbot"
     buildable: bool = True                       # False → NOT_BUILDABLE
     not_buildable_reasons: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)   # M2c S4: from the artifact → research rung (a)
 
 
 class AdequacyReview(BaseModel):
@@ -39,6 +40,7 @@ class IterationPlan(BaseModel):
     acceptance: list[str] = Field(default_factory=list)   # maps to success criteria
     interface: str = ""                                    # the pinned public contract (tester+coder)
     files: list[str] = Field(default_factory=list)         # files this iteration touches (advisory)
+    research_questions: list[str] = Field(default_factory=list)   # M2c S4: open questions → research rung (a)
 
 
 class Plan(BaseModel):
@@ -100,6 +102,14 @@ class BuildState(BaseModel):
 
     # M2b budgets / caps (design §5.8) — additive
     caps_hit: list[str] = Field(default_factory=list)   # which budget cap(s) fired → PoCBuildArtifact.caps_hit
+
+    # M2c S4 research-on-gaps escalation rung (design §5.8) — additive
+    research_pending: bool = False     # p_critic → p4: run targeted research on next entry (stuck rung b)
+    research_error: str = ""           # the error summary to research (set with research_pending)
+    last_research_iteration: int = -1  # guard: research at most once per iteration index
+    last_coder_stuck: bool = False     # last coder run repeated an error signature (≥ stuck_research_after)
+    last_coder_error: str = ""         # last coder run's error tail (for the research query)
+    research_calls: int = 0            # model calls spent in research (budget visibility)
 
     # bookkeeping
     log: list[str] = Field(default_factory=list)   # human-readable phase trace
