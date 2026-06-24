@@ -72,6 +72,7 @@ class Ctx:
     run_folder: object | None = None   # ingest.RunFolder (loaded at P0)
     service_env: dict = field(default_factory=dict)    # PF_SERVICE_<NAME>_HOST=<ip> injected into sandboxes
     services: list = field(default_factory=list)       # live sibling-service handles (reaped at build end)
+    events: object | None = None       # M3 web-UI seam: optional event sink (callable); None on the CLI path
 
     def say(self, line: str) -> None:
         self.report.append(line)
@@ -80,6 +81,10 @@ class Ctx:
         if os.environ.get("PF_PROGRESS", "1") != "0":
             import sys
             print(f"  · {line}", file=sys.stderr, flush=True)
+        # M3: mirror the line to the web-UI event sink (additive; stderr keeps working for the CLI).
+        if self.events is not None:
+            from poc_foundry.events import emit, make_event
+            emit(self.events, make_event("log", self.build_id, line=line))
 
 
 # ── workspace git (the sanctioned deterministic commits, AGENTS rule #2) ─────

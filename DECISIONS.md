@@ -994,3 +994,43 @@ Kata VM, so template rot (a yanked pin, a smoke regression) is caught off the bu
   pgvector's `pg`→pgvector pinned; an unpinned-service template flagged; an unresolvable template
   recorded; the `--preflight` CLI exits 0) + contract 11/11 + hygiene clean. *Server (pending):
   `cli template-ci` scaffold+smokes both templates GREEN in fresh VMs; ZERO leaks.*
+
+## #27 — M3 S1: web-UI event seam + single-slot RunManager + SSE (2026-06-24)
+
+Design §5.12: make a run watchable WITHOUT moving pipeline logic into the UI (rule #5). The web layer
+is a SECOND thin presentation over the unchanged headless contract — it only calls `core`.
+
+- **The seam is one optional callable on `Ctx`** (`ctx.events`), threaded as an OPTIONAL `event_sink`
+  kwarg through `build_poc`/`resume_build`/`_prepare`. The CLI never passes it → `ctx.events is None` →
+  emitting is a pure no-op and the contract is byte-for-byte unchanged (a fakes test asserts both
+  signatures default `event_sink=None`). Chosen over a module-global registry: explicit, thread-safe
+  for a future multi-build world, and trivially testable.
+- **Two emit points, additive.** `Ctx.say` mirrors each progress line to the sink as a `log` event
+  (stderr stream kept verbatim for the CLI); `graph.wrap` emits a `node` event carrying a slice-board
+  `snapshot(state)` at every node boundary — so the board flips green as `success_criteria[].status`
+  and `iteration_records` advance. `build_poc` emits an early `start` (the freshly minted id reaches the
+  UI before the first slow node). `snapshot` reads `BuildState` purely via `getattr` → no coupling, no
+  heavy import; lives in pure-stdlib `events.py` (`py_compile`s on 3.10).
+- **`events.emit` is tracing-grade tolerant** — a flaky subscriber NEVER crashes a build (same
+  discipline as `tracing`/hint-write). `sse_format` serializes `event:`+`data:` frames.
+- **Single-slot `RunManager`** (`web/runmanager.py`, pure stdlib + threading/queue): ONE build at a time
+  (matches the runtime reality — one vLLM, build-id-scoped broker nets); a 2nd concurrent start raises
+  `RunBusy` → the server answers **409**. Launches `build_poc`/`resume_build` on a daemon thread, wires
+  the sink to fan every event out to all SSE subscribers, keeps a replay buffer (a late/reconnecting SPA
+  sees the run so far), emits a terminal `end`/`error`. `stop` delegates to `request_stop_build` (M2b S4
+  — the cooperative-stop sentinel is already checkpoint-backed; NOT reimplemented). Core fns are
+  DI-injected (defaults lazy-import `core`) so the module imports + runs under the no-pytest fakes
+  without the agent stack.
+- **`web/server.py` (FastAPI) is image-only** (imports the `ui` extra; never imported by the fakes —
+  the testable Python is `events`+`runmanager`). Routes: start/resume/stop, list/detail, a
+  suffix-allowlisted + traversal-guarded `file` reader (serves already-scrubbed build files), `status`,
+  and the `events` SSE stream (async generator, `asyncio.to_thread` on the queue + client-disconnect
+  check). Serves the committed `dist/` (placeholder until S2). **Binds localhost ONLY** (`web/__main__`
+  on 127.0.0.1:8770; warns on a non-loopback override) — the process holds the secrets, so the SSH
+  tunnel is the boundary; **no in-app auth, and we don't claim one** (rule #1 / §5.12). New `web` compose
+  service (localhost port; override mirrors `app`'s broker socket + `PF_WORKSPACE_DIR`).
+- **Local: 118 fakes** (+11 `test_m3_events.py`: `say→sink→sse_format`; snapshot projection + empty-state
+  tolerance; failing-sink tolerance; contract-additive signatures; RunManager 409 / fan-out+`end` /
+  replay / `stop`→sentinel / error surfacing) + contract 11/11 + hygiene clean. *Server (pending): `$DC
+  --profile web up web`, `curl -N /api/events` while POSTing a build start → `start`/`node`/`log`/`end`
+  stream. S2 (React SPA over the tunnel) next.*

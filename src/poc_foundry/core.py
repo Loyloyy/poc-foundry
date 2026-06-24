@@ -48,8 +48,10 @@ def _make_broker(cfg, build_id: str, runtime: str | None):
     return Broker(build_id, cfg, allowed_images=allowed, runtime=runtime, vllm_key=vllm_key)
 
 
-def _prepare(cfg, build_id: str, run_dir: Path, template: str, runtime: str | None):
-    """Build the per-build ``Ctx`` + broker (shared by build + resume)."""
+def _prepare(cfg, build_id: str, run_dir: Path, template: str, runtime: str | None,
+             event_sink=None):
+    """Build the per-build ``Ctx`` + broker (shared by build + resume). ``event_sink`` (M3 §5.12) is
+    the optional web-UI event callback carried on ``Ctx.events``; ``None`` on the CLI path."""
     from poc_foundry.coder import BespokeCoder
 
     workspace_dir = cfg.workspace_dir / build_id / "workspace"
@@ -60,18 +62,21 @@ def _prepare(cfg, build_id: str, run_dir: Path, template: str, runtime: str | No
     broker = _make_broker(cfg, build_id, runtime)
     ctx = Ctx(cfg=cfg, build_id=build_id, run_dir=run_dir, template=load_template(template),
               build_dir=cfg.builds_dir / build_id, workspace_dir=workspace_dir,
-              staging_dir=staging_dir, broker=broker, coder=BespokeCoder())
+              staging_dir=staging_dir, broker=broker, coder=BespokeCoder(), events=event_sink)
     return ctx, broker
 
 
 def build_poc(source: str | Path, brief: str = "", *, driver: str = "tech-scout",
               template: str | None = None, builds_dir: str | Path | None = None,
-              runtime: str | None = None):
+              runtime: str | None = None, event_sink=None):
     """Build ONE PoC from ONE Stage-2 artifact. Returns ``(report_md, PoCBuildArtifact)``.
 
     Deterministic spine: provision a per-build sandbox environment (internal net + egress proxy +
     uv-cache), run the LangGraph pipeline P0→P7 (checkpointed), then tear the environment down. The
     emitted artifact + workspace land under ``builds/<build_id>/``.
+
+    ``event_sink`` (M3 §5.12) is the optional web-UI event callback — ``None`` on the CLI path, so the
+    headless contract is unchanged. When set, an early ``start`` event carries the freshly minted id.
     """
     from poc_foundry.graph import build_graph
     from poc_foundry.state import BuildState
@@ -86,7 +91,11 @@ def build_poc(source: str | Path, brief: str = "", *, driver: str = "tech-scout"
     (build_dir / "build_meta.json").write_text(json.dumps(
         {"source_dir": str(run_dir), "template": template, "driver": driver, "brief": brief}))
 
-    ctx, broker = _prepare(cfg, build_id, run_dir, template, runtime)
+    if event_sink is not None:   # surface the id to the UI before the first (slow) node
+        from poc_foundry import events as _ev
+        _ev.emit(event_sink, _ev.make_event("start", build_id, kind="build",
+                                            source=str(source), template=template, driver=driver))
+    ctx, broker = _prepare(cfg, build_id, run_dir, template, runtime, event_sink)
     state = BuildState(build_id=build_id, brief=brief, driver=driver, source_dir=str(run_dir),
                        build_dir=str(build_dir), workspace_dir=str(ctx.workspace_dir))
 
@@ -211,10 +220,11 @@ def _emit_failed(build_dir: Path, build_id: str, ctx, exc: Exception) -> None:
         pass
 
 
-def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime: str | None = None):
+def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime: str | None = None,
+                 event_sink=None):
     """Resume a checkpointed build from its last completed node (design §5.9). A FRESH sandbox/broker
     is provisioned over the PERSISTED workspace + checkpoint (VMs are cattle; the workspace + state are
-    pets). Returns ``(report_md, PoCBuildArtifact)``."""
+    pets). Returns ``(report_md, PoCBuildArtifact)``. ``event_sink`` (M3) streams to the web UI."""
     from poc_foundry.control import clear_stop
     from poc_foundry.graph import build_graph
     from poc_foundry.ingest import load_run
@@ -225,7 +235,12 @@ def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime
     run_dir = Path(meta["source_dir"])
 
     clear_stop(build_dir)   # a prior cooperative stop must not immediately re-trip the resumed run
-    ctx, broker = _prepare(cfg, build_id, run_dir, meta.get("template", cfg.default_template), runtime)
+    if event_sink is not None:
+        from poc_foundry import events as _ev
+        _ev.emit(event_sink, _ev.make_event("start", build_id, kind="resume",
+                                            template=meta.get("template", cfg.default_template)))
+    ctx, broker = _prepare(cfg, build_id, run_dir, meta.get("template", cfg.default_template), runtime,
+                           event_sink)
     ctx.run_folder = load_run(run_dir)   # phases resumed past P0 still need the loaded artifact
 
     from poc_foundry import tracing

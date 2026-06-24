@@ -32,7 +32,7 @@ RUN git config --global --add safe.directory '*'
 # here or the image silently lacks langgraph/langchain/deepagents (mirrors Stage 2's extras lesson).
 COPY pyproject.toml ./
 COPY src ./src
-RUN pip install --upgrade pip && pip install -e ".[runtime,obs,test]"
+RUN pip install --upgrade pip && pip install -e ".[runtime,obs,ui,test]"
 
 # Runtime assets. templates/ is stamped into PoC workspaces by P3 scaffold (compose also mounts it
 # for live edits). config/scripts as before.

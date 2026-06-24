@@ -72,6 +72,10 @@ def build_graph(ctx: Ctx, cfg):
     def wrap(name, fn):
         def run(state):
             control.raise_if_stopped(ctx.build_dir, name)   # cooperative stop at the node boundary (S4)
+            if ctx.events is not None:                       # M3: stream a slice-board snapshot to the UI
+                from poc_foundry import events as _ev
+                _ev.emit(ctx.events, _ev.make_event("node", ctx.build_id, node=name,
+                                                     snapshot=_ev.snapshot(state)))
             return fn(state, ctx)
         return run
 

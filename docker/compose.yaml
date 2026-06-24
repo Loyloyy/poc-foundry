@@ -44,6 +44,34 @@ services:
     networks:
       - depot-net
 
+  # ---- Web UI (M3 §5.12). A SECOND thin presentation over the headless core (rule #5) — same image
+  #      as `app`, so it ALSO holds the secrets → bind LOCALHOST ONLY and reach it over an SSH tunnel
+  #      (the tunnel is the boundary; no in-app auth). Long-running: `docker compose --profile web up web`.
+  #      It RUNS builds (single-slot RunManager), so on the server it needs the SAME host-specific mounts
+  #      `app` gets (PF_WORKSPACE_DIR at the same path + the broker RPC socket) — add a mirror `web:`
+  #      block in docker-compose.override.yml (see the example). ----
+  web:
+    image: poc-foundry-app
+    container_name: pf-web
+    profiles: ["web"]
+    command: python -m poc_foundry.web
+    env_file:
+      - ../.env
+    ports:
+      # LOCALHOST ONLY (rule #1 / §5.12). NEVER 0.0.0.0 — this process holds the vLLM key + endpoints.
+      # Reach it with an SSH tunnel: `ssh -N -L 8770:127.0.0.1:8770 <user>@<server>` then open :8770.
+      - "127.0.0.1:8770:8770"
+    volumes:
+      - ../config:/app/config
+      - ../src:/app/src
+      - ../scripts:/app/scripts
+      - ../templates:/app/templates
+      - ../tests:/app/tests
+      - ../playbooks:/app/playbooks
+      - ../builds:/app/builds            # serves history + descope reports from emitted builds
+    networks:
+      - depot-net
+
   # ---- Sandbox image (BUILD/SMOKE target). At runtime the broker spins this `--runtime kata` as a
   #      fresh VM per iteration on a per-build internal network — NOT a long-running compose service.
   sandbox:

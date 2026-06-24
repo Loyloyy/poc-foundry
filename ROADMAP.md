@@ -305,8 +305,22 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       leaks, green bar green, both templates build `done`, hygiene clean on emitted output.
 
 ## M3 — web UI
-- [ ] slice board · Stop/Resume · history · descope report view (Stage-2 SSE seam)
-- **Acceptance:** a run is watchable live over an SSH tunnel; Stop/Resume works.
+- [x] **S1 — event seam + RunManager + SSE** *(local fakes GREEN; server SSE-over-tunnel pending)* —
+      `events.py` (pure-stdlib `make_event`/`snapshot`/`emit`/`sse_format`); `Ctx.say` + `graph.wrap`
+      emit structured events through an optional `ctx.events` sink threaded via `build_poc`/
+      `resume_build`/`_prepare` (CLI passes nothing → contract unchanged); single-slot `RunManager`
+      (`web/runmanager.py`: start/resume/stop/status/subscribe, 2nd start → `RunBusy`→409, fan-out +
+      replay buffer, terminal `end`/`error`); FastAPI `web/server.py` (localhost-only) + `web/__main__`
+      (uvicorn :8770); `web` compose service (localhost port; override mirrors app's broker/workspace).
+      Fakes: `tests/test_m3_events.py` (11). DECISIONS #27.
+- [ ] S2 — React SPA (built off-server, `dist/` committed): sidebar · live slice board · docs inline ·
+      build/test log · descope report. Validate over the SSH tunnel.
+- **Acceptance:** a run is watchable live over an SSH tunnel; Stop/Resume works from the UI; history +
+  descope report render; headless core/contract unchanged; localhost-bound (no public bind).
+- **Server check (S1):** `DC="docker compose -f docker/compose.yaml"`; build `$DC build app`; bring up
+  `$DC --profile web up web` (needs the broker daemon + override mounts); `curl -N
+  http://127.0.0.1:8770/api/events` in one shell while `POST`ing a build start in another → see
+  `start`/`node`/`log`/`end` events stream.
 
 ## M4 — breadth
 - [ ] security red-team demo (both beats) + vLLM key-proxy (ship together) · `refine` flow · JS

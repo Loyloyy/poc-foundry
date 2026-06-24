@@ -34,6 +34,19 @@ services:
       # absent) — but the loop won't persist. Curated playbooks still inject (read-only) regardless.
       - ../playbooks:/app/playbooks
 
+  # ---- M3 web UI: it RUNS builds (single-slot RunManager) so it needs the SAME host-specific bits as
+  #      `app` — the broker RPC socket + PF_WORKSPACE_DIR at the same path. Mirror them here. (The
+  #      tracked compose.yaml already gives `web` the localhost port + the source/builds mounts.) ----
+  web:
+    depends_on:
+      - broker
+    environment:
+      - PF_BROKER_SOCKET=/var/tmp/pf-broker/broker.sock
+    volumes:
+      - /var/tmp/pf-workspaces:/var/tmp/pf-workspaces
+      - /var/tmp/pf-broker:/var/tmp/pf-broker
+      - ../playbooks:/app/playbooks
+
   # ---- Out-of-process broker daemon. The ONLY holder of the host docker socket; enforces the
   #      create-param invariant (rule #8) broker-side. Reuses the app image (has the docker CLI). ----
   broker:
