@@ -305,7 +305,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       leaks, green bar green, both templates build `done`, hygiene clean on emitted output.
 
 ## M3 — web UI
-- [x] **S1 — event seam + RunManager + SSE** *(local fakes GREEN; server SSE-over-tunnel pending)* —
+- [x] **S1 — event seam + RunManager + SSE** ✅ SERVER-VALIDATED (2026-06-24): SSE over the tunnel
+      streamed `start`/`node`(slice-board snapshot)/`log` through a real fixture build; history + status
+      + cooperative Stop→Resume + `/api/stop`(no-id) all confirmed; localhost-publish boundary.
       `events.py` (pure-stdlib `make_event`/`snapshot`/`emit`/`sse_format`); `Ctx.say` + `graph.wrap`
       emit structured events through an optional `ctx.events` sink threaded via `build_poc`/
       `resume_build`/`_prepare` (CLI passes nothing → contract unchanged); single-slot `RunManager`
@@ -313,14 +315,22 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       replay buffer, terminal `end`/`error`); FastAPI `web/server.py` (localhost-only) + `web/__main__`
       (uvicorn :8181); `web` compose service (localhost port; override mirrors app's broker/workspace).
       Fakes: `tests/test_m3_events.py` (11). DECISIONS #27.
-- [ ] S2 — React SPA (built off-server, `dist/` committed): sidebar · live slice board · docs inline ·
-      build/test log · descope report. Validate over the SSH tunnel.
+- [x] **S2 — React SPA** *(built; server tunnel-validation pending)* — React 18 + TS + Vite in
+      `frontend/`, mirroring the Stage-2 frontend pattern (npm on the dev box, `node_modules` gitignored,
+      **prebuilt `dist/` committed** to `src/poc_foundry/web/dist/` — the `.gitignore` re-includes it past
+      the blanket `dist/`). `useEventStream` subscribes to the single-slot global `/api/events` and
+      accumulates `start`/`node`(snapshot)/`log`/`end`/`error`. Views (§5.12): Sidebar (new-build form,
+      single-slot Start disabled while busy + 409 surfaced; history list) · live **SliceBoard** (criteria
+      flip green; iteration records) · **LogPanel** (streaming `Ctx.say`) · **DocsPanel** (inline
+      markdown of any exposed build file) · **DescopePanel** (descope items + `abandoned.patch` pointer +
+      caps). Stop (no-id `/api/stop`) + Resume buttons; Langfuse "Traces ↗" link. Rebuild after frontend
+      changes: `cd frontend && npm install && npm run build` (recommit `dist/`). DECISIONS #28.
 - **Acceptance:** a run is watchable live over an SSH tunnel; Stop/Resume works from the UI; history +
   descope report render; headless core/contract unchanged; localhost-bound (no public bind).
-- **Server check (S1):** `DC="docker compose -f docker/compose.yaml"`; build `$DC build app`; bring up
-  `$DC --profile web up web` (needs the broker daemon + override mounts); `curl -N
-  http://127.0.0.1:8181/api/events` in one shell while `POST`ing a build start in another → see
-  `start`/`node`/`log`/`end` events stream.
+- **S1 ✅ server-validated** (2026-06-24, see above). **S2 server check:** rebuild the image (committed
+  `dist/` is `COPY src`'d in), `$DC --profile web up -d broker web`, tunnel `ssh -N -L
+  8181:127.0.0.1:8181 …`, open `http://127.0.0.1:8181` → start a fixture build, watch the slice board +
+  log stream live, Stop→Resume, open a historical build's docs + descope.
 
 ## M4 — breadth
 - [ ] security red-team demo (both beats) + vLLM key-proxy (ship together) · `refine` flow · JS

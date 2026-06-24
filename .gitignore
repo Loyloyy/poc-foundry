@@ -25,6 +25,15 @@ dist/
 .venv/
 venv/
 
+# ── M3 web UI (React) ────────────────────────────────────────────────────────
+# Frontend source lives in frontend/ and is built OFF-server (npm on the dev box, like Stage 2);
+# node_modules is gitignored (frontend/.gitignore). The ONE exception to the blanket `dist/` above:
+# the prebuilt React bundle IS committed (the server has no npm/registry, rule #3 — it serves the
+# committed bundle straight). Re-include it. Rebuild + recommit after frontend changes:
+#   cd frontend && npm install && npm run build
+!src/poc_foundry/web/dist/
+!src/poc_foundry/web/dist/**
+
 # ── Experience loop (M2c S3) ─────────────────────────────────────────────────
 # Tier-1 auto-hints are low-authority, EXPIRING, machine-local + LLM-generated (could echo an
 # incident traceback) → never committed. Tier-2 promotion is a human merge INTO a curated playbook

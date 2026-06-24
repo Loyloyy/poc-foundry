@@ -1022,7 +1022,8 @@ is a SECOND thin presentation over the unchanged headless contract — it only c
   DI-injected (defaults lazy-import `core`) so the module imports + runs under the no-pytest fakes
   without the agent stack.
 - **`web/server.py` (FastAPI) is image-only** (imports the `ui` extra; never imported by the fakes —
-  the testable Python is `events`+`runmanager`). Routes: start/resume/stop, list/detail, a
+  the testable Python is `events`+`runmanager`). Routes: start/resume/stop (+ no-id `/api/stop` for the
+  Stop button — single-slot), list/detail, a
   suffix-allowlisted + traversal-guarded `file` reader (serves already-scrubbed build files), `status`,
   and the `events` SSE stream (async generator, `asyncio.to_thread` on the queue + client-disconnect
   check). Serves the committed `dist/` (placeholder until S2). **The localhost boundary is the
@@ -1036,6 +1037,41 @@ is a SECOND thin presentation over the unchanged headless contract — it only c
   `PF_WORKSPACE_DIR` so the UI can run builds.
 - **Local: 118 fakes** (+11 `test_m3_events.py`: `say→sink→sse_format`; snapshot projection + empty-state
   tolerance; failing-sink tolerance; contract-additive signatures; RunManager 409 / fan-out+`end` /
-  replay / `stop`→sentinel / error surfacing) + contract 11/11 + hygiene clean. *Server (pending): `$DC
-  --profile web up web`, `curl -N /api/events` while POSTing a build start → `start`/`node`/`log`/`end`
-  stream. S2 (React SPA over the tunnel) next.*
+  replay / `stop`→sentinel / error surfacing) + contract 11/11 + hygiene clean. **Server-validated
+  2026-06-24:** SSE over the tunnel streamed `start`/`node`(snapshot)/`log` through a real fixture
+  build; history/status/Stop→Resume confirmed; port **8181** (8770/8008 are vLLM on the shared box);
+  the localhost boundary is the host-side publish + uvicorn 0.0.0.0 in-container (see above).
+
+## #28 — M3 S2: React SPA (the watchable UI), `dist/` committed (2026-06-24)
+
+Design §5.12: a React SPA, built off-server, `dist/` committed. The blocker was rule #3's "no npm on
+any host" — including the dev box where the agent works. **Resolved by following the Stage-2 precedent
+(`ai-engineer-research/frontend/`): npm runs on the DEV BOX (which has node 20 — Stage-2's 70 MB
+`node_modules` was already here), `node_modules` is gitignored, and the PREBUILT `dist/` is committed**
+so the server (no npm/registry, rule #3) serves the bundle straight. So rule #3 targets the *Python
+pipeline stack* (≥3.11, Docker-only) and the *server* (no registry) — the frontend toolchain on the dev
+box is a sanctioned, already-established exception, NOT a deviation. (User steered me to look at Stage 2.)
+
+- **Stack + layout.** React 18 + TypeScript + Vite in `frontend/`, mirroring Stage 2 verbatim
+  (`useEventStream` hook over `EventSource`, thin `api.ts`, `tsconfig`/`vite.config` shapes). Vite
+  `build.outDir` → `../src/poc_foundry/web/dist/` — exactly where `web/server.py` serves it (it mounts
+  `/assets` + falls back to `index.html` for SPA routes). `.gitignore` re-includes that one dist past the
+  blanket `dist/` (`!src/poc_foundry/web/dist/**`); `frontend/.gitignore` hides `node_modules`. Build +
+  recommit: `cd frontend && npm install && npm run build`.
+- **Single global SSE, not per-run.** Unlike Stage 2 (per-run `/runs/{id}/stream`), the backend is
+  single-slot, so `useEventStream` subscribes ONCE to the global `/api/events`; the server's replay
+  buffer means a reload mid-build still shows the live board. Events: `start`(reset)/`node`(snapshot →
+  the board)/`log`(append)/`end`/`error`.
+- **Views (§5.12).** Sidebar = new-build form (Start disabled while `busy`; a 409 → inline "already
+  running") + history list (from `list_builds`, click to open). Main = live **SliceBoard** (criteria flip
+  green; iteration records) · **LogPanel** (auto-scrolling `Ctx.say` stream) · **DocsPanel** (inline
+  markdown of any allow-listed build file via `/file`) · **DescopePanel** (descope items + finish-paths +
+  `abandoned.patch` pointer + caps). Live view (the running build) auto-follows; selecting a historical
+  build loads its emitted artifact + files. Stop = no-id `/api/stop`; Resume = `/api/builds/{id}/resume`
+  (shown when status ∈ {stopped, incomplete}); Langfuse `host` → "Traces ↗". Security-Demo tab deferred
+  to M4. NO pipeline logic in the SPA (rule #5) — it only calls the API.
+- **Build output:** `tsc --noEmit && vite build` GREEN; bundle ~312 KB (97 KB gzip) committed. The
+  Python green bar is unchanged (118 fakes + 11 contract + hygiene) — no Python logic changed beyond the
+  S1 `/api/stop` convenience route. *Server (pending): rebuild the image (committed `dist/` is `COPY
+  src`'d), bring up `web`, open over the tunnel, watch a fixture build live + exercise Stop/Resume +
+  history/docs/descope.*

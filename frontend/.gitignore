@@ -1,0 +1,6 @@
+node_modules/
+*.local
+
+# NOTE: the built bundle is emitted to ../src/poc_foundry/web/dist/ (NOT here) and IS committed —
+# the server has no npm/registry and serves the prebuilt bundle (rule #3). Rebuild + recommit with:
+#   cd frontend && npm install && npm run build
