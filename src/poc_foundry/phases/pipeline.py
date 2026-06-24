@@ -298,6 +298,29 @@ def _reflect(ctx: Ctx, i: int, it, it_status: str, attempts: int, incidents: lis
         pass
 
 
+# ── refine staging (M4 S1) ───────────────────────────────────────────────────
+# Refine re-attacks several descoped criteria, but P4's cumulative gate runs ALL of ``/staged`` — so a
+# not-yet-worked backlog test sitting red would block the criterion currently being made green. Refine
+# therefore parks the backlog tests in ``staging/refine_pending/`` (done by ``core``) and stages each
+# one INTO the active ``/staged`` set only when its iteration runs, removing it again if it stays red.
+def _refine_stage_in(ctx: Ctx, test_file: str) -> None:
+    """Copy this iteration's parked (already-authored, red-first) backlog test into the active /staged
+    set so it joins the cumulative gate now — reuse, NOT re-author. No-op if it isn't parked."""
+    parked = ctx.staging_dir / "refine_pending" / test_file
+    dest = ctx.staging_dir / "tests" / test_file
+    if parked.exists() and not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(parked, dest)
+
+
+def _refine_park_out(ctx: Ctx, test_file: str) -> None:
+    """A refined criterion stayed red → drop its test from the active /staged set so it does not poison
+    later backlog iterations' cumulative gate. The authored copy survives in ``refine_pending/``."""
+    dest = ctx.staging_dir / "tests" / test_file
+    if dest.exists():
+        dest.unlink()
+
+
 # ── research-on-gaps (design §5.3 P4.a, §5.8) ────────────────────────────────
 def _maybe_research(ctx: Ctx, state, i: int, it, fresh: bool):
     """Run the targeted research rung if triggered. Returns ``(research_md, incidents, calls, upd)``:
@@ -355,11 +378,18 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     i = state.iteration
     it = plan.iterations[i]
     targets = [c for c in spec.success_criteria if c.text in it.acceptance]   # this iteration's criteria
-    test_file = f"test_iter_{i}.py"
-    strict_red_first = (i == 0)   # iteration 0 runs against the scaffold echo-stub — a real test MUST be red
+    # refine (M4 S1) pins the criterion's original staged-test filename so a filtered backlog plan REUSES
+    # the already-authored red-first test instead of re-numbering (and re-authoring) it.
+    test_file = it.test_file or f"test_iter_{i}.py"
+    # iteration 0 runs against the scaffold echo-stub — a real test MUST be red. In refine the workspace
+    # already holds real code (we're past scaffold), so a green probe means "met by existing code", not
+    # tester inadequacy → the strict-red-first wall does not apply.
+    strict_red_first = (i == 0) and not state.refine_mode
 
     staging_tests = ctx.staging_dir / "tests"
     staging_tests.mkdir(parents=True, exist_ok=True)     # ACCUMULATE: prior iterations' tests stay (cumulative suite)
+    if state.refine_mode:
+        _refine_stage_in(ctx, test_file)                 # bring THIS backlog test into the active gate (reuse)
     test_path = staging_tests / test_file
     fresh = not test_path.exists()
 
@@ -483,6 +513,9 @@ def p4_iterate(state, ctx: Ctx) -> dict:
         # only; untracked .deps / caches are left intact.)
         git(ctx.workspace_dir, "reset", "--hard", "HEAD", check=False)
         ctx.say(f"P4 iter{i}: rolled the workspace back to the last green commit (failed edits discarded)")
+
+    if state.refine_mode and crit_status != "met":
+        _refine_park_out(ctx, test_file)   # still red → keep it out of later backlog iterations' gate
 
     for c in targets:                                    # reflect the outcome on THIS iteration's criteria
         c.status = crit_status

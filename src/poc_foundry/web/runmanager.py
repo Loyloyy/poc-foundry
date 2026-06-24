@@ -41,6 +41,11 @@ def _default_resume(build_id, *, event_sink, **kw):
     return resume_build(build_id, event_sink=event_sink, **kw)
 
 
+def _default_refine(build_id, *, event_sink, **kw):
+    from poc_foundry.core import refine_build
+    return refine_build(build_id, event_sink=event_sink, **kw)
+
+
 def _default_stop(build_id):
     from poc_foundry.core import request_stop_build
     return request_stop_build(build_id)
@@ -48,9 +53,10 @@ def _default_stop(build_id):
 
 class RunManager:
     def __init__(self, *, build_fn: Callable | None = None, resume_fn: Callable | None = None,
-                 stop_fn: Callable | None = None):
+                 stop_fn: Callable | None = None, refine_fn: Callable | None = None):
         self._build_fn = build_fn or _default_build
         self._resume_fn = resume_fn or _default_resume
+        self._refine_fn = refine_fn or _default_refine
         self._stop_fn = stop_fn or _default_stop
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
@@ -74,6 +80,12 @@ class RunManager:
         return self._launch("resume",
                              lambda sink: self._resume_fn(build_id, event_sink=sink, **kw),
                              {"kind": "resume", "build_id": build_id})
+
+    def refine(self, build_id: str, **kw) -> dict:
+        """Refine a finished build's descoped backlog (M4 S1). Raises ``RunBusy`` if one is running."""
+        return self._launch("refine",
+                             lambda sink: self._refine_fn(build_id, event_sink=sink, **kw),
+                             {"kind": "refine", "build_id": build_id})
 
     def _launch(self, kind: str, call: Callable[[Callable], Any], summary: dict) -> dict:
         with self._lock:

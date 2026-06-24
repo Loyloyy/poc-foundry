@@ -39,6 +39,19 @@ on the host, else build still `done` + "hint NOT persisted") · S4 research-on-g
 vendored tools + BESPOKE search→fetch→synthesize agent, deepagents-swappable; triggers = open-questions
 + stuck-loop; shared depot SearXNG — real cited research.md, coder consumes it; DECISIONS #25) · S5
 template CI (`core.template_ci`/`preflight_templates` + `cli template-ci` — both templates GREEN in
-fresh VMs). ZERO leaks throughout. Local checks: `run_spine_tests.py` (**107**) + contract (11).
-DECISIONS #23–#26. **Next: M3 (web UI). Residual: confirm hint persists after `chmod 777
-playbooks/hints` + the depot-side SearXNG digest/engine pins (user's service-depot repo).**
+fresh VMs). ZERO leaks throughout. DECISIONS #23–#26.
+
+**M3 ✅ COMPLETE (2026-06-25, server-validated over the SSH tunnel):** the web UI — S1 event seam +
+single-slot `RunManager` + SSE (`events.py`, `web/runmanager.py`, `web/server.py`; `Ctx.say`/`graph.wrap`
+emit through an optional `ctx.events` sink threaded via `build_poc`/`resume_build` — CLI path unchanged,
+rule #5 holds) · S2 React+TS+Vite SPA in `frontend/`, **prebuilt `dist/` committed** to
+`src/poc_foundry/web/dist/` (npm on the dev box like Stage 2; server serves the bundle). Watched a real
+build live over the tunnel; cooperative Stop→Resume; history/docs/descope; localhost-publish boundary
+(uvicorn 0.0.0.0 in-container, host publishes `127.0.0.1:8181`). Source picker, Langfuse session
+deep-link, Stop "Stopping…" UX, caveats card. DECISIONS #27–#28. Local: `run_spine_tests.py` (**119**) +
+contract (11). **Ops gotchas:** `.env` changes need `up -d --force-recreate` (not `restart`); `DC` must
+pass BOTH `-f` files (compose + override); web service binds `127.0.0.1:8181`. **Next: M4 — breadth**
+(see `../stage3-planning/HANDOVER_M4.md`): security red-team demo + vLLM key-proxy + Security-Demo tab ·
+`refine` flow · `docs/PLATFORM.md`. **Residuals:** hint persistence (`chmod 777 playbooks/hints`); depot
+SearXNG pins; the daemon-side invariant-rejection audit log; Langfuse exact-trace deep-link (capture
+`trace_id` at build time); `PF_MAX_RUN_WALL_CLOCK_S` to bound degenerate runs.

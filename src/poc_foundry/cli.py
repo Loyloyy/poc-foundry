@@ -3,6 +3,7 @@
     python -m poc_foundry.cli build <run-folder-or-artifact-id> [--brief ...] [--driver ...]
     python -m poc_foundry.cli list
     python -m poc_foundry.cli resume <build-id>
+    python -m poc_foundry.cli refine <build-id> [--coder <role>]
     python -m poc_foundry.cli stop <build-id>
     python -m poc_foundry.cli clean <build-id>
     python -m poc_foundry.cli eval [--fixture PATH ...] [--template NAME] [--min-score F] [--json PATH]
@@ -45,6 +46,16 @@ def _cmd_resume(args) -> int:
     report, artifact = resume_build(args.build_id, runtime=args.runtime)
     print(report)
     print(f"\n→ {artifact.id}: status={artifact.status}")
+    return 0 if artifact.status in ("done", "not-buildable") else 1
+
+
+def _cmd_refine(args) -> int:
+    from poc_foundry.core import refine_build
+
+    report, artifact = refine_build(args.build_id, coder_override=args.coder, runtime=args.runtime)
+    print(report)
+    print(f"\n→ {artifact.id}: status={artifact.status} "
+          f"demonstrates_core_value={artifact.final_verdict.demonstrates_core_value}")
     return 0 if artifact.status in ("done", "not-buildable") else 1
 
 
@@ -136,6 +147,13 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("build_id")
     r.add_argument("--runtime", default=None)
     r.set_defaults(func=_cmd_resume)
+
+    rf = sub.add_parser("refine", help="re-attack a finished build's descoped backlog on a stronger coder")
+    rf.add_argument("build_id")
+    rf.add_argument("--coder", default=None,
+                    help="role name whose .env triple points at the frontier coder endpoint (per-call rebind)")
+    rf.add_argument("--runtime", default=None)
+    rf.set_defaults(func=_cmd_refine)
 
     s = sub.add_parser("stop", help="request a cooperative stop (checkpoints + exits; resume-able)")
     s.add_argument("build_id")

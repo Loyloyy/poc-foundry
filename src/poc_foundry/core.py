@@ -117,15 +117,18 @@ def build_poc(source: str | Path, brief: str = "", *, driver: str = "tech-scout"
     return _result(build_dir)
 
 
-def _invoke_with_salvage(graph, first_input, ctx, cfg, build_dir: Path, build_id: str) -> None:
+def _invoke_with_salvage(graph, first_input, ctx, cfg, build_dir: Path, build_id: str,
+                         thread_id: str | None = None) -> None:
     """Run the graph under the budget meter. ``first_input`` is the initial ``BuildState`` (a fresh
-    build) or ``None`` (resume). A ``BudgetExceeded`` cap (design §5.8) escapes the phases' broad
-    ``except Exception`` guards (it's a ``BaseException``) → we salvage here rather than crash."""
+    build or a seeded refine state) or ``None`` (resume — replay the checkpoint). A ``BudgetExceeded``
+    cap (design §5.8) escapes the phases' broad ``except Exception`` guards (it's a ``BaseException``) →
+    we salvage here rather than crash. ``thread_id`` defaults to ``build_id`` (build/resume share the
+    build's checkpoint thread); refine passes its own thread so it never clobbers the original run."""
     from poc_foundry.control import BuildStopped
     from poc_foundry.models import METER, BudgetExceeded
 
     METER.begin_run(cfg)
-    gcfg = {"configurable": {"thread_id": build_id}, "recursion_limit": 60}
+    gcfg = {"configurable": {"thread_id": thread_id or build_id}, "recursion_limit": 60}
     try:
         graph.invoke(first_input, config=gcfg)
     except BudgetExceeded as be:
@@ -253,6 +256,133 @@ def resume_build(build_id: str, *, builds_dir: str | Path | None = None, runtime
             finally:
                 broker.destroy()
     finally:
+        tracing.flush()
+
+    return _result(build_dir)
+
+
+def _recover_state(graph, thread_id: str):
+    """Recover a checkpointed ``BuildState`` for ``thread_id`` (None if there is no checkpoint)."""
+    from poc_foundry.state import BuildState
+    try:
+        snap = graph.get_state({"configurable": {"thread_id": thread_id}})
+        return BuildState(**snap.values) if snap and getattr(snap, "values", None) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _refine_seed(state, cfg):
+    """Turn a recovered FINISHED-build ``BuildState`` into a backlog-only refine seed (M4 S1). Returns
+    ``(seed_state, backlog_test_files)``: the seed carries a plan of ONLY the not-yet-``met`` criteria's
+    iterations (each pinned to its ORIGINAL staged-test filename so the red-first test is reused, not
+    re-authored); the backlog file list is what ``core`` parks for one-at-a-time staging. The critic bar
+    is untouched (DECISIONS #28) — refine raises coder capability, it never re-specs/re-plans, so the
+    respec/replan budgets are pinned to their caps (the verdict ladder collapses to fix → descope)."""
+    from poc_foundry.state import IterationPlan, Plan
+
+    spec = state.spec
+    crits = spec.success_criteria if spec else []
+    met = {c.text for c in crits if c.status == "met"}
+    orig = state.plan.iterations if state.plan else []
+
+    refine_iters: list = []
+    backlog_files: list[str] = []
+    for idx, it in enumerate(orig):
+        crit = it.acceptance[0] if it.acceptance else ""
+        if not crit or crit in met:
+            continue
+        tf = it.test_file or f"test_iter_{idx}.py"
+        refine_iters.append(IterationPlan(
+            goal=it.goal, acceptance=list(it.acceptance), interface=it.interface,
+            files=list(it.files), research_questions=list(it.research_questions), test_file=tf))
+        backlog_files.append(tf)
+
+    backlog_crits = {it.acceptance[0] for it in refine_iters if it.acceptance}
+    for c in crits:                                  # re-attack only the backlog; others keep their status
+        if c.text in backlog_crits:
+            c.status = "pending"
+
+    state.plan = Plan(iterations=refine_iters)
+    state.iteration = 0
+    state.fix_count = 0
+    state.refine_mode = True
+    state.respec_count = cfg.respec_cap              # pin: refine never re-specs/re-plans (don't game)
+    state.replan_count = cfg.replan_cap
+    state.descope_report = []                        # rebuilt by the critic; refined criteria drop off
+    state.verdict = ""
+    return state, backlog_files
+
+
+def _refine_prepare_staging(staging_dir: Path, backlog_files: list[str]) -> None:
+    """Park the backlog tests out of the active ``staging/tests`` cumulative gate into
+    ``staging/refine_pending`` so P4 can stage them in one at a time (see ``_refine_stage_in``)."""
+    tests = staging_dir / "tests"
+    pending = staging_dir / "refine_pending"
+    pending.mkdir(parents=True, exist_ok=True)
+    for f in backlog_files:
+        src = tests / f
+        if src.exists():
+            shutil.move(str(src), str(pending / f))
+
+
+def refine_build(build_id: str, *, coder_override: str | None = None,
+                 builds_dir: str | Path | None = None, runtime: str | None = None, event_sink=None):
+    """Re-attack a FINISHED build's DESCOPED backlog on a stronger/frontier ``coder`` (M4 S1 — the
+    descope finish-path made real). Re-runs ONLY the not-yet-``met`` criteria over the PERSISTED
+    workspace + already-authored (red-first) staged tests; P0–P3 are NOT re-run and the tests are NOT
+    re-authored. The critic bar is unchanged (DECISIONS #28: raise coder capability, never weaken the
+    verifier). ``coder_override`` is a per-call role rebind (a ``.env`` role whose triple points at the
+    frontier endpoint), NOT a global ``.env`` change. Advances descoped criteria toward ``met`` and
+    re-emits the updated artifact. Returns ``(report_md, PoCBuildArtifact)``.
+
+    NOTE: like ``resume``, refine relies on the build's persisted local-disk workspace + checkpoint +
+    staging tests; if they were cleaned, the descoped tests can't be reused.
+    """
+    from poc_foundry import models, tracing
+    from poc_foundry.control import clear_stop
+    from poc_foundry.graph import build_graph, build_refine_graph
+    from poc_foundry.ingest import load_run
+
+    cfg = load_config(builds_dir)
+    build_dir = cfg.builds_dir / build_id
+    meta = json.loads((build_dir / "build_meta.json").read_text())
+    run_dir = Path(meta["source_dir"])
+    template = meta.get("template", cfg.default_template)
+
+    if coder_override:                       # fail fast with a clear error before provisioning anything
+        models.resolve_role(coder_override)  # raises if the override role's triple isn't configured
+
+    clear_stop(build_dir)                    # a prior cooperative stop must not re-trip the refine run
+    if event_sink is not None:
+        from poc_foundry import events as _ev
+        _ev.emit(event_sink, _ev.make_event("start", build_id, kind="refine", template=template,
+                                            coder=coder_override or ""))
+    ctx, broker = _prepare(cfg, build_id, run_dir, template, runtime, event_sink)
+    ctx.run_folder = load_run(run_dir)       # p7 emit needs the loaded source artifact for provenance
+
+    recovered = _recover_state(build_graph(ctx, cfg), build_id)
+    if recovered is None:
+        raise RuntimeError(f"cannot refine {build_id}: no checkpoint found (the build's state is needed)")
+    seed, backlog = _refine_seed(recovered, cfg)
+    if not backlog:
+        ctx.say(f"refine: nothing to refine — every testable criterion of {build_id} is already met")
+        return _result(build_dir)
+    _refine_prepare_staging(ctx.staging_dir, backlog)
+    ctx.say(f"refine: re-attacking {len(backlog)} descoped criterion(s) on "
+            f"coder={coder_override or '(unchanged)'}")
+
+    models.set_role_alias("coder", coder_override)   # per-call rebind (None clears → no-op)
+    try:
+        with tracing.build(build_id, tags=["refine", template, coder_override or "coder"]):
+            try:
+                broker.provision()
+                graph = build_refine_graph(ctx, cfg)
+                _invoke_with_salvage(graph, seed, ctx, cfg, build_dir, build_id,
+                                     thread_id=f"{build_id}-refine")
+            finally:
+                broker.destroy()
+    finally:
+        models.set_role_alias("coder", None)         # always clear the process-local rebind
         tracing.flush()
 
     return _result(build_dir)

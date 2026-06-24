@@ -41,6 +41,8 @@ class IterationPlan(BaseModel):
     interface: str = ""                                    # the pinned public contract (tester+coder)
     files: list[str] = Field(default_factory=list)         # files this iteration touches (advisory)
     research_questions: list[str] = Field(default_factory=list)   # M2c S4: open questions → research rung (a)
+    test_file: str = ""    # M4 S1 refine: pin the staged-test filename so a FILTERED backlog plan reuses
+    #                        the criterion's already-authored (red-first) test rather than re-numbering it
 
 
 class Plan(BaseModel):
@@ -67,6 +69,9 @@ class BuildState(BaseModel):
     phase: str = "init"           # current phase label (for events / PROGRESS.md)
     status: str = "incomplete"    # done | incomplete | failed | not-buildable
     iteration: int = 0
+    refine_mode: bool = False     # M4 S1: this is a `refine` re-attack of a finished build's descoped
+    #                               backlog (workspace already has real code) — disables the iteration-0
+    #                               strict-red-first probe (a green test now means "met by existing code")
 
     # phase products
     spec: Spec | None = None

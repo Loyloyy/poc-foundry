@@ -304,7 +304,18 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       pending) · template CI scaffold+smokes every template GREEN (S5, server pending). Plus always: zero
       leaks, green bar green, both templates build `done`, hygiene clean on emitted output.
 
-## M3 — web UI
+## M3 — web UI ✅ COMPLETE (2026-06-25, server-validated over the SSH tunnel)
+Both slices server-validated: a real build was watched live over the tunnel (slice board flipping
+green, log streaming), cooperative Stop→Resume worked from the UI, history + docs + descope render,
+the headless contract is unchanged, localhost-publish boundary holds. Post-validation UX polish
+(DECISIONS #28 addendum): research-source **picker** (`/api/sources` → topics, not raw paths);
+Langfuse "Traces" link rewritten to a browser-reachable URL + deep-linked to the build's session
+(`PF_LANGFUSE_PROJECT_ID`); Stop button **"Stopping…"** state + banner; **caveats/quality** card
+(surfaces `degraded_critic` + critic advisories); clamped long Stage-2 briefs. Ops gotchas learned:
+`.env` changes need `up -d --force-recreate` (NOT `restart`); `DC` must pass BOTH `-f` files; port
+**8181** (8770/8008 are vLLM). Real-build learning: a non-degraded critic (distinct model family)
+correctly blocks gameable tests → on a hard source (PageIndex) everything honestly descopes to the
+`refine` finish-path; needs `PF_MAX_RUN_WALL_CLOCK_S` to bound degenerate runs. **Next: M4.**
 - [x] **S1 — event seam + RunManager + SSE** ✅ SERVER-VALIDATED (2026-06-24): SSE over the tunnel
       streamed `start`/`node`(slice-board snapshot)/`log` through a real fixture build; history + status
       + cooperative Stop→Resume + `/api/stop`(no-id) all confirmed; localhost-publish boundary.
@@ -315,7 +326,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
       replay buffer, terminal `end`/`error`); FastAPI `web/server.py` (localhost-only) + `web/__main__`
       (uvicorn :8181); `web` compose service (localhost port; override mirrors app's broker/workspace).
       Fakes: `tests/test_m3_events.py` (11). DECISIONS #27.
-- [x] **S2 — React SPA** *(built; server tunnel-validation pending)* — React 18 + TS + Vite in
+- [x] **S2 — React SPA** ✅ SERVER-VALIDATED (2026-06-25, over the tunnel) — React 18 + TS + Vite in
       `frontend/`, mirroring the Stage-2 frontend pattern (npm on the dev box, `node_modules` gitignored,
       **prebuilt `dist/` committed** to `src/poc_foundry/web/dist/` — the `.gitignore` re-includes it past
       the blanket `dist/`). `useEventStream` subscribes to the single-slot global `/api/events` and
@@ -333,7 +344,19 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done & verified.
   log stream live, Stop→Resume, open a historical build's docs + descope.
 
 ## M4 — breadth
-- [ ] security red-team demo (both beats) + vLLM key-proxy (ship together) · `refine` flow · JS
+- [x] **S1 `refine` flow** (2026-06-25, local; server pending) — `core.refine_build(build_id, *,
+      coder_override)` re-attacks a FINISHED build's descoped backlog on a stronger coder. Backlog-only
+      refine graph (`build_refine_graph`: iterate→critic→docs→cleanroom→emit, P0–P3 skipped), reuses the
+      persisted workspace + already-authored red-first staged tests (pinned `IterationPlan.test_file`,
+      staged in ONE-at-a-time via `refine_pending/` so a still-red criterion never blocks the cumulative
+      gate), `refine_mode` disables iteration-0 strict-red-first (post-scaffold code). Per-call coder
+      rebind = `models.set_role_alias` (process-local, NOT a global `.env` change; `same_family` sees it
+      too). Critic bar UNCHANGED (respec/replan pinned to caps → fix→descope; DECISIONS #28). Wired into
+      CLI (`refine <id> [--coder ROLE]`) + web UI (✦ Refine button on a finished build with descopes).
+      Local: `run_spine_tests.py` (**131**, +12 `test_m4_refine.py`). DECISIONS #29.
+      **Acceptance (server):** a descoped fixture build refines ≥1 criterion to `met` on a stronger coder;
+      the slice board flips it green live; the artifact + descope report update; critic not weakened.
+- [ ] security red-team demo (both beats) + vLLM key-proxy (ship together) · JS
       template (if npm granted) · multi-service composition · eval harness v2 · `docs/PLATFORM.md`
 - [ ] **daemon-side invariant-rejection audit log** (from the M2c S1 design review): the broker daemon
       (trust boundary / rule-#8 enforcer) should durably record rejected `create*` (+ provision/destroy)

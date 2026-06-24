@@ -79,7 +79,7 @@ export default function Sidebar(p: Props) {
           </select>
         </label>
         {selected ? (
-          <p className="muted small src-brief">
+          <p className="muted small src-brief" title={selected.brief || selected.id}>
             {selected.brief || selected.id}
           </p>
         ) : (

@@ -16,7 +16,7 @@ _ENV = {
     "ARCHITECT_API_BASE": "http://10.20.30.40:8000/v1",
     "ARCHITECT_API_KEY": "sk-secret-abc123def456",
     "PF_VLLM_ALLOW_HOST": "10.20.30.40:8000",
-    "PF_WORKSPACE_DIR": "/mnt/nfsdata/aloysius/pf-workspaces",
+    "PF_WORKSPACE_DIR": "/srv/nfs/builder/pf-workspaces",
     "PF_SERVICE_PG_HOST": "172.31.0.5",
     "PF_DEFAULT_ROLE": "architect",          # not a secret — must be ignored
 }
@@ -29,7 +29,7 @@ def test_collect_secrets_finds_host_model_key_path():
     assert "10.20.30.40" in values               # bare host
     assert "qwen2.5-coder-32b-instruct-awq" in values
     assert "sk-secret-abc123def456" in values
-    assert "/mnt/nfsdata/aloysius/pf-workspaces" in values
+    assert "/srv/nfs/builder/pf-workspaces" in values
     assert "172.31.0.5" in values
     # the role label is NOT a secret
     assert "architect" not in values
@@ -44,13 +44,13 @@ def test_scrub_text_removes_all_sensitive_values():
         "CONNECT 10.20.30.40:8000 ...\n"
         "model=qwen2.5-coder-32b-instruct-awq base=http://10.20.30.40:8000/v1\n"
         "Authorization: Bearer sk-secret-abc123def456\n"
-        "workspace at /mnt/nfsdata/aloysius/pf-workspaces/poc-x\n"
+        "workspace at /srv/nfs/builder/pf-workspaces/poc-x\n"
         "sibling pg @ 172.31.0.5:5432\n"
         "open http://localhost:7860 to view\n"
     )
     out = scrub.scrub_text(text, secrets)
     for leak in ("10.20.30.40", "qwen2.5-coder-32b-instruct-awq",
-                 "sk-secret-abc123def456", "/mnt/nfsdata/aloysius", "172.31.0.5"):
+                 "sk-secret-abc123def456", "/srv/nfs/builder", "172.31.0.5"):
         assert leak not in out, f"leak survived: {leak}"
     assert scrub.ENDPOINT in out and scrub.MODEL in out and scrub.KEY in out
     assert "localhost:7860" in out               # generic local URL untouched

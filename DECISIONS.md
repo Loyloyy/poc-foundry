@@ -1075,3 +1075,69 @@ box is a sanctioned, already-established exception, NOT a deviation. (User steer
   S1 `/api/stop` convenience route. *Server (pending): rebuild the image (committed `dist/` is `COPY
   src`'d), bring up `web`, open over the tunnel, watch a fixture build live + exercise Stop/Resume +
   history/docs/descope.*
+
+  **Addendum (2026-06-25) — SERVER-VALIDATED over the tunnel + UX polish (119 fakes):**
+  - Watched a real fixture build live (slice board flips green, log streams), Stop→Resume, history/docs/
+    descope all render; localhost-publish boundary holds. M3 ✅ COMPLETE.
+  - **Source picker** (`core.list_sources` + `/api/sources`): the build form shows Stage-2 **topics**
+    (read off `vNN.json`), not raw paths — scans fixtures + `PF_ARTIFACTS_ROOT` (mount the Stage-2
+    `artifacts/` dir into `web`). A "Custom path…" escape hatch remains.
+  - **Langfuse link** made browser-usable: `LANGFUSE_HOST` is the in-network name a laptop can't resolve
+    → rewrite host→localhost (or `PF_LANGFUSE_PUBLIC_URL`); **deep-link to the build's session** via
+    `PF_LANGFUSE_PROJECT_ID` (trace carries `session_id==build_id`). Exact-trace `?peek=` deep-link
+    deferred (needs capturing Langfuse `trace_id` at build time → M4 nicety).
+  - **Stop UX:** immediate "Stopping…" + a banner explaining the cooperative stop lands at the next node
+    boundary (an in-flight model call can take a minute). **Caveats/quality card** surfaces
+    `degraded_critic` + the critic's advisory text. Long Stage-2 briefs clamp to 3 lines.
+  - **Ops gotchas (cost round-trips; now memory + ROADMAP):** `.env` changes need
+    `docker compose ... up -d --force-recreate web` (NOT `restart` — that keeps the stale env_file env);
+    `DC` must pass BOTH `-f` files (compose + override) or the broker/host-mounts vanish; port **8181**
+    (8770/8008 are vLLM on the shared box; uvicorn binds 0.0.0.0 in-container, the boundary is the host
+    `127.0.0.1:8181` publish).
+  - **Real-build learning (informs M4):** a non-degraded critic (distinct model family — e.g. `critic`→
+    gpt-oss vs `coder`→GLM) correctly BLOCKS gameable string-presence tests. On a hard source (PageIndex
+    tree-nav) the GLM coder can't satisfy it within budget → every criterion honestly descopes to the
+    `refine` finish-path, and a degenerate respec/replan loop ran ~90 min (no run-level wall-clock cap).
+    Takeaways: (1) `refine` (M4) is the real success-rate lever; (2) set `PF_MAX_RUN_WALL_CLOCK_S`;
+    (3) DON'T tune the harness to manufacture green — that games the verifier, which is the whole value.
+
+
+## #29 — M4 S1: `refine` — re-attack the descoped backlog on a stronger coder (2026-06-25)
+
+The M3 real-build learning (#28) named `refine` as the real success-rate lever: a strict critic on a
+hard source honestly descopes every criterion to the finish-path *"re-run with `refine` on a frontier
+`coder` endpoint"*. `refine` is the code that fulfils that — it raises success by giving the coder MORE
+capability, never by lowering the critic bar (the whole-value invariant, #28).
+
+- **Headless entrypoint.** `core.refine_build(build_id, *, coder_override=None, runtime, event_sink)`
+  re-runs ONLY a finished build's not-yet-`met` criteria over the PERSISTED workspace + already-authored
+  red-first staged tests. P0–P3 (ingest/spec/plan/scaffold) are NOT re-run; the tests are NOT re-authored.
+  Re-emits the updated artifact (refined criteria flip to `met`, drop off the descope report). `refine ≠
+  resume`: resume replays a checkpoint from its last node; refine seeds a NEW state and re-enters at P4.
+- **A backlog-only refine graph** (`graph.build_refine_graph`): `START→iterate→critic→(fix|next→iterate /
+  else→docs)→docs→cleanroom→emit`. Reuses every phase unchanged; only the wiring is new (rule #5 — no
+  pipeline logic in a new place). Seeded with a hand-built `BuildState` from the build's checkpoint
+  (`_recover_state`), so it runs on its own `thread_id` (`<id>-refine`) and never clobbers the original.
+- **Backlog selection + staged-test reuse** (`_refine_seed`): the seed plan keeps ONLY the iterations whose
+  criterion isn't met, each pinned to its ORIGINAL staged-test filename via the new
+  `IterationPlan.test_file` (so a filtered plan reuses the red-first test instead of re-numbering →
+  re-authoring it). The cumulative gate runs all of `/staged`, so multiple still-red backlog tests would
+  block each other → refine parks them in `staging/refine_pending/` and stages each INTO the active set
+  only on its iteration (`_refine_stage_in`), removing it again if it stays red (`_refine_park_out`).
+  New `BuildState.refine_mode` disables the iteration-0 strict-red-first probe (the workspace already holds
+  real post-scaffold code → a green probe means "met by existing code", not tester inadequacy).
+- **Per-call coder rebind, NOT a global `.env` change** (`models.set_role_alias`): a PROCESS-LOCAL alias map
+  resolved FIRST in `resolve_role`, so the rebind reaches BOTH the coder loop (`chat_text("coder",…)`) AND
+  the degraded-critic check (`same_family("critic","coder")` correctly reads a frontier coder as a distinct
+  family). Set around the one refine run, cleared in `finally`. `coder_override` is a `.env` role name whose
+  triple points at the frontier endpoint (e.g. the neighbour gpt-oss-120b); blank = re-run on the base coder.
+- **Critic never weakened** (#28): refine pins `respec_count`/`replan_count` to their caps, so the verdict
+  ladder collapses to fix→descope (no re-spec/re-plan — refine re-attacks the SAME plan). An adequacy-failing
+  green still descopes (not respec'd) → a gamed pass is never rewarded.
+- **Surfaces.** CLI `refine <id> [--coder ROLE]`; web `POST /api/builds/{id}/refine` + `RunManager.refine`
+  (single-slot, streams like a normal run) + a **✦ Refine descopes** button (with a coder-role input) on a
+  finished build that has descopes. Spend is metered against the budget (§5.8) like any run.
+- **Local:** `run_spine_tests.py` **131** (+12 `test_m4_refine.py`: backlog selection, rebind plumbing +
+  `same_family`, respec/replan pinned, one-at-a-time staging, additive contract, RunManager.refine).
+  *Server (pending): refine a descoped fixture build on a stronger coder; watch a criterion flip green live
+  + the re-emitted artifact's descope report shrink; confirm the critic still blocks gameable tests.*

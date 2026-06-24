@@ -51,6 +51,15 @@ export const api = {
       json<RunStatus>(r)
     ),
 
+  // Re-attack a finished build's descoped backlog on a stronger coder (M4 S1). `coder` is a role name
+  // whose .env triple points at the frontier endpoint (a per-call rebind; empty = unchanged coder).
+  refine: (id: string, coder?: string) =>
+    fetch(`/api/builds/${encodeURIComponent(id)}/refine`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coder: coder || null }),
+    }).then((r) => json<RunStatus>(r)),
+
   // No-id stop: the single-slot RunManager stops whatever is running (the Stop button).
   stop: () => fetch("/api/stop", { method: "POST" }).then((r) => json<{ stopped: boolean }>(r)),
 };

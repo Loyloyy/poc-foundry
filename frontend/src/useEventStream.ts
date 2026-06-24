@@ -8,7 +8,7 @@ import type { EndEvent, ErrorEvent, LogEvent, NodeEvent, Snapshot, StartEvent } 
 export interface LiveState {
   connected: boolean;
   buildId: string;
-  kind: string; // build | resume
+  kind: string; // build | resume | refine
   source: string;
   node: string; // last node entered
   snapshot: Snapshot | null; // latest slice-board snapshot

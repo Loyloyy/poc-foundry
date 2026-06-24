@@ -69,11 +69,11 @@ def _safe_build_file(build_id: str, rel: str) -> Path:
     return target
 
 
-def _langfuse_public_url() -> str:
-    """The BROWSER-facing Langfuse URL for the 'Traces' link. ``LANGFUSE_HOST`` is the IN-NETWORK target
-    the orchestrator pushes to (e.g. ``langfuse-web:3000``) — a laptop browser can't resolve it. Prefer
-    an explicit ``PF_LANGFUSE_PUBLIC_URL``; otherwise rewrite the host to ``localhost`` (preserving
-    scheme+port) so the link works through the standard SSH tunnel out of the box."""
+def _langfuse_public_base() -> str:
+    """The BROWSER-facing Langfuse base URL. ``LANGFUSE_HOST`` is the IN-NETWORK target the orchestrator
+    pushes to (e.g. ``langfuse-web:3000``) — a laptop browser can't resolve it. Prefer an explicit
+    ``PF_LANGFUSE_PUBLIC_URL``; otherwise rewrite the host to ``localhost`` (preserving scheme+port) so
+    the link works through the standard SSH tunnel out of the box."""
     explicit = os.environ.get("PF_LANGFUSE_PUBLIC_URL", "").strip()
     if explicit:
         return explicit
@@ -88,13 +88,25 @@ def _langfuse_public_url() -> str:
     return f"{u.scheme or 'http'}://localhost{port}"
 
 
+def _langfuse_url(build_id: str) -> str:
+    """Deep-link to THIS build's Langfuse session when the project id is known (the build's trace carries
+    ``session_id == build_id``, so ``/project/<pid>/sessions/<build_id>`` lands on it directly). Set
+    ``PF_LANGFUSE_PROJECT_ID`` (the ``cmxxx…`` cuid from any Langfuse trace URL). Without it, fall back
+    to the base URL (the home/org-select page)."""
+    base = _langfuse_public_base()
+    if not base:
+        return ""
+    pid = os.environ.get("PF_LANGFUSE_PROJECT_ID", "").strip()
+    return f"{base.rstrip('/')}/project/{pid}/sessions/{build_id}" if pid else base
+
+
 def _build_detail(build_id: str) -> dict:
     from poc_foundry.artifact import load as load_artifact
 
     root = _builds_root() / build_id
     if not root.is_dir():
         raise HTTPException(404, "no such build")
-    detail: dict = {"id": build_id, "files": [], "langfuse_host": _langfuse_public_url()}
+    detail: dict = {"id": build_id, "files": [], "langfuse_host": _langfuse_url(build_id)}
     try:
         detail["artifact"] = load_artifact(root).model_dump()
     except Exception as e:  # noqa: BLE001 — half-written / failed build: still inspectable
@@ -158,6 +170,21 @@ def start_build(req: StartReq):
 def resume_build(build_id: str, runtime: str | None = None):
     try:
         cur = manager.resume(build_id, runtime=runtime)
+    except RunBusy as e:
+        raise HTTPException(409, str(e))
+    return JSONResponse(cur, status_code=202)
+
+
+class RefineReq(BaseModel):
+    coder: str | None = None     # role whose .env triple points at the frontier coder (per-call rebind)
+    runtime: str | None = None
+
+
+@app.post("/api/builds/{build_id}/refine")
+def refine_build(build_id: str, req: RefineReq | None = None):
+    req = req or RefineReq()
+    try:
+        cur = manager.refine(build_id, coder_override=req.coder, runtime=req.runtime)
     except RunBusy as e:
         raise HTTPException(409, str(e))
     return JSONResponse(cur, status_code=202)

@@ -32,10 +32,11 @@ export interface Snapshot {
 export type StartEvent = {
   type: "start";
   build_id: string;
-  kind: "build" | "resume";
+  kind: "build" | "resume" | "refine";
   source?: string;
   template?: string;
   driver?: string;
+  coder?: string;
 };
 export type NodeEvent = { type: "node"; build_id: string; node: string; snapshot: Snapshot };
 export type LogEvent = { type: "log"; build_id: string; line: string };

@@ -538,3 +538,43 @@ to actually PERSIST hints on NFS, pre-create the dir writable (same as builds/):
 `mkdir -p playbooks/hints && chmod 777 playbooks/hints` (documented in the override example). Without
 it the build succeeds and just logs "hint NOT persisted". +1 fakes test (write_hint → None on an
 unwritable dir).
+
+## M3 web UI — ops gotchas + improving PoC success WITHOUT gaming the verifier (2026-06-25)
+
+**Two Docker/compose traps that each cost a server round-trip:**
+- **`.env` changes need `up -d --force-recreate`, NOT `restart`.** `docker compose restart` re-uses the
+  container's existing environment; `env_file` values are only read when the container is **recreated**.
+  Symptom: edited `.env` (model role binding, `PF_MAX_ITERATIONS`, …) but the build behaved as before.
+  Always `… up -d --force-recreate <svc>` then `exec <svc> bash -lc 'echo "$THE_VAR"'` to confirm it
+  landed before relying on it.
+- **`DC` must pass BOTH `-f` files** (`-f docker/compose.yaml -f docker/docker-compose.override.yml`).
+  An explicit `-f` DISABLES compose's auto-merge of the override → the `broker` service ("no such
+  service: broker") and all host-specific mounts silently vanish.
+- **Web UI port 8181** (8770/8008 are vLLM on the shared box). Uvicorn binds **0.0.0.0 in-container**
+  (Docker forwards the published port to eth0, not loopback — a 127.0.0.1 bind returns
+  empty/connection-reset through the map); the localhost boundary is the **host-side publish**
+  `127.0.0.1:8181:8181`. Don't "fix" the in-container bind to 127.0.0.1.
+- **Langfuse browser link:** `LANGFUSE_HOST` is the in-network name a laptop can't resolve; the UI
+  rewrites host→localhost (or set `PF_LANGFUSE_PUBLIC_URL`). Deep-link to the build's *session* with
+  `PF_LANGFUSE_PROJECT_ID` (trace carries `session_id==build_id`). The exact `?peek=<traceId>` URL needs
+  capturing the Langfuse `trace_id` in `tracing.build()` — deferred to M4.
+
+**Improving the odds of a successful PoC — WITHOUT gaming the criteria check (the core principle).**
+A real build on a hard source (PageIndex tree-nav) descoped *everything*: a non-degraded critic
+(distinct model family — bind `critic` ≠ `coder` family) correctly **blocks** string-presence tests
+that a hard-coded stub would pass. That is the system working — honest descopes > untrustworthy green.
+The whole value is the verifier; **never tune the harness to manufacture green by weakening it.** The
+*legitimate* levers (all raise capability or test quality, none lower the bar):
+1. **Stronger `coder` model** — by far the biggest lever, and exactly what the **`refine` flow** (M4)
+   does: re-run the descoped backlog on a frontier coder. Keep the cheap model for `scribe`.
+2. **Match task difficulty to capability + feed the coder more** — pick achievable sources; richer
+   Stage-2 artifacts (`reference_repos`/`code/`) → richer spec → less the coder has to invent.
+3. **Balance critic strictness against coder strength** — a strict critic *demands* a capable coder;
+   strict-critic + weak-coder on a hard task = everything descopes. Don't pair them.
+4. **Fix the root cause — gameable tests.** Every failure was "the *test* only checks string presence."
+   A stronger `tester` model + criteria phrased as **behaviour** ("retrieves the Tax Provisions node")
+   not string-match ("contains '10.2'") forces the coder to actually implement the mechanism → real
+   green. This raises success by raising the bar correctly, not lowering it.
+5. **Give it room, bounded** — raise `PF_MAX_FIX_ATTEMPTS`/`PF_MAX_ITERATIONS`/call caps for more shots,
+   but ALWAYS set `PF_MAX_RUN_WALL_CLOCK_S` (a strict critic + hard source + respec/replan looped ~90
+   min with no run cap). The experience loop (M2c S3) also compounds success once Tier-2 promotion runs.

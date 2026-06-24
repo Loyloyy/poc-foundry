@@ -78,7 +78,10 @@ input, select {
 .sb-row { display: flex; gap: 10px; }
 .sb-row .grow { flex: 1; }
 .sb-new { width: 100%; margin-top: 4px; }
-.src-brief { margin: -4px 0 2px; font-style: italic; }
+.src-brief {
+  margin: -4px 0 2px; font-style: italic;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+} /* clamp a long Stage-2 brief to 3 lines; full text on hover (title attr) */
 
 .sb-runs { flex: 1; min-height: 0; }
 .sb-section { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 6px 2px; }
@@ -107,6 +110,8 @@ input, select {
 .run-id { font-family: ui-monospace, monospace; }
 .run-sub { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
 .run-controls { display: flex; gap: 10px; align-items: center; flex: none; }
+.refine-ctl { display: inline-flex; gap: 6px; align-items: center; }
+.refine-ctl .coder-input { width: 160px; margin-top: 0; }
 .empty { max-width: 38rem; margin-top: 12vh; }
 
 /* ── slice board ───────────────────────────────────────────────────────────── */

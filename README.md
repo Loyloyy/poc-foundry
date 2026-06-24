@@ -24,8 +24,13 @@ P0 ingest+freshness → P1 spec → P2 plan → P3 SCAFFOLD →
 
 ## Status
 
-**Bootstrapping** (Slice 1: repo foundation). No pipeline code yet — M0 de-risk spikes come first.
-See `ROADMAP.md` for milestone state, `DECISIONS.md` for rationale, `DEV_NOTES.md` for gotchas.
+**M0 · M1 · M2a · M2b · M2c · M3 ✅ COMPLETE** (server-validated). The pipeline builds + *verifies* a
+PoC inside Kata VM sandboxes, *survives* (budgets/salvage/stop-resume), is *observable/evaluable/
+self-improving/can research a stuck point*, and is *watchable live over a web UI* (slice board,
+Stop/Resume, history, honest descope reporting). **Next: M4 — breadth** (security red-team demo + vLLM
+key-proxy + Security-Demo tab · `refine` flow · `docs/PLATFORM.md`); see
+`../stage3-planning/HANDOVER_M4.md`. See `ROADMAP.md` for milestone state, `DECISIONS.md` for rationale,
+`DEV_NOTES.md` for gotchas.
 
 ## Design & contracts (read these)
 

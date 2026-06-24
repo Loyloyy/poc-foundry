@@ -54,7 +54,7 @@ services:
       - ../playbooks:/app/playbooks
       # Stage-2 artifacts (READ-ONLY input, rule #6) — mount the ai-engineer-research artifacts dir so
       # the picker can read each run's topic. Adjust the host path to where Stage 2 writes them.
-      - /mnt/nfsdata/aloysius/ai-engineer-research/artifacts:/app/artifacts:ro
+      - /path/to/ai-engineer-research/artifacts:/app/artifacts:ro
 
   # ---- Out-of-process broker daemon. The ONLY holder of the host docker socket; enforces the
   #      create-param invariant (rule #8) broker-side. Reuses the app image (has the docker CLI). ----

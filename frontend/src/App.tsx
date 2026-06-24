@@ -19,6 +19,7 @@ export default function App() {
   const [detail, setDetail] = useState<BuildDetail | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [stopping, setStopping] = useState(false);
+  const [coderRole, setCoderRole] = useState("");
   const prevActive = useRef("");
 
   const activeId = status.busy ? status.build_id || live.buildId : "";
@@ -96,6 +97,9 @@ export default function App() {
     ? live.terminal?.demonstrates
     : art?.final_verdict?.demonstrates_core_value;
   const canResume = !status.busy && !!art && RESUMABLE.has(art.status);
+  // Refine re-attacks a FINISHED build's descoped backlog on a stronger coder — offered whenever a
+  // non-live build has descoped criteria and nothing else is running.
+  const canRefine = !status.busy && !isLiveView && !!art && (art.descope_report?.length ?? 0) > 0;
   const hasAbandoned = !!detail?.files.includes("abandoned.patch");
 
   const onStop = () => {
@@ -104,6 +108,8 @@ export default function App() {
   };
   const onResume = () =>
     api.resume(selectedId).then(() => setRefreshKey((k) => k + 1)).catch(() => {});
+  const onRefine = () =>
+    api.refine(selectedId, coderRole.trim()).then(() => setRefreshKey((k) => k + 1)).catch(() => {});
 
   return (
     <div className="app">
@@ -150,6 +156,18 @@ export default function App() {
                   </button>
                 )}
                 {canResume && <button onClick={onResume}>▶ Resume</button>}
+                {canRefine && (
+                  <span className="refine-ctl">
+                    <input
+                      className="coder-input"
+                      placeholder="coder role (e.g. frontier)"
+                      value={coderRole}
+                      onChange={(e) => setCoderRole(e.target.value)}
+                      title="A .env role whose triple points at a stronger/frontier coder endpoint (a per-call rebind). Leave blank to re-run on the same coder."
+                    />
+                    <button onClick={onRefine}>✦ Refine descopes</button>
+                  </span>
+                )}
                 {detail?.langfuse_host && (
                   <a className="ghost btn" href={detail.langfuse_host} target="_blank" rel="noreferrer">
                     Traces ↗

@@ -113,9 +113,30 @@ def _load_dotenv() -> None:
 _ROLE_TEMP = {"architect": 0.2, "coder": 0.1, "tester": 0.1, "critic": 0.0, "scribe": 0.3}
 
 
+# ── per-call role rebind (M4 S1 refine) ───────────────────────────────────────
+# A PROCESS-LOCAL alias map (NOT a global `.env` change): ``refine`` points the ``coder`` role at a
+# stronger/frontier endpoint for the duration of one refine run, then clears it. Resolving through the
+# alias means BOTH the coder loop (``chat_text("coder", …)``) AND the degraded-critic check
+# (``same_family("critic","coder")``) see the rebound endpoint — so a frontier coder correctly reads as
+# a DISTINCT family (the critic stays independent; design §5.4, DECISIONS #28: never weaken the critic).
+_ROLE_ALIASES: dict[str, str] = {}
+
+
+def set_role_alias(role: str, alias: str | None) -> None:
+    """Rebind ``role`` to another configured role's ``.env`` triple for this process (``alias=None``
+    clears it). Used by ``core.refine_build`` around a single run; never persisted."""
+    key = role.strip().lower()
+    if alias and alias.strip():
+        _ROLE_ALIASES[key] = alias.strip()
+    else:
+        _ROLE_ALIASES.pop(key, None)
+
+
 def resolve_role(role: str) -> tuple[str, str, str]:
-    """(model, api_base, api_key) for a role; blank triple → PF_DEFAULT_ROLE fallback."""
+    """(model, api_base, api_key) for a role; blank triple → PF_DEFAULT_ROLE fallback. A process-local
+    refine alias (``set_role_alias``) is applied FIRST, so a rebound role resolves the alias's triple."""
     _load_dotenv()
+    role = _ROLE_ALIASES.get(role.strip().lower(), role)
     r = role.upper()
     model = os.environ.get(f"{r}_MODEL", "").strip()
     if not model or model.startswith("<"):
