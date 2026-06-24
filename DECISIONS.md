@@ -1139,5 +1139,78 @@ capability, never by lowering the critic bar (the whole-value invariant, #28).
   finished build that has descopes. Spend is metered against the budget (§5.8) like any run.
 - **Local:** `run_spine_tests.py` **131** (+12 `test_m4_refine.py`: backlog selection, rebind plumbing +
   `same_family`, respec/replan pinned, one-at-a-time staging, additive contract, RunManager.refine).
-  *Server (pending): refine a descoped fixture build on a stronger coder; watch a criterion flip green live
-  + the re-emitted artifact's descope report shrink; confirm the critic still blocks gameable tests.*
+- **SERVER-VALIDATED (2026-06-25)** over the tunnel — `cli refine poc-…104121-57e82f`: refine recovered the
+  checkpoint, re-attacked all **4 non-`met`** criteria (broader than the artifact's single logged descope —
+  backlog = every non-`met` criterion, correct), moved **2 to `met`**, flipping the build **incomplete →
+  done** (demonstrates=yes; clean-room install/test/demo all GREEN), re-emitted the artifact. The critic
+  stayed honest LIVE: it `descope→next`'d two gameable greens ("can be satisfied by an empty string…" /
+  "a stub that always returns 'no relevant information'…"), with `respecs=1 replans=1` confirming the pinned
+  caps held (fix→descope, no re-spec/re-plan). Budget metered (`llm_calls=36, wall_s=1411`, no caps hit).
+- **Honest scope of the validation:** this run used the BASE coder; the met-flip came via re-verification
+  (`met-existing`) against the now-fuller workspace, NOT new problem-solving. The "a *stronger* coder solves
+  a hard descoped criterion" claim is **deferred** (the user has no frontier endpoint; gpt-oss-120b isn't
+  meaningfully stronger) — the rebind path is identical + fakes-proven, so it's a zero-code residual.
+- **Residual (real, low-priority):** langgraph warns "Deserializing unregistered type … Spec/Plan/
+  IterationRecord … blocked in a future version" when `_recover_state` reads the checkpoint. Harmless today;
+  pin it by registering `allowed_msgpack_modules` (or `LANGGRAPH_STRICT_MSGPACK`) when we next touch graph
+  compile. Web-UI ✦ Refine button is wired but not yet clicked over the tunnel (same `core.refine_build`).
+
+
+## #30 — M4 S2a: daemon-side invariant-rejection audit log (2026-06-25)
+
+The M2c S1 design review (DECISIONS #22 follow-up) flagged that the broker daemon — the trust boundary
+(rule #8 enforcer, sole docker.sock holder) — should durably record rejected `create*` so the rule-#8
+enforcement is *evidenced*, not just asserted. Ships now as the first S2 slice (the security demo's
+beat-(b) reads it); the key-proxy + the two live beats + the Security-Demo tab follow.
+
+- **Where the record lives.** `sandbox/audit.py` (stdlib json+os): append-only JSONL `append/read/
+  make_entry`. The `Broker` (which ENFORCES the invariant in `_check_*`) records each rejection in
+  `create`/`create_service`/`provision`, plus provision/destroy lifecycle, into an in-memory list AND
+  (when `PF_BROKER_AUDIT_LOG` is set) the durable file. In the server deployment the **daemon** sets that
+  env to `/var/tmp/pf-broker/audit.log` on the shared `pf-broker` dir → the file is written ONLY by the
+  daemon process (independent of a possibly-compromised orchestrator) yet readable by app/web (mounted).
+  Recording in the Broker (not the daemon wrapper) is DRY: the same code enforces + audits, so both the
+  out-of-process (daemon) and in-process (local) paths record identically.
+- **Finding-0 holds.** A record carries only harness/LLM-derived create-params (image/name/caps/mount
+  TARGETS) + the invariant reason — never env values, never the vLLM key (fakes assert a secret never
+  appears in the serialized audit).
+- **Surfacing.** `audit` RPC + `RemoteBroker.audit()`; `p7_emit` pulls `ctx.broker.audit()` rejections into
+  `security.incidents[]` as `[high] broker-invariant-rejection: <method> — <reason>`. (Normal builds have
+  none — a real rejected create* fails loud and crashes the phase; the audit is the forensic/demo record.)
+- **Local:** `run_spine_tests.py` **139** (+8 `test_m4_security.py`: append/read roundtrip + malformed-line
+  tolerance, rejected create/create_service/provision recorded with reason+detail, no-secret-leak, durable
+  file append, the `audit` RPC, and the emit-merge). Override.example documents `PF_BROKER_AUDIT_LOG`.
+  *Server (pending): set the env on `broker`; the S2c rejection beat shows a blocked create* in the file.*
+
+
+## #31 — M4 S2b: the key-proxy, reframed honestly (keyless on-prem vLLM) (2026-06-25)
+
+S2 (security demo + key-proxy) opened with a design check against reality (§5.2: "claims written against
+enforced reality only"). The `.env` showed the on-prem vLLM is **keyless** — every role's API key is `not-needed`,
+both endpoints (`:8008` GLM main, `:8770` gpt-oss critic) accept any token. The design's key-proxy premise
+was "a single static key ⇒ ship a reverse-proxy to make it per-build revocable"; with NO key, a reverse
+proxy over vLLM would guard nothing → shipping it as-specified would be theatre (rules #9/#28).
+
+**Resolution (with the user).** The key-proxy is the REAL control for the GENERAL case — this platform is
+meant to run key-requiring providers (OpenAI/Claude/hosted models), where the model key IS a high-value
+secret that must never enter the throwaway VM. The on-prem keyless vLLM is just this box's config. So we
+build the key-proxy as the genuine mechanism and **demonstrate it with a canary**: a planted stand-in
+secret configured as the "real key"; the demo proves the VM never sees it (and that inference still works
+because the proxy swapped it in). Honest: we never claim the on-prem vLLM has a key — we claim "when a
+provider needs a key, the orchestrator holds it, the proxy injects it, the VM never sees it," and prove it.
+
+This makes the key-proxy and Finding-0 the SAME demonstration: "the real secret never reaches the sandbox."
+
+- **Topology.** `sandbox VM → key-proxy (presents a per-build SACRIFICIAL token) → injects the REAL key →
+  model`. The real key lives only in the proxy (orchestrator-side); the VM env carries only the sacrificial
+  token (rotatable per build). On a keyless deployment the sacrificial token defaults to `not-needed` and
+  the proxy still forwards — the control is dormant-but-wired (no false claim) until a real key is set.
+- **Built + green (testable core):** `security/keyproxy.py` — `swap_authorization` (validate sacrificial →
+  return real `Authorization`; deny on mismatch so the VM can't borrow the proxy's identity), `redact` (the
+  proxy never emits its own key), and a stdlib `http.server` reverse proxy `serve()` (image-only). And
+  `security/findings.py` — `scan_sandbox_env`: scan a VM's env against `scrub.collect_secrets()`, report any
+  leak by PLACEHOLDER (never the raw value) — empty = Finding-0 pass. `run_spine_tests.py` **145** (+6).
+- **Remaining (server-bound, next slice):** the key-proxy CONTAINER + broker per-build provisioning +
+  per-build token generation + VM model-base_url injection (OPT-IN via `PF_KEYPROXY_*`; normal builds
+  unchanged); `core.security_demo()` + CLI `demo-security` (3 beats: canary/Finding-0 · egress containment ·
+  broker rejection); the Security-Demo web tab (S2d).

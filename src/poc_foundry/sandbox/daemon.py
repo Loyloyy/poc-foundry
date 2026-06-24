@@ -64,6 +64,8 @@ class BrokerDaemon:
             return {"ip": broker.service_ip(sbx)}
         if method == "proxy_log":
             return {"log": broker.proxy_log(tail=params.get("tail", 200))}
+        if method == "audit":
+            return {"entries": broker.audit()}
         if method == "destroy":
             broker.destroy()
             self._brokers.pop(bid, None)

@@ -344,7 +344,7 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
   log stream live, Stop→Resume, open a historical build's docs + descope.
 
 ## M4 — breadth
-- [x] **S1 `refine` flow** (2026-06-25, local; server pending) — `core.refine_build(build_id, *,
+- [x] **S1 `refine` flow** (2026-06-25, ✅ SERVER-VALIDATED over the tunnel) — `core.refine_build(build_id, *,
       coder_override)` re-attacks a FINISHED build's descoped backlog on a stronger coder. Backlog-only
       refine graph (`build_refine_graph`: iterate→critic→docs→cleanroom→emit, P0–P3 skipped), reuses the
       persisted workspace + already-authored red-first staged tests (pinned `IterationPlan.test_file`,
@@ -354,12 +354,36 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
       too). Critic bar UNCHANGED (respec/replan pinned to caps → fix→descope; DECISIONS #28). Wired into
       CLI (`refine <id> [--coder ROLE]`) + web UI (✦ Refine button on a finished build with descopes).
       Local: `run_spine_tests.py` (**131**, +12 `test_m4_refine.py`). DECISIONS #29.
-      **Acceptance (server):** a descoped fixture build refines ≥1 criterion to `met` on a stronger coder;
-      the slice board flips it green live; the artifact + descope report update; critic not weakened.
-- [ ] security red-team demo (both beats) + vLLM key-proxy (ship together) · JS
-      template (if npm granted) · multi-service composition · eval harness v2 · `docs/PLATFORM.md`
-- [ ] **daemon-side invariant-rejection audit log** (from the M2c S1 design review): the broker daemon
-      (trust boundary / rule-#8 enforcer) should durably record rejected `create*` (+ provision/destroy)
-      append-only, read independently of the orchestrator, feeding `security.incidents[]` (§5.2 posture).
-      NOT trace propagation; planning-chat consult first (DECISIONS #22 follow-up).
+      **Server result (2026-06-25):** `refine poc-…104121-57e82f` re-attacked all 4 non-`met` criteria,
+      moved 2 to `met` (incomplete→**done**, demonstrates=yes), re-emitted; the critic `descope→next`'d
+      2 gameable greens live (respecs=1/replans=1 caps held). The CLI path is proven; the met-flip came
+      via re-verification (`met-existing`) on the BASE coder. **Deferred residual:** a genuinely stronger
+      coder *solving* a hard descoped criterion (needs a frontier endpoint — no code change). Also noted:
+      langgraph emits "unregistered msgpack type" deserialization WARNINGS when refine recovers the
+      checkpoint (Spec/Plan/IterationRecord) — harmless now, "blocked in a future version" → register
+      `allowed_msgpack_modules` or pass typed state. Web-UI ✦ Refine button not yet exercised (same core).
+- [~] **S2b key-proxy + S2c red-team beats** (2026-06-25 — testable core built, infra/beats pending).
+      DESIGN RESOLVED with the user: on-prem vLLM is KEYLESS (`not-needed`), so a key-proxy "over vLLM"
+      would guard nothing → reframed honestly. The key-proxy is the REAL control for key-requiring
+      providers (OpenAI/Claude); demonstrated here with a **canary** (a planted stand-in secret the VM
+      must never see). Built + green: `security/keyproxy.py` (pure `swap_authorization` sacrificial→real,
+      deny-on-mismatch, `redact`; + a stdlib reverse-proxy `serve()` for the container) and
+      `security/findings.py` (`scan_sandbox_env` Finding-0: prove no orchestrator secret reached the VM,
+      reports by PLACEHOLDER). Local: `run_spine_tests.py` (**145**, +6). DECISIONS #31.
+      **REMAINING (server-bound):** (1) key-proxy CONTAINER + broker provisions it per-build on the
+      internal net + generates a per-build rotatable sacrificial token + injects the model base_url into
+      the VM (OPT-IN via `PF_KEYPROXY_*`; normal builds unchanged); (2) `core.security_demo()` + CLI
+      `demo-security` running the **3 beats** — canary/Finding-0, egress containment, broker rejection;
+      (3) the **Security-Demo web tab** (S2d, reuses the event seam). The vLLM key-proxy-over-vLLM is
+      NOT applicable (keyless) and is labelled as such; both endpoints (`:8008` GLM main, `:8770` gpt-oss)
+      are reachable but only `:8008` is in the sandbox allowlist (correct — critic runs orchestrator-side).
+- [ ] JS template (if npm granted) · multi-service composition · eval harness v2 · `docs/PLATFORM.md`
+- [x] **S2a daemon-side invariant-rejection audit log** (2026-06-25, local; server pending) — the broker
+      (rule-#8 enforcer) records every rejected `create*`/`create_service`/`provision` (+ provision/destroy
+      lifecycle) APPEND-ONLY via `sandbox/audit.py` to `PF_BROKER_AUDIT_LOG` (the daemon owns the file on
+      the shared `pf-broker` dir → durable + readable INDEPENDENT of the orchestrator). No secret ever
+      enters a record (Finding-0). `audit` RPC + `RemoteBroker.audit()`; p7 emit merges rejections into
+      `security.incidents[]` as `[high]`. Local: `run_spine_tests.py` (**139**, +8 `test_m4_security.py`).
+      DECISIONS #30. **Server:** set `PF_BROKER_AUDIT_LOG` on the `broker` service (override.example
+      updated); the live rejection beat (S2c) reads this file as un-bypassable evidence.
 - **Acceptance:** the security demo runs both beats with proxy logs as evidence; `demo-security` CLI.

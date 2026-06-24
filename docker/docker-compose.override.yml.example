@@ -66,6 +66,11 @@ services:
       - ../.env
     environment:
       - PF_BROKER_SOCKET=/var/tmp/pf-broker/broker.sock
+      # M4 S2 (§5.2): the daemon durably records rejected create* (+ provision/destroy) APPEND-ONLY to
+      # this file — readable independent of the orchestrator (it's on the shared pf-broker dir, written
+      # only by the daemon). The orchestrator reads it at emit to feed security.incidents[]; the security
+      # demo reads it directly as un-bypassable rule-#8 evidence.
+      - PF_BROKER_AUDIT_LOG=/var/tmp/pf-broker/audit.log
     volumes:
       - ../src:/app/src
       - ../config:/app/config

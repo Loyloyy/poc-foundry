@@ -94,6 +94,14 @@ class RemoteBroker:
         except Exception:  # noqa: BLE001 — log read is best-effort
             return ""
 
+    def audit(self) -> list:
+        """The daemon-side rejected-create*/lifecycle records for this build (M4 S2). Best-effort:
+        the durable copy is the daemon's append-only file (read independently for the security demo)."""
+        try:
+            return self._call("audit").get("entries", [])
+        except Exception:  # noqa: BLE001 — audit read is best-effort at emit
+            return []
+
     def destroy(self) -> None:
         from poc_foundry import tracing
         with tracing.span("broker.destroy", build_id=self.build_id):

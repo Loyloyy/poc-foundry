@@ -20,12 +20,15 @@ never "cannot be escaped" (rule #9).
 """
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import subprocess
 import time
 import uuid
 from dataclasses import dataclass
+
+from poc_foundry.sandbox import audit as _audit
 
 # ── allowlists for the create* invariant ─────────────────────────────────────
 # Linux capabilities a create* call may request. M1 grants NONE (the template needs no extra caps);
@@ -155,6 +158,21 @@ class Broker:
         self._sandboxes: dict[str, Sandbox] = {}
         self._provisioned = False
         self.events: list[str] = []          # human-readable provisioning/egress trace
+        # Append-only audit (M4 S2, §5.2): rejected create*/lifecycle, durable + orchestrator-independent.
+        # The DAEMON sets PF_BROKER_AUDIT_LOG to a mounted path so the record survives + can't be edited
+        # by the orchestrator; in-process (local/fakes) it stays in-memory only unless the env is set.
+        self._audit_path = os.environ.get("PF_BROKER_AUDIT_LOG", "").strip()
+        self._audit_events: list[dict] = []
+
+    def _record_audit(self, event: str, method: str, *, reason: str = "", detail: dict | None = None) -> None:
+        entry = _audit.make_entry(self.build_id, event, method, reason=reason, detail=detail)
+        self._audit_events.append(entry)
+        _audit.append(self._audit_path, entry)   # durable, append-only (no-op when no path configured)
+
+    def audit(self) -> list[dict]:
+        """The rejected-create* + lifecycle records for this build (in-memory mirror of the durable
+        append-only log). Read by the orchestrator at emit to feed ``security.incidents[]``."""
+        return list(self._audit_events)
 
     # ── context manager ──────────────────────────────────────────────────────
     def __enter__(self) -> "Broker":
@@ -178,7 +196,9 @@ class Broker:
             return
         proxy_image = getattr(self.cfg, "proxy_image", "poc-foundry-proxy")
         if proxy_image not in self.allowed_images:
-            raise BrokerInvariantError(f"proxy image {proxy_image!r} not in allowlist")
+            reason = f"proxy image {proxy_image!r} not in allowlist"
+            self._record_audit("rejected", "provision", reason=reason, detail={"image": proxy_image})
+            raise BrokerInvariantError(reason)
 
         from poc_foundry import tracing
         # Atomic: if ANY step fails (e.g. the proxy doesn't come up after the networks/volume were
@@ -199,6 +219,7 @@ class Broker:
                 raise
 
         self._provisioned = True
+        self._record_audit("provision", "provision", detail={"net": self.net_internal})
         self._log(f"provisioned net={self.net_internal}/{self.net_egress} proxy={self.proxy_url}")
 
     def _await_proxy(self, *, tries: int = 10) -> str:
@@ -249,10 +270,16 @@ class Broker:
         if not self._provisioned:
             raise BrokerError("call provision() before create()")
         image = image or getattr(self.cfg, "sandbox_image", "poc-foundry-sandbox")
-        self._check_image(image)
-        self._check_caps(caps)
-        self._check_mounts(mounts)
-        self._check_name(name)
+        try:
+            self._check_image(image)
+            self._check_caps(caps)
+            self._check_mounts(mounts)
+            self._check_name(name)
+        except BrokerInvariantError as e:
+            self._record_audit("rejected", "create", reason=str(e),
+                               detail={"image": image, "name": name, "caps": list(caps),
+                                       "mount_targets": [m.target for m in mounts]})
+            raise
 
         full = f"pf-{self.build_id[-12:]}-{name}-{uuid.uuid4().hex[:6]}"
         full = full.replace("--", "-")
@@ -294,8 +321,13 @@ class Broker:
         if not self._provisioned:
             raise BrokerError("call provision() before create_service()")
         ref = f"{image}:{pinned_tag}" if pinned_tag else image
-        self._check_image(ref)
-        self._check_name(name)
+        try:
+            self._check_image(ref)
+            self._check_name(name)
+        except BrokerInvariantError as e:
+            self._record_audit("rejected", "create_service", reason=str(e),
+                               detail={"image": ref, "name": name})
+            raise
         full = f"pf-{self.build_id[-12:]}-svc-{name}-{uuid.uuid4().hex[:6]}".replace("--", "-")
         argv = ["docker", "run", "-d", "--rm", "--name", full, "--network", self.net_internal]
         for k, v in (env or {}).items():
@@ -358,5 +390,6 @@ class Broker:
         if not self._uv_shared:                       # a shared uv-cache PERSISTS across builds (the speed-up)
             _run(["docker", "volume", "rm", self.uv_volume], check=False)
         if self._provisioned:
+            self._record_audit("destroy", "destroy", detail={"net": self.net_internal})
             self._log("destroyed build environment")
         self._provisioned = False

@@ -821,6 +821,17 @@ def p7_emit(state, ctx: Ctx) -> dict:
     except Exception:  # noqa: BLE001
         allowlist = []
 
+    # broker-side rejected-create* records (M4 S2, §5.2) → security.incidents[]: the daemon (rule-#8
+    # enforcer) durably audits every blocked create*; surface them as high-severity evidence here.
+    incidents = list(state.incidents)
+    try:
+        for e in (ctx.broker.audit() if hasattr(ctx.broker, "audit") else []):
+            if e.get("event") == "rejected":
+                incidents.append(f"[high] broker-invariant-rejection: {e.get('method', '')} — "
+                                 f"{(e.get('reason') or '')[:200]}")
+    except Exception:  # noqa: BLE001 — audit read is best-effort, never fails emit
+        pass
+
     pa = PoCBuildArtifact(
         id=ctx.build_id,
         generated_at=_now_iso(),
@@ -846,7 +857,7 @@ def p7_emit(state, ctx: Ctx) -> dict:
         services=services,
         licenses=[ctx.template.license] if ctx.template.license else [],
         security=SecurityInfo(sandbox="kata", egress_allowlist=allowlist,
-                              incidents=list(state.incidents),
+                              incidents=incidents,
                               degraded_critic=bool(state.degraded_critic)),
         budget=Budget(wall_s=snap["wall_s"], llm_calls=snap["llm_calls"],
                       contention_indicator=snap["contention_indicator"]),
