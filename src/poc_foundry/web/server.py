@@ -108,6 +108,13 @@ def builds() -> list[dict]:
     return list_builds()
 
 
+@app.get("/api/sources")
+def sources() -> list[dict]:
+    """Buildable Stage-2 sources (topic/brief/path) for the build-form picker."""
+    from poc_foundry.core import list_sources
+    return list_sources()
+
+
 @app.get("/api/builds/{build_id}")
 def build_detail(build_id: str) -> dict:
     return _build_detail(build_id)

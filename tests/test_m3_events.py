@@ -78,6 +78,17 @@ def test_snapshot_tolerates_an_empty_state():
     assert snap["criteria"] == [] and snap["iterations"] == [] and snap["phase"] == ""
 
 
+def test_list_sources_surfaces_the_fixture_topic():
+    # the build-form picker shows TOPICS, not raw paths: the committed fixture is discovered with its
+    # Stage-2 `topic`/`brief` read straight off vNN.json (no heavy schema validation).
+    import poc_foundry.core as core
+    rows = core.list_sources()
+    fx = [r for r in rows if r["path"].endswith("sample_artifact")]
+    assert fx, f"fixture not discovered in {[r['path'] for r in rows]}"
+    assert fx[0]["topic"] == "Synthetic RAG-over-docs PoC (fixture)"
+    assert fx[0]["id"] == "dra-20260101-000000-abc123-m" and fx[0]["version"] == 1
+
+
 def test_core_build_poc_accepts_event_sink_kw():
     # the contract stays additive: build_poc/resume_build grow an OPTIONAL event_sink (CLI never passes it)
     import poc_foundry.core as core

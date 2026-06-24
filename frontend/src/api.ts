@@ -1,6 +1,6 @@
 // Thin fetch helpers over the FastAPI surface (all under /api). The web layer holds no pipeline logic
 // (rule #5) and neither does this — it just calls core via the server.
-import type { BuildDetail, BuildSummary, RunStatus } from "./types";
+import type { BuildDetail, BuildSummary, RunStatus, SourceInfo } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -28,6 +28,8 @@ export const api = {
   status: () => fetch("/api/status").then((r) => json<RunStatus>(r)),
 
   listBuilds: () => fetch("/api/builds").then((r) => json<BuildSummary[]>(r)),
+
+  listSources: () => fetch("/api/sources").then((r) => json<SourceInfo[]>(r)),
 
   buildDetail: (id: string) =>
     fetch(`/api/builds/${encodeURIComponent(id)}`).then((r) => json<BuildDetail>(r)),

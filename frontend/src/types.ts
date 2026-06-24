@@ -56,6 +56,15 @@ export interface BuildSummary {
   demonstrates: string;
 }
 
+// A discoverable Stage-2 build source (fixtures + PF_ARTIFACTS_ROOT) — the picker shows `topic`.
+export interface SourceInfo {
+  id: string;
+  topic: string;
+  brief: string;
+  version: number;
+  path: string;
+}
+
 export interface DescopeItem {
   criterion: string;
   attempts_made?: number;

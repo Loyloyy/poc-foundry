@@ -306,6 +306,43 @@ def _result(build_dir: Path):
     return report, artifact
 
 
+# ── source discovery (M3: the web-UI build form shows TOPICS, not raw paths) ──
+def _source_meta(folder: Path) -> dict | None:
+    """Cheaply read a Stage-2 run folder's latest ``vNN.json`` top-level metadata (topic/brief/id/
+    version) WITHOUT the heavy schema validation — enough to label a build-source picker. Returns
+    ``None`` for a folder with no parseable artifact."""
+    vs = sorted((int(p.stem[1:]), p) for p in folder.glob("v*.json") if p.stem[1:].isdigit())
+    if not vs:
+        return None
+    ver, vpath = vs[-1]
+    try:
+        d = json.loads(vpath.read_text())
+    except Exception:  # noqa: BLE001 — a malformed source is just skipped from the picker
+        return None
+    return {"id": d.get("id", ""), "topic": d.get("topic", "") or folder.name,
+            "brief": d.get("brief", ""), "version": int(d.get("version", ver)), "path": str(folder)}
+
+
+def list_sources() -> list[dict]:
+    """Discover buildable Stage-2 sources (READ-ONLY input, rule #6) for the web-UI build picker:
+    every committed test fixture + every run folder under ``PF_ARTIFACTS_ROOT`` (if set). Each row is
+    ``{id, topic, brief, version, path}`` — the ``path`` is what ``build_poc(source=…)`` resolves."""
+    folders: list[Path] = []
+    repo_root = Path(__file__).resolve().parents[2]
+    fixtures = repo_root / "tests" / "fixtures"
+    if fixtures.is_dir():
+        folders += [p for p in sorted(fixtures.iterdir()) if p.is_dir()]
+    ar = os.environ.get("PF_ARTIFACTS_ROOT", "").strip()
+    if ar and Path(ar).is_dir():
+        folders += [p for p in sorted(Path(ar).iterdir()) if p.is_dir()]
+    out: dict[str, dict] = {}
+    for folder in folders:
+        meta = _source_meta(folder)
+        if meta:
+            out[meta["path"]] = meta
+    return sorted(out.values(), key=lambda m: m["topic"].lower())
+
+
 # ── small operations used by the CLI ─────────────────────────────────────────
 def list_builds(builds_dir: str | Path | None = None) -> list[dict]:
     cfg = load_config(builds_dir)

@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError, type StartBody } from "../api";
-import type { BuildSummary } from "../types";
+import type { BuildSummary, SourceInfo } from "../types";
+
+const CUSTOM = "__custom__";
 
 // Left rail: a New-build form (single-slot — Start is disabled while a build runs; a 409 surfaces as
 // an inline message) + the history list of emitted builds (click to open).
@@ -22,18 +24,34 @@ function statusPill(s: string): string {
 }
 
 export default function Sidebar(p: Props) {
-  const [source, setSource] = useState("/app/tests/fixtures/sample_artifact");
+  const [sources, setSources] = useState<SourceInfo[]>([]);
+  const [pick, setPick] = useState<string>(""); // selected source path, or CUSTOM
+  const [custom, setCustom] = useState("/app/tests/fixtures/sample_artifact");
   const [brief, setBrief] = useState("");
   const [driver, setDriver] = useState("tech-scout");
   const [template, setTemplate] = useState("");
   const [err, setErr] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Load the discoverable Stage-2 sources once; default to the first (so the form shows a topic).
+  useEffect(() => {
+    api
+      .listSources()
+      .then((s) => {
+        setSources(s);
+        setPick((cur) => cur || (s[0]?.path ?? CUSTOM));
+      })
+      .catch(() => setPick((cur) => cur || CUSTOM));
+  }, []);
+
+  const source = pick === CUSTOM ? custom.trim() : pick;
+  const selected = sources.find((s) => s.path === pick);
+
   const start = async () => {
     setErr("");
     setSubmitting(true);
     try {
-      const body: StartBody = { source: source.trim(), brief, driver };
+      const body: StartBody = { source, brief, driver };
       if (template.trim()) body.template = template.trim();
       await api.start(body);
       p.onStarted();
@@ -50,11 +68,28 @@ export default function Sidebar(p: Props) {
 
       <div className="sb-form">
         <label>
-          Source <span className="muted small">(Stage-2 run folder / artifact id)</span>
-          <input value={source} onChange={(e) => setSource(e.target.value)} spellCheck={false} />
+          Research source <span className="muted small">(Stage-2 artifact)</span>
+          <select value={pick} onChange={(e) => setPick(e.target.value)}>
+            {sources.map((s) => (
+              <option key={s.path} value={s.path}>
+                {s.topic}
+              </option>
+            ))}
+            <option value={CUSTOM}>Custom path…</option>
+          </select>
         </label>
+        {selected ? (
+          <p className="muted small src-brief">
+            {selected.brief || selected.id}
+          </p>
+        ) : (
+          <label>
+            Path <span className="muted small">(run folder / artifact id)</span>
+            <input value={custom} onChange={(e) => setCustom(e.target.value)} spellCheck={false} />
+          </label>
+        )}
         <label>
-          Brief <span className="muted small">(optional)</span>
+          Brief <span className="muted small">(optional — shapes the spec)</span>
           <input value={brief} onChange={(e) => setBrief(e.target.value)} />
         </label>
         <div className="sb-row">
