@@ -1,9 +1,11 @@
 """FastAPI presentation over the headless contract (M3 §5.12, rule #5: NO pipeline logic here).
 
 Serves the committed React ``dist/`` + a small JSON API + an **SSE** stream of structured build
-events. The orchestrator process holds the secrets → this binds **localhost only** and is reached
-over an **SSH tunnel** (the tunnel is the boundary; there is no in-app auth, and we don't claim one —
-never bind a public interface).
+events. The orchestrator process holds the secrets → it is published on the server's **loopback
+only** (compose ``127.0.0.1:8181:8181``) and reached over an **SSH tunnel** (the tunnel is the
+boundary; there is no in-app auth, and we don't claim one — never publish on a public interface).
+Uvicorn itself listens 0.0.0.0 IN-CONTAINER (Docker forwards the published port to eth0, not
+loopback); the host-side publish is what restricts it to localhost. See ``__main__``.
 
 This module imports the ``ui`` extra (fastapi/uvicorn) at top level, so it is image-only: it is NEVER
 imported by the no-pytest fakes (which exercise ``runmanager``/``events`` directly on the 3.10 box).

@@ -1025,10 +1025,15 @@ is a SECOND thin presentation over the unchanged headless contract — it only c
   the testable Python is `events`+`runmanager`). Routes: start/resume/stop, list/detail, a
   suffix-allowlisted + traversal-guarded `file` reader (serves already-scrubbed build files), `status`,
   and the `events` SSE stream (async generator, `asyncio.to_thread` on the queue + client-disconnect
-  check). Serves the committed `dist/` (placeholder until S2). **Binds localhost ONLY** (`web/__main__`
-  on 127.0.0.1:8181; warns on a non-loopback override) — the process holds the secrets, so the SSH
-  tunnel is the boundary; **no in-app auth, and we don't claim one** (rule #1 / §5.12). New `web` compose
-  service (localhost port; override mirrors `app`'s broker socket + `PF_WORKSPACE_DIR`).
+  check). Serves the committed `dist/` (placeholder until S2). **The localhost boundary is the
+  HOST-SIDE PUBLISH** — compose maps `127.0.0.1:8181:8181`, so the service is reachable only from the
+  server loopback, then over an SSH tunnel. Uvicorn listens **0.0.0.0 in-container** by necessity
+  (Docker forwards the published port to eth0, NOT the container loopback — a 127.0.0.1 listen returns
+  empty/connection-reset through the port map; this matches the depot's own langfuse/searxng). The
+  process holds the secrets → **no in-app auth, and we don't claim one** (rule #1 / §5.12); chose host-
+  publish-on-loopback over in-container 127.0.0.1 + the SSH tunnel as the boundary. Port **8181** (8770/
+  8008 are vLLM on the shared box). New `web` compose service; override mirrors `app`'s broker socket +
+  `PF_WORKSPACE_DIR` so the UI can run builds.
 - **Local: 118 fakes** (+11 `test_m3_events.py`: `say→sink→sse_format`; snapshot projection + empty-state
   tolerance; failing-sink tolerance; contract-additive signatures; RunManager 409 / fan-out+`end` /
   replay / `stop`→sentinel / error surfacing) + contract 11/11 + hygiene clean. *Server (pending): `$DC
