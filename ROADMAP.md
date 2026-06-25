@@ -378,7 +378,7 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
       NOT applicable (keyless) and is labelled as such; both endpoints (`:8008` GLM main, `:8770` gpt-oss)
       are reachable but only `:8008` is in the sandbox allowlist (correct — critic runs orchestrator-side).
 - [ ] JS template (if npm granted) · multi-service composition · eval harness v2 · `docs/PLATFORM.md`
-- [x] **S2a daemon-side invariant-rejection audit log** (2026-06-25, local; server pending) — the broker
+- [x] **S2a daemon-side invariant-rejection audit log** (2026-06-25, ✅ SERVER-VALIDATED) — the broker
       (rule-#8 enforcer) records every rejected `create*`/`create_service`/`provision` (+ provision/destroy
       lifecycle) APPEND-ONLY via `sandbox/audit.py` to `PF_BROKER_AUDIT_LOG` (the daemon owns the file on
       the shared `pf-broker` dir → durable + readable INDEPENDENT of the orchestrator). No secret ever

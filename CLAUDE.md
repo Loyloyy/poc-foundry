@@ -48,10 +48,27 @@ rule #5 holds) · S2 React+TS+Vite SPA in `frontend/`, **prebuilt `dist/` commit
 `src/poc_foundry/web/dist/` (npm on the dev box like Stage 2; server serves the bundle). Watched a real
 build live over the tunnel; cooperative Stop→Resume; history/docs/descope; localhost-publish boundary
 (uvicorn 0.0.0.0 in-container, host publishes `127.0.0.1:8181`). Source picker, Langfuse session
-deep-link, Stop "Stopping…" UX, caveats card. DECISIONS #27–#28. Local: `run_spine_tests.py` (**119**) +
-contract (11). **Ops gotchas:** `.env` changes need `up -d --force-recreate` (not `restart`); `DC` must
-pass BOTH `-f` files (compose + override); web service binds `127.0.0.1:8181`. **Next: M4 — breadth**
-(see `../stage3-planning/HANDOVER_M4.md`): security red-team demo + vLLM key-proxy + Security-Demo tab ·
-`refine` flow · `docs/PLATFORM.md`. **Residuals:** hint persistence (`chmod 777 playbooks/hints`); depot
-SearXNG pins; the daemon-side invariant-rejection audit log; Langfuse exact-trace deep-link (capture
-`trace_id` at build time); `PF_MAX_RUN_WALL_CLOCK_S` to bound degenerate runs.
+deep-link, Stop "Stopping…" UX, caveats card. DECISIONS #27–#28. **Ops gotchas:** `.env` changes need
+`up -d --force-recreate` (not `restart`); `DC` must pass BOTH `-f` files (compose + override); web binds
+`127.0.0.1:8181`.
+
+**M4 — breadth (IN PROGRESS, 2026-06-25). Local: `run_spine_tests.py` (145) + contract (11) + hygiene.**
+- **S1 `refine` ✅ SERVER-VALIDATED** — `core.refine_build(id, *, coder_override)` re-attacks a finished
+  build's descoped backlog on a stronger coder (backlog-only refine graph; reuses persisted workspace +
+  red-first staged tests; per-call `models.set_role_alias` rebind, NOT a global `.env` flip; critic bar
+  unchanged — respec/replan pinned to caps). CLI `refine` + web ✦ Refine button. A descoped fixture went
+  incomplete→**done** on the server; critic descoped gameable greens live. DECISIONS #29.
+- **S2a daemon rejection-audit ✅ SERVER-VALIDATED** — broker records rejected `create*`/lifecycle
+  append-only to `PF_BROKER_AUDIT_LOG` (daemon-owned → durable + orchestrator-independent), no secret in
+  any entry; `audit` RPC → `security.incidents[]`. DECISIONS #30. (`sandbox/audit.py`.)
+- **S2b key-proxy core ✅ local** — `security/keyproxy.py` (swap sacrificial→real, deny-on-mismatch,
+  redact) + `security/findings.py` (Finding-0 env scan). Reframed honestly: on-prem vLLM is KEYLESS, so the
+  key-proxy is the real control for key-requiring providers (OpenAI/Claude), demonstrated with a **canary**.
+  DECISIONS #31.
+- **REMAINING (next chat → `../stage3-planning/HANDOVER_M4b.md`):** S2c `demo-security` CLI + 3 live beats
+  (canary/Finding-0 · egress containment · broker rejection); S2b key-proxy container + broker provisioning
+  (opt-in `PF_KEYPROXY_*`); S2d Security-Demo web tab; S3 `docs/PLATFORM.md`.
+- **Residuals:** hint persistence (`chmod 777 playbooks/hints`); depot SearXNG pins; Langfuse exact-trace
+  deep-link (capture `trace_id` at build time); `PF_MAX_RUN_WALL_CLOCK_S` to bound degenerate runs; the
+  langgraph "unregistered msgpack type" warning on refine's checkpoint recovery (harmless; register
+  `allowed_msgpack_modules`); no frontier coder endpoint yet (refine's stronger-coder met-flip deferred).

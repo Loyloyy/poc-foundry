@@ -1180,7 +1180,11 @@ beat-(b) reads it); the key-proxy + the two live beats + the Security-Demo tab f
 - **Local:** `run_spine_tests.py` **139** (+8 `test_m4_security.py`: append/read roundtrip + malformed-line
   tolerance, rejected create/create_service/provision recorded with reason+detail, no-secret-leak, durable
   file append, the `audit` RPC, and the emit-merge). Override.example documents `PF_BROKER_AUDIT_LOG`.
-  *Server (pending): set the env on `broker`; the S2c rejection beat shows a blocked create* in the file.*
+- **SERVER-VALIDATED (2026-06-25):** with `PF_BROKER_AUDIT_LOG` set on `broker`, a rejected create*
+  (`image='attacker/evil:latest'`) driven through the live daemon was blocked daemon-side
+  (`BrokerInvariantError`), returned by the `audit` RPC, AND written to the durable file — provision →
+  rejected → destroy, full forensic detail, no secret. The file was written by the `pf-broker` container
+  and read back from a *separate* `app` container = the "independent of the orchestrator" property, live.
 
 
 ## #31 — M4 S2b: the key-proxy, reframed honestly (keyless on-prem vLLM) (2026-06-25)

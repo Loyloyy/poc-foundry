@@ -134,8 +134,8 @@ def test_keyproxy_swaps_sacrificial_for_real_key():
     from poc_foundry.security import keyproxy
     # the VM presents only its sacrificial token; the proxy returns the REAL upstream auth to forward.
     out = keyproxy.swap_authorization("Bearer per-build-token-abc",
-                                      sacrificial_token="per-build-token-abc", real_key="CANARY-sk-REALKEY")
-    assert out == "Bearer CANARY-sk-REALKEY"
+                                      sacrificial_token="per-build-token-abc", real_key="CANARY-DEMO-VALUE")
+    assert out == "Bearer CANARY-DEMO-VALUE"
     # a bare token (no 'Bearer ') is tolerated
     assert keyproxy.swap_authorization("per-build-token-abc",
                                        sacrificial_token="per-build-token-abc", real_key="K") == "Bearer K"
@@ -153,9 +153,9 @@ def test_keyproxy_denies_a_wrong_or_missing_token():
 
 def test_keyproxy_redacts_the_real_key():
     from poc_foundry.security import keyproxy
-    msg = "error talking to upstream with key CANARY-sk-REALKEY oops"
-    red = keyproxy.redact(msg, "CANARY-sk-REALKEY")
-    assert "CANARY-sk-REALKEY" not in red and "<real-model-key>" in red
+    msg = "error talking to upstream with key CANARY-DEMO-VALUE oops"
+    red = keyproxy.redact(msg, "CANARY-DEMO-VALUE")
+    assert "CANARY-DEMO-VALUE" not in red and "<real-model-key>" in red
 
 
 # ── Finding-0: no orchestrator secret reaches the sandbox VM ───────────────────
@@ -164,7 +164,7 @@ def test_scan_sandbox_env_passes_when_clean():
     # the broker hands the VM only proxy + sacrificial token + service IPs — no orchestrator secrets.
     vm_env = {"HTTPS_PROXY": "http://10.0.0.2:3128", "PF_SANDBOX_VLLM_KEY": "not-needed",
               "PF_SERVICE_PG_HOST": "10.0.0.5"}
-    secrets = [("CANARY-sk-REALKEY", "<real-model-key>"), ("sk-lf-supersecret", "<langfuse-key>")]
+    secrets = [("CANARY-DEMO-VALUE", "<real-model-key>"), ("demo-langfuse-secret", "<langfuse-key>")]
     scan = scan_sandbox_env(vm_env, secrets)
     assert scan.ok and scan.leaked == [] and scan.secret_count == 2
 
@@ -172,8 +172,8 @@ def test_scan_sandbox_env_passes_when_clean():
 def test_scan_sandbox_env_flags_a_leak_by_placeholder_not_value():
     from poc_foundry.security.findings import scan_sandbox_env
     # if a real secret DID appear in the VM env, the scan flags it — by PLACEHOLDER, never the raw value.
-    leaky = {"OPENAI_API_KEY": "CANARY-sk-REALKEY", "X": "ok"}
-    secrets = [("CANARY-sk-REALKEY", "<real-model-key>")]
+    leaky = {"OPENAI_API_KEY": "CANARY-DEMO-VALUE", "X": "ok"}
+    secrets = [("CANARY-DEMO-VALUE", "<real-model-key>")]
     scan = scan_sandbox_env(leaky, secrets)
     assert not scan.ok and scan.leaked == ["<real-model-key>"]
 
@@ -186,7 +186,7 @@ def test_broker_vm_env_carries_no_orchestrator_secret():
     b.proxy_url = "http://10.0.0.2:3128"
     vm_env = {"HTTPS_PROXY": b.proxy_url, "HTTP_PROXY": b.proxy_url,
               "PF_SANDBOX_VLLM_KEY": b.vllm_key}          # mirrors Broker.create's env construction
-    scan = scan_sandbox_env(vm_env, [("CANARY-sk-REALKEY", "<real-model-key>"),
+    scan = scan_sandbox_env(vm_env, [("CANARY-DEMO-VALUE", "<real-model-key>"),
                                      ("per-build-sacrificial-xyz", "<sacrificial>")])
     # the sacrificial token is INTENDED in the VM (it's sacrificial); the REAL key must be absent.
     assert "<real-model-key>" not in scan.leaked
