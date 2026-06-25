@@ -38,6 +38,16 @@ def test_collect_secrets_finds_host_model_key_path():
     assert lengths == sorted(lengths, reverse=True)
 
 
+def test_collect_secrets_skips_public_base_image_gpg_key():
+    # GPG_KEY is the CPython release signing fingerprint (public, baked into every python:* image) — it
+    # ends in _KEY but is NOT a secret, so it must not be collected (else the security demo's Finding-0
+    # scan flags it across two python-based images as a false leak).
+    pub = "7169605F62C751356D054A26A821E680E5FA6305"
+    secrets = scrub.collect_secrets(env={"GPG_KEY": pub, "OPENAI_API_KEY": "sk-realsecret-xyz"})
+    values = {v for v, _ in secrets}
+    assert pub not in values and "sk-realsecret-xyz" in values
+
+
 def test_scrub_text_removes_all_sensitive_values():
     secrets = scrub.collect_secrets(env=_ENV)
     text = (

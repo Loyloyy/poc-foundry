@@ -1292,3 +1292,15 @@ The first server run of `demo-security` proved the harness end-to-end and surfac
   log flush. The FAIL summary no longer falsely says "the VM reached the host" when curl was blocked.
 - **Local:** `run_spine_tests.py` **151** (+ the sacrificial-exclusion test; analyzer + leaked_keys
   assertions updated). Web tab unchanged (renders the new detail fields generically — no rebuild).
+
+## #32d — M4 S2c: GPG_KEY false-positive in Finding-0 (second live run) (2026-06-25)
+
+The fixed beats 2–3 went GREEN on the server; beat 1's new `leaked_keys` diagnostic immediately named the
+culprit: VM var **`GPG_KEY`**. `GPG_KEY` is the CPython release signing-key FINGERPRINT — a PUBLIC
+constant baked into every `python:*` base image (published on python.org), not a secret. The orchestrator
+(`app`) runs the same `python:3.12-slim` base, so `collect_secrets()` classified its `GPG_KEY` (name ends
+`_KEY`) as `<redacted-key>`, and the sandbox VM (same base image) carries the identical public value →
+flagged as a "leak." **Fix (in `scrub.py`, the right general place):** a `_SKIP_KEYS = {"GPG_KEY"}`
+name-allowlist short-circuits `_classify` — so the scrubber also stops needlessly rewriting that public
+fingerprint in emitted reports. `run_spine_tests.py` **152** (+1 scrub test). This is exactly the
+diagnosability `leaked_keys` was added for (one round-trip from symptom to fix).

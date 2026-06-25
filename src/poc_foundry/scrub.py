@@ -35,6 +35,10 @@ _TEXT_FILES = ("report.md", "00_INDEX.md", "PROGRESS.md")
 
 # never treat these as secrets (generic / public / sentinel values)
 _SKIP = {"not-needed", "localhost", "127.0.0.1", "0.0.0.0", "postgres", "true", "false"}
+# never treat these VAR NAMES as secrets — public constants baked into base images that merely END in a
+# secret-looking suffix. ``GPG_KEY`` is the CPython release signing-key FINGERPRINT (published on
+# python.org), identical across every ``python:*`` image, so it is shared base-image config, not a key.
+_SKIP_KEYS = {"GPG_KEY"}
 _MIN_LEN = 4   # skip trivially short tokens (false-positive substring matches)
 
 
@@ -57,6 +61,8 @@ def _classify(key: str, value: str, add) -> None:
     """Map ONE ``KEY=value`` pair to its placeholder(s) via the key's suffix (case-insensitive). Used
     for both the process env and the flattened ``build_env.json`` leaves."""
     ku = key.upper()
+    if ku in _SKIP_KEYS:                        # public base-image constant — never a secret
+        return
     if ku.endswith("_MODEL") or ku == "MODEL":
         add(value, MODEL)
         if value.strip().startswith("/"):     # a served model id is sometimes an on-disk path
