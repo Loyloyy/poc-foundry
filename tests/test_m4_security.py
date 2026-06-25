@@ -176,6 +176,7 @@ def test_scan_sandbox_env_flags_a_leak_by_placeholder_not_value():
     secrets = [("CANARY-DEMO-VALUE", "<real-model-key>")]
     scan = scan_sandbox_env(leaky, secrets)
     assert not scan.ok and scan.leaked == ["<real-model-key>"]
+    assert scan.leaked_keys == ["OPENAI_API_KEY"]   # names the offending VM var (safe; never the value)
 
 
 def test_broker_vm_env_carries_no_orchestrator_secret():
@@ -217,13 +218,18 @@ class _StubSandbox:
         self._b.destroyed.append(self.name)
 
 
+_CURL_DENIED = "curl: (56) CONNECT tunnel failed, response 403\nPF_HTTP=000\nPF_EXIT=56"
+_CURL_OPEN = "PF_HTTP=200\nPF_EXIT=0"
+
+
 class _StubBroker:
-    """A scripted broker for run_demo: serves a VM env dump + a curl outcome, a proxy log, and either
+    """A scripted broker for run_demo: serves a VM env dump + a curl probe output, a proxy log, and either
     rejects (default) or allows an off-allowlist create — so each beat's PASS/FAIL is exercised."""
 
-    def __init__(self, *, vm_env, curl, proxy_log, reject_evil=True):
+    def __init__(self, *, vm_env, curl, proxy_log, reject_evil=True, vllm_key=""):
         self._vm_env, self._curl, self._proxy_log = vm_env, curl, proxy_log
         self._reject_evil = reject_evil
+        self.vllm_key = vllm_key
         self._audit, self.created, self.destroyed = [], [], []
 
     def create(self, *, mounts, caps=(), name="sbx", image=None, env_extra=None):
@@ -239,7 +245,7 @@ class _StubBroker:
     def _exec(self, cmd):
         if cmd.strip() == "env":
             return _StubExec(0, "\n".join(f"{k}={v}" for k, v in self._vm_env.items()))
-        return _StubExec(*self._curl)   # the egress probe → (rc, http_code text)
+        return _StubExec(0, self._curl)   # the egress probe → in-band PF_HTTP/PF_EXIT markers
 
     def proxy_log(self, *, tail=200):
         return self._proxy_log
@@ -256,34 +262,47 @@ def test_security_demo_all_three_beats_pass():
     from poc_foundry.security import demo
     vm_env = {"HTTPS_PROXY": "http://10.0.0.2:3128", "PF_SANDBOX_VLLM_KEY": "not-needed",
               "PATH": "/usr/local/bin:/usr/bin"}
-    broker = _StubBroker(vm_env=vm_env, curl=(56, "000"), proxy_log=_denied_log())
+    broker = _StubBroker(vm_env=vm_env, curl=_CURL_DENIED, proxy_log=_denied_log())
     res = demo.run_demo(broker, canary="CANARY-XYZ", build_id="poc-demo",
-                        secrets=[("CANARY-XYZ", "<canary>")])
+                        secrets=[("CANARY-XYZ", "<canary>")], proxy_poll_tries=1)
     assert res["ok"] and len(res["beats"]) == 3 and all(b["passed"] for b in res["beats"])
     assert [b["beat"] for b in res["beats"]] == ["canary / Finding-0", "egress containment",
                                                  "broker rejection"]
     assert "secdemo" in broker.created and broker.destroyed   # the demo VM was reaped
 
 
+def test_security_demo_excludes_the_sacrificial_token_from_finding0():
+    # the sacrificial inference token is INTENDED in the VM — beat-1 must NOT flag it as a leak.
+    from poc_foundry.security import demo
+    vm_env = {"HTTPS_PROXY": "http://10.0.0.2:3128", "PF_SANDBOX_VLLM_KEY": "sacrificial-abc"}
+    broker = _StubBroker(vm_env=vm_env, curl=_CURL_DENIED, proxy_log=_denied_log(),
+                         vllm_key="sacrificial-abc")
+    res = demo.run_demo(broker, canary="CANARY-XYZ", build_id="poc-sac",
+                        secrets=[("sacrificial-abc", "<redacted-key>"), ("CANARY-XYZ", "<canary>")],
+                        proxy_poll_tries=1)
+    assert res["beats"][0]["passed"]   # the sacrificial token is excluded → Finding-0 holds
+
+
 def test_security_demo_beats_fail_on_leak_open_egress_unblocked_create():
     from poc_foundry.security import demo
-    # the canary leaked into the VM, the proxy did NOT deny (no TCP_DENIED), and the bad create is allowed
-    leaky_env = {"OPENAI_API_KEY": "CANARY-XYZ", "PATH": "/usr/bin"}
-    broker = _StubBroker(vm_env=leaky_env, curl=(0, "200"), proxy_log="", reject_evil=False)
+    # a REAL secret leaked into the VM, the proxy did NOT deny, and the bad create is allowed
+    leaky_env = {"LANGFUSE_SECRET_KEY": "CANARY-XYZ", "PATH": "/usr/bin"}
+    broker = _StubBroker(vm_env=leaky_env, curl=_CURL_OPEN, proxy_log="", reject_evil=False)
     res = demo.run_demo(broker, canary="CANARY-XYZ", build_id="poc-bad",
-                        secrets=[("CANARY-XYZ", "<canary>")])
+                        secrets=[("CANARY-XYZ", "<canary>")], proxy_poll_tries=1)
     assert not res["ok"] and not any(b["passed"] for b in res["beats"])
     canary_beat = res["beats"][0]
-    assert canary_beat["detail"]["leaked"] == ["<canary>"]   # flagged by placeholder, never raw value
+    assert canary_beat["detail"]["leaked"] == ["<canary>"]               # by placeholder, never raw value
+    assert canary_beat["detail"]["leaked_keys"] == ["LANGFUSE_SECRET_KEY"]  # names the offending VM var
 
 
 def test_security_demo_events_are_emitted_and_canary_redacted():
     from poc_foundry.security import demo
     events = []
     vm_env = {"HTTPS_PROXY": "http://10.0.0.2:3128"}
-    broker = _StubBroker(vm_env=vm_env, curl=(56, "000"), proxy_log=_denied_log())
+    broker = _StubBroker(vm_env=vm_env, curl=_CURL_DENIED, proxy_log=_denied_log())
     demo.run_demo(broker, canary="CANARY-XYZ", build_id="poc-ev", emit=events.append,
-                  secrets=[("CANARY-XYZ", "<canary>")])
+                  secrets=[("CANARY-XYZ", "<canary>")], proxy_poll_tries=1)
     beat_events = [e for e in events if e["type"] == "beat"]
     assert len(beat_events) == 3 and all(e["build_id"] == "poc-ev" for e in beat_events)
     assert "CANARY-XYZ" not in json.dumps(events)   # the canary never reaches a shared event
@@ -295,9 +314,11 @@ def test_demo_pure_analyzers():
     # env parse: only plausible NAME=value lines become keys
     env = demo.parse_env("FOO=bar\nPATH=/usr/bin\n  continuation-line\n12BAD=x")
     assert env == {"FOO": "bar", "PATH": "/usr/bin"}
-    # egress: denied-in-log + blocked curl = pass; a 2xx through an open path = fail
-    assert demo.analyze_egress(56, "000", egress_denied(_denied_log()))["passed"]
-    assert not demo.analyze_egress(0, "200", egress_denied(""))["passed"]
+    # egress: blocked + TCP_DENIED in the log = pass; a 2xx through an open path = fail
+    assert demo.analyze_egress(_CURL_DENIED, egress_denied(_denied_log()))["passed"]
+    assert not demo.analyze_egress(_CURL_OPEN, egress_denied(""))["passed"]
+    # blocked + curl's own 403-from-proxy is denial evidence even with NO proxy-log entry (flush lag)
+    assert demo.analyze_egress(_CURL_DENIED, False)["passed"]
     # rejection: needs BOTH the raise and an audit entry
     audited = [audit.make_entry("x", "rejected", "create", reason="bad image")]
     assert demo.analyze_rejection(True, "bad image", audited)["passed"]

@@ -1271,3 +1271,24 @@ The web surface for #32 (design §5.12), built on the M3 event seam — zero new
   the streamed `summary`/`detail`. `frontend/` rebuilt on the dev box (npm present), `dist/` recommitted.
 - **Local:** `run_spine_tests.py` **150** (+1 `RunManager.security_demo` streams beats + finishes). The
   live render is the server demo (same `core.security_demo` the CLI proved).
+
+## #32c — M4 S2c fixes from the first live run (sacrificial-token Finding-0 + curl-side egress evidence) (2026-06-25)
+
+The first server run of `demo-security` proved the harness end-to-end and surfaced two **evidence** bugs
+(not security failures) — beat-3 passed; beats 1–2 needed honest fixes:
+- **Beat 1 false positive (sacrificial token).** `scan_sandbox_env` flagged `<redacted-key>` in the VM —
+  it was the `PF_SANDBOX_VLLM_KEY` *sacrificial* token, which is INTENDED in the VM (DECISIONS #31:
+  sacrificial = buys inference, nothing else). `collect_secrets()` classifies it as a key, so Finding-0
+  flagged the one secret that's supposed to be there. **Fix:** `run_demo` reads the broker's sacrificial
+  token (`broker.vllm_key`/`_vllm_key`) and EXCLUDES its value from the must-be-absent set. A real leak
+  (Langfuse/GitHub/path) still fails. `scan_sandbox_env` now also returns `leaked_keys` (the VM VAR NAMES
+  that held a secret — safe to show, never the value) so a genuine leak is diagnosable in one round-trip,
+  and matches only the env VALUE side (not the `VAR=` name).
+- **Beat 2 missing evidence (proxy-log flush lag).** Egress WAS contained (curl blocked, http 000) but
+  `TCP_DENIED` wasn't in `docker logs` yet (squid's file→stdout tail lags the immediate read). **Fix:**
+  the probe is now `curl -sS … 2>&1; echo PF_EXIT=$?` so curl's OWN "CONNECT tunnel failed, response 403"
+  is captured in-band — that 403-from-proxy is itself affirmative denial evidence; PASS = blocked AND
+  (`TCP_DENIED` in the log OR curl's proxy-403). `run_demo` also POLLS `proxy_log` a few times to let the
+  log flush. The FAIL summary no longer falsely says "the VM reached the host" when curl was blocked.
+- **Local:** `run_spine_tests.py` **151** (+ the sacrificial-exclusion test; analyzer + leaked_keys
+  assertions updated). Web tab unchanged (renders the new detail fields generically — no rebuild).

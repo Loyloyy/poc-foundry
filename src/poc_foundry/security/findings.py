@@ -14,9 +14,11 @@ from dataclasses import dataclass, field
 @dataclass
 class SecretScan:
     """Result of scanning a sandbox env for orchestrator secrets. ``leaked`` lists the PLACEHOLDERS of any
-    secret found in the VM (never the raw value — honest reporting stays clean). ``ok`` ⇔ nothing leaked."""
+    secret found in the VM (never the raw value — honest reporting stays clean); ``leaked_keys`` lists the
+    VM env VAR NAMES that held one (safe to show, aids diagnosis). ``ok`` ⇔ nothing leaked."""
 
     leaked: list[str] = field(default_factory=list)
+    leaked_keys: list[str] = field(default_factory=list)
     scanned_keys: int = 0
     secret_count: int = 0
 
@@ -30,16 +32,23 @@ def scan_sandbox_env(env: dict, secrets=None) -> SecretScan:
     (``scrub.collect_secrets`` → ``[(value, placeholder)]``). Returns a :class:`SecretScan`; an empty
     ``leaked`` is the Finding-0 pass — the real key/Langfuse secret/model paths never reached the VM.
 
-    Reports the leaked secret's PLACEHOLDER, not its value (the scan output is itself shareable)."""
+    Matches a secret only against the env VALUE side (not the ``VAR=`` name), and reports the leaked
+    secret's PLACEHOLDER + the VAR NAME that held it — never the raw value (the scan output is shareable)."""
     if secrets is None:
         from poc_foundry import scrub
         secrets = scrub.collect_secrets()
-    blob = "\n".join(f"{k}={v}" for k, v in (env or {}).items())
-    leaked = []
-    for value, placeholder in secrets:
-        if value and value in blob and placeholder not in leaked:
-            leaked.append(placeholder)
-    return SecretScan(leaked=leaked, scanned_keys=len(env or {}), secret_count=len(secrets))
+    leaked: list[str] = []
+    leaked_keys: list[str] = []
+    for k, v in (env or {}).items():
+        sval = str(v)
+        for value, placeholder in secrets:
+            if value and value in sval:
+                if placeholder not in leaked:
+                    leaked.append(placeholder)
+                if k not in leaked_keys:
+                    leaked_keys.append(k)
+    return SecretScan(leaked=leaked, leaked_keys=leaked_keys,
+                      scanned_keys=len(env or {}), secret_count=len(secrets))
 
 
 def egress_denied(proxy_log: str) -> bool:
