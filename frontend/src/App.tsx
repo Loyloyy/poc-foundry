@@ -7,6 +7,7 @@ import SliceBoard from "./components/SliceBoard";
 import LogPanel from "./components/LogPanel";
 import DocsPanel from "./components/DocsPanel";
 import DescopePanel from "./components/DescopePanel";
+import SecurityDemo from "./components/SecurityDemo";
 
 const POLL_MS = 2500;
 const RESUMABLE = new Set(["stopped", "incomplete"]);
@@ -20,6 +21,7 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [stopping, setStopping] = useState(false);
   const [coderRole, setCoderRole] = useState("");
+  const [view, setView] = useState<"builds" | "security">("builds");
   const prevActive = useRef("");
 
   const activeId = status.busy ? status.build_id || live.buildId : "";
@@ -123,7 +125,21 @@ export default function App() {
       />
 
       <main className="main">
-        {!selectedId ? (
+        <nav className="tabs">
+          <button className={view === "builds" ? "tab active" : "tab"} onClick={() => setView("builds")}>
+            Builds
+          </button>
+          <button
+            className={view === "security" ? "tab active" : "tab"}
+            onClick={() => setView("security")}
+          >
+            Security demo
+          </button>
+        </nav>
+
+        {view === "security" ? (
+          <SecurityDemo live={live} status={status} />
+        ) : !selectedId ? (
           <div className="empty">
             <h2>Watch a build</h2>
             <p className="muted">

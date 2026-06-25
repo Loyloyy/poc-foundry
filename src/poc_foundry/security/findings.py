@@ -40,3 +40,11 @@ def scan_sandbox_env(env: dict, secrets=None) -> SecretScan:
         if value and value in blob and placeholder not in leaked:
             leaked.append(placeholder)
     return SecretScan(leaked=leaked, scanned_keys=len(env or {}), secret_count=len(secrets))
+
+
+def egress_denied(proxy_log: str) -> bool:
+    """True if the egress proxy's CONNECT log shows a DENIED tunnel (squid ``TCP_DENIED``) — the
+    affirmative evidence that a sandbox VM's attempt to reach a non-allowlisted host was blocked at the
+    sole exit (design §5.2 egress containment). Pure → the demo's PASS/FAIL is fakes-testable; the live
+    proxy log comes from ``broker.proxy_log()`` over the tunnel."""
+    return "TCP_DENIED" in (proxy_log or "")

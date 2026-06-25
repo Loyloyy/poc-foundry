@@ -579,6 +579,47 @@ def template_ci(template_names: list[str] | None = None, *, runtime: str | None 
     return rows
 
 
+def security_demo(*, builds_dir: str | Path | None = None, runtime: str | None = None,
+                  event_sink=None, canary: str | None = None) -> dict:
+    """Run the 3 live security beats (design §5.2 / §5.12) against a freshly provisioned broker:
+    canary/Finding-0 · egress containment · broker rejection. Headless (rule #5) — CLI + web call this.
+    Returns ``{"build_id", "ok", "beats": [...]}``.
+
+    ``canary`` defaults to ``PF_DEMO_CANARY`` — a planted stand-in secret the demo proves the VM never
+    sees (DECISIONS #31: the on-prem vLLM is keyless, so the canary is how we demonstrate the real
+    control honestly without claiming a key the box doesn't have). ``event_sink`` (M3 §5.12) streams a
+    ``beat`` event per beat to the web tab; ``None`` on the CLI path."""
+    from datetime import datetime, timezone
+
+    from poc_foundry import events as _ev
+    from poc_foundry import tracing
+    from poc_foundry.security import demo as _demo
+
+    cfg = load_config(builds_dir)
+    canary = (canary if canary is not None else os.environ.get("PF_DEMO_CANARY", "")).strip()
+    demo_id = "security-demo-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    broker = _make_broker(cfg, demo_id, runtime)
+
+    if event_sink is not None:
+        _ev.emit(event_sink, _ev.make_event("start", demo_id, kind="security-demo"))
+
+    result = {"build_id": demo_id, "ok": False, "beats": []}
+    try:
+        with tracing.build(demo_id, tags=["security-demo"]):
+            broker.provision()
+            try:
+                result = _demo.run_demo(broker, cfg, canary=canary, emit=event_sink, build_id=demo_id)
+            finally:
+                broker.destroy()
+    finally:
+        tracing.flush()
+
+    if event_sink is not None:
+        _ev.emit(event_sink, _ev.make_event("end", demo_id, status=("ok" if result["ok"] else "failed"),
+                                            ok=result["ok"], beats=result["beats"]))
+    return result
+
+
 def clean_build(build_id: str, builds_dir: str | Path | None = None,
                 *, workspaces: bool = True) -> list[str]:
     """Remove a build's emitted folder (and its local-disk workspace/staging). Returns removed paths."""

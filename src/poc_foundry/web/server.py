@@ -190,6 +190,23 @@ def refine_build(build_id: str, req: RefineReq | None = None):
     return JSONResponse(cur, status_code=202)
 
 
+class SecurityDemoReq(BaseModel):
+    canary: str | None = None    # planted secret to prove absent from the VM (default PF_DEMO_CANARY)
+    runtime: str | None = None
+
+
+@app.post("/api/security-demo")
+def security_demo(req: SecurityDemoReq | None = None):
+    """Run the 3 live security beats (M4 S2c) in the single slot; the SPA tab renders the streamed
+    ``beat`` events live (blocked/denied/audited)."""
+    req = req or SecurityDemoReq()
+    try:
+        cur = manager.security_demo(canary=req.canary, runtime=req.runtime)
+    except RunBusy as e:
+        raise HTTPException(409, str(e))
+    return JSONResponse(cur, status_code=202)
+
+
 @app.post("/api/builds/{build_id}/stop")
 def stop_build(build_id: str) -> dict:
     return manager.stop(build_id)

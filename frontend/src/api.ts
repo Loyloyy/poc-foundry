@@ -62,6 +62,15 @@ export const api = {
 
   // No-id stop: the single-slot RunManager stops whatever is running (the Stop button).
   stop: () => fetch("/api/stop", { method: "POST" }).then((r) => json<{ stopped: boolean }>(r)),
+
+  // Run the 3 live security beats (M4 S2c) in the single slot; the SPA renders streamed `beat` events.
+  // `canary` is a planted secret proven absent from the VM (empty = the server's PF_DEMO_CANARY).
+  securityDemo: (canary?: string) =>
+    fetch("/api/security-demo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ canary: canary || null }),
+    }).then((r) => json<RunStatus>(r)),
 };
 
 export const eventsUrl = "/api/events";

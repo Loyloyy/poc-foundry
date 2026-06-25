@@ -1218,3 +1218,56 @@ This makes the key-proxy and Finding-0 the SAME demonstration: "the real secret 
   per-build token generation + VM model-base_url injection (OPT-IN via `PF_KEYPROXY_*`; normal builds
   unchanged); `core.security_demo()` + CLI `demo-security` (3 beats: canary/Finding-0 · egress containment ·
   broker rejection); the Security-Demo web tab (S2d).
+
+## #32 — M4 S2c: `demo-security` CLI + the 3 live red-team beats (2026-06-25)
+
+The honest demonstration of the platform's defense-in-depth (DECISIONS #30/#31; design §5.2/§5.12).
+One headless entrypoint runs three beats against a REAL provisioned broker — each proves one control
+with deterministic evidence, not a claim (rules #9/#28).
+
+- **Headless (rule #5).** `core.security_demo(*, builds_dir, runtime, event_sink, canary)` builds the
+  per-build broker via `_make_broker` (so it rides the SAME out-of-process daemon path as a real build —
+  the rejection beat hits the live rule-#8 enforcer), provisions it, runs `security/demo.run_demo`, and
+  reaps it. Returns `{"build_id", "ok", "beats":[...]}`. CLI `demo-security [--canary V]`; the web tab
+  (S2d) calls the same core through `RunManager`.
+- **`security/demo.py` = pure analyzers + thin orchestration.** The PASS/FAIL logic (`parse_env`,
+  `analyze_canary`/`analyze_egress`/`analyze_rejection`) is stdlib-only → fakes-testable WITHOUT Docker;
+  `run_demo` only wires a live broker to them (create VM → `exec` → analyze → destroy). Same discipline
+  as every gate: the catch is provable locally, the live VM run is the server demo.
+- **The 3 beats.**
+  1. **canary / Finding-0** — one fresh VM, `exec("env")` → `parse_env` → `findings.scan_sandbox_env`
+     against `scrub.collect_secrets()` (the orchestrator's real Langfuse/GitHub/path secrets) PLUS the
+     planted `canary`. PASS = nothing leaked. The broker only ever injects proxy + sacrificial token +
+     sibling IPs into a VM, so this is the CHECKED form of that claim. Leaks are reported by PLACEHOLDER.
+  2. **egress containment** — the same VM `exec`s `curl … https://example.com` (a non-allowlisted host);
+     PASS = `findings.egress_denied(proxy_log)` sees squid `TCP_DENIED` AND the curl was blocked (no 2xx).
+     New pure `findings.egress_denied`.
+  3. **broker rejection** — `broker.create(image='attacker/evil:latest', …)`; PASS = it raises
+     `BrokerInvariantError` (rule #8) AND a `rejected/create` entry is in `broker.audit()` (S2a, durable).
+- **Canary handling (DECISIONS #31).** Defaults to `PF_DEMO_CANARY`; it is NEVER injected into a VM (the
+  whole point — it lives orchestrator-side only) and is REDACTED from every shared beat output/event
+  (`_redact_beat`, on top of the placeholder-only analyzers). On a keyless box the canary is how we prove
+  "the real secret never reaches the sandbox" without claiming a key the box doesn't have.
+- **Event seam (M3).** `run_demo` emits a `make_event("beat", …)` per beat; `security_demo` brackets it
+  with `start`/`end`. `event_sink=None` on the CLI path (headless contract unchanged).
+- **Local:** `run_spine_tests.py` **149** (+4 in `test_m4_security.py`: all-3-pass with VM reaped,
+  all-3-fail on leak/open-egress/unblocked-create, events emitted + canary redacted, the pure analyzers).
+- **Acceptance (server, pending):** `cli demo-security` runs all 3 beats GREEN over the tunnel — the
+  canary + real secrets absent from the VM, an egress attempt `TCP_DENIED` in the proxy log, the bad
+  create rejected + audited. Needs the broker daemon up with `PF_BROKER_AUDIT_LOG` set (already on the
+  server from S2a). **Remaining:** the Security-Demo web tab (S2d).
+
+## #32b — M4 S2d: the Security-Demo web tab (2026-06-25)
+
+The web surface for #32 (design §5.12), built on the M3 event seam — zero new pipeline logic (rule #5).
+- **Single-slot, reused stream.** New `RunManager.security_demo(**kw)` launches `core.security_demo`
+  on the one slot via a `_run_demo` runner (the demo returns a result DICT + publishes its own
+  `start`/`beat`/`end`, unlike a build's `(report, artifact)`); a concurrent run raises `RunBusy` → 409.
+  `POST /api/security-demo` (`SecurityDemoReq{canary,runtime}`) is the route. `RunManager._launch` grew a
+  `runner=` param so build/resume/refine are untouched.
+- **SPA.** A Builds / Security-demo tab switch in `App.tsx`; the Security tab (`components/SecurityDemo.tsx`)
+  POSTs and renders the 3 beats live from the global SSE — `useEventStream` gained `beats[]` (reset on
+  `start`, appended on each `beat`). Each beat card shows PASS/FAIL + the control's plain-English blurb +
+  the streamed `summary`/`detail`. `frontend/` rebuilt on the dev box (npm present), `dist/` recommitted.
+- **Local:** `run_spine_tests.py` **150** (+1 `RunManager.security_demo` streams beats + finishes). The
+  live render is the server demo (same `core.security_demo` the CLI proved).

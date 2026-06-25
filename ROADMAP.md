@@ -372,12 +372,29 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
       reports by PLACEHOLDER). Local: `run_spine_tests.py` (**145**, +6). DECISIONS #31.
       **REMAINING (server-bound):** (1) key-proxy CONTAINER + broker provisions it per-build on the
       internal net + generates a per-build rotatable sacrificial token + injects the model base_url into
-      the VM (OPT-IN via `PF_KEYPROXY_*`; normal builds unchanged); (2) `core.security_demo()` + CLI
-      `demo-security` running the **3 beats** — canary/Finding-0, egress containment, broker rejection;
-      (3) the **Security-Demo web tab** (S2d, reuses the event seam). The vLLM key-proxy-over-vLLM is
+      the VM (OPT-IN via `PF_KEYPROXY_*`; normal builds unchanged); the vLLM key-proxy-over-vLLM is
       NOT applicable (keyless) and is labelled as such; both endpoints (`:8008` GLM main, `:8770` gpt-oss)
       are reachable but only `:8008` is in the sandbox allowlist (correct — critic runs orchestrator-side).
-- [ ] JS template (if npm granted) · multi-service composition · eval harness v2 · `docs/PLATFORM.md`
+- [x] **S2c `demo-security` CLI + 3 live beats** (2026-06-25, local green — server-validate pending) —
+      `core.security_demo()` (headless, rule #5) provisions a broker and runs `security/demo.run_demo`:
+      beat-1 **canary/Finding-0** (`exec("env")` → `parse_env` → `findings.scan_sandbox_env` against
+      `scrub.collect_secrets()` + the planted canary; PASS = nothing leaked), beat-2 **egress containment**
+      (`exec` a curl to a non-allowlisted host → `findings.egress_denied(proxy_log)`; PASS = `TCP_DENIED`
+      + blocked), beat-3 **broker rejection** (an off-allowlist `create` raises `BrokerInvariantError` +
+      lands in `broker.audit()`). Pure analyzers fakes-tested; canary redacted from every shared output;
+      a `beat` event per beat for the web tab. CLI `demo-security [--canary]`. Local:
+      `run_spine_tests.py` (**149**, +4). DECISIONS #32. Canary via `PF_DEMO_CANARY`.
+- [x] **S2d Security-Demo web tab** (2026-06-25, local green — server-validate pending) — a Builds /
+      Security-demo tab switch (`App.tsx`); the Security tab POSTs `/api/security-demo` (→ new
+      `RunManager.security_demo`, single slot, `_run_demo` runner) and renders the 3 beats live from the
+      streamed `beat` events (reuses the M3 SSE seam; `useEventStream` gains `beats[]`). `frontend/`
+      rebuilt on the dev box, `dist/` recommitted. Local: `run_spine_tests.py` (**150**, +1
+      RunManager.security_demo fakes test). DECISIONS #32.
+- [x] **S3 `docs/PLATFORM.md`** (2026-06-25) — the workshop teaching artifact: poc-foundry as a worked
+      example of the wiki's patterns (Vertical-Slices, Validation-Contract, Verifiers-Rule,
+      Harness-Engineering, Doom-Loop avoidance, Skills/ACE, defense-in-depth, observability/evals), each
+      pattern cited to a real module. Generic (rule #1).
+- [ ] JS template (if npm granted) · multi-service composition · eval harness v2
 - [x] **S2a daemon-side invariant-rejection audit log** (2026-06-25, ✅ SERVER-VALIDATED) — the broker
       (rule-#8 enforcer) records every rejected `create*`/`create_service`/`provision` (+ provision/destroy
       lifecycle) APPEND-ONLY via `sandbox/audit.py` to `PF_BROKER_AUDIT_LOG` (the daemon owns the file on

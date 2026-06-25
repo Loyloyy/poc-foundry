@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { eventsUrl } from "./api";
-import type { EndEvent, ErrorEvent, LogEvent, NodeEvent, Snapshot, StartEvent } from "./types";
+import type {
+  BeatEvent,
+  BeatResult,
+  EndEvent,
+  ErrorEvent,
+  LogEvent,
+  NodeEvent,
+  Snapshot,
+  StartEvent,
+} from "./types";
 
 // The live state accumulated from the single-slot /api/events SSE stream. Because the backend is
 // single-slot (one build at a time) the stream is GLOBAL — we subscribe once on mount and the server
@@ -13,6 +22,7 @@ export interface LiveState {
   node: string; // last node entered
   snapshot: Snapshot | null; // latest slice-board snapshot
   log: string[];
+  beats: BeatResult[]; // security-demo: one per beat as they stream in
   terminal: EndEvent | null;
   error: string | null;
 }
@@ -25,6 +35,7 @@ const EMPTY: LiveState = {
   node: "",
   snapshot: null,
   log: [],
+  beats: [],
   terminal: null,
   error: null,
 };
@@ -75,6 +86,17 @@ export function useEventStream(): LiveState {
         ...s,
         buildId: d.build_id || s.buildId,
         log: cap([...s.log, d.line], LOG_CAP),
+      }))
+    );
+
+    on("beat", (d: BeatEvent) =>
+      setState((s) => ({
+        ...s,
+        buildId: d.build_id || s.buildId,
+        beats: [
+          ...s.beats,
+          { beat: d.beat, passed: d.passed, summary: d.summary, detail: d.detail },
+        ],
       }))
     );
 

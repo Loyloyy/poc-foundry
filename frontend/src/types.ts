@@ -32,7 +32,7 @@ export interface Snapshot {
 export type StartEvent = {
   type: "start";
   build_id: string;
-  kind: "build" | "resume" | "refine";
+  kind: "build" | "resume" | "refine" | "security-demo";
   source?: string;
   template?: string;
   driver?: string;
@@ -44,8 +44,25 @@ export type EndEvent = {
   type: "end";
   build_id: string;
   status: string;
-  artifact_id: string;
-  demonstrates: string;
+  artifact_id?: string;
+  demonstrates?: string;
+  ok?: boolean; // security-demo terminal flag
+};
+
+// ── security demo (M4 S2c/S2d) — one beat per defense-in-depth control ─────────
+export interface BeatResult {
+  beat: string;
+  passed: boolean;
+  summary: string;
+  detail: Record<string, any>;
+}
+export type BeatEvent = {
+  type: "beat";
+  build_id: string;
+  beat: string;
+  passed: boolean;
+  summary: string;
+  detail: Record<string, any>;
 };
 export type ErrorEvent = { type: "error"; build_id: string; error: string };
 

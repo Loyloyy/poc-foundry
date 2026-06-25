@@ -51,13 +51,20 @@ def _default_stop(build_id):
     return request_stop_build(build_id)
 
 
+def _default_security_demo(*, event_sink, **kw):
+    from poc_foundry.core import security_demo
+    return security_demo(event_sink=event_sink, **kw)
+
+
 class RunManager:
     def __init__(self, *, build_fn: Callable | None = None, resume_fn: Callable | None = None,
-                 stop_fn: Callable | None = None, refine_fn: Callable | None = None):
+                 stop_fn: Callable | None = None, refine_fn: Callable | None = None,
+                 security_demo_fn: Callable | None = None):
         self._build_fn = build_fn or _default_build
         self._resume_fn = resume_fn or _default_resume
         self._refine_fn = refine_fn or _default_refine
         self._stop_fn = stop_fn or _default_stop
+        self._security_demo_fn = security_demo_fn or _default_security_demo
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._subscribers: list[Queue] = []
@@ -87,7 +94,15 @@ class RunManager:
                              lambda sink: self._refine_fn(build_id, event_sink=sink, **kw),
                              {"kind": "refine", "build_id": build_id})
 
-    def _launch(self, kind: str, call: Callable[[Callable], Any], summary: dict) -> dict:
+    def security_demo(self, **kw) -> dict:
+        """Run the 3 live security beats (M4 S2c) in the single slot, streaming a ``beat`` event each.
+        Raises ``RunBusy`` if a run is in progress. The core publishes ``start``/``beat``/``end`` itself."""
+        return self._launch("security-demo",
+                            lambda sink: self._security_demo_fn(event_sink=sink, **kw),
+                            {"kind": "security-demo"}, runner=self._run_demo)
+
+    def _launch(self, kind: str, call: Callable[[Callable], Any], summary: dict,
+                runner: Callable | None = None) -> dict:
         with self._lock:
             if self.busy:
                 raise RunBusy(f"a {self._current.get('kind') if self._current else 'build'} is already "
@@ -96,7 +111,7 @@ class RunManager:
             self._replay = []
             self._current = {"state": "running", "build_id": summary.get("build_id", ""),
                              "phase": "", "status": "", "error": "", **summary}
-            self._thread = threading.Thread(target=self._run, args=(call,), name=f"pf-{kind}",
+            self._thread = threading.Thread(target=runner or self._run, args=(call,), name=f"pf-{kind}",
                                             daemon=True)
             self._thread.start()
             return dict(self._current)
@@ -113,6 +128,23 @@ class RunManager:
                                          self._current.get("build_id", ""))
             self._publish(make_event("end", aid, status=status, artifact_id=aid, demonstrates=demo))
         except Exception as e:  # noqa: BLE001 — surface the failure to the UI; the build folder has the forensic artifact
+            with self._lock:
+                bid = self._current.get("build_id", "") if self._current else ""
+                if self._current is not None:
+                    self._current.update(state="error", error=f"{type(e).__name__}: {e}")
+            self._publish(make_event("error", bid, error=f"{type(e).__name__}: {e}"))
+
+    def _run_demo(self, call: Callable[[Callable], Any]) -> None:
+        """Runner for ``security_demo`` — it returns a result DICT (not ``(report, artifact)``) and
+        publishes its own ``start``/``beat``/``end`` events through the sink, so this only tracks the
+        slot's terminal state."""
+        try:
+            result = call(self._publish)
+            with self._lock:
+                if self._current is not None:
+                    self._current.update(state="finished", build_id=result.get("build_id", ""),
+                                         status="ok" if result.get("ok") else "failed")
+        except Exception as e:  # noqa: BLE001 — surface the failure to the UI
             with self._lock:
                 bid = self._current.get("build_id", "") if self._current else ""
                 if self._current is not None:

@@ -168,3 +168,28 @@ input, select {
 .markdown table { border-collapse: collapse; }
 .markdown th, .markdown td { border: 1px solid var(--border); padding: 6px 10px; }
 .markdown a { color: var(--link); }
+
+/* ── tabs + security demo (M4 S2d) ───────────────────────────────────────────── */
+.tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+.tab {
+  background: none; color: var(--muted); border: none; border-bottom: 2px solid transparent;
+  border-radius: 0; padding: 8px 14px; cursor: pointer; font-size: 0.92rem;
+}
+.tab:hover { color: var(--fg); }
+.tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+
+.beats { display: flex; flex-direction: column; gap: 14px; margin-top: 8px; }
+.beat-card {
+  background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--border);
+  border-radius: 10px; padding: 14px 16px;
+}
+.beat-card.pass { border-left-color: var(--ok); }
+.beat-card.fail { border-left-color: var(--bad); }
+.beat-card.pending { border-left-color: var(--info); }
+.beat-head { display: flex; align-items: center; gap: 10px; }
+.beat-head h3 { margin: 0; font-size: 1rem; }
+.beat-summary { margin: 8px 0 4px; font-weight: 500; }
+.beat-detail {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+  margin: 6px 0 0; font-size: 0.82rem; overflow-x: auto; color: var(--muted);
+}

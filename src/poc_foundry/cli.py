@@ -8,6 +8,7 @@
     python -m poc_foundry.cli clean <build-id>
     python -m poc_foundry.cli eval [--fixture PATH ...] [--template NAME] [--min-score F] [--json PATH]
     python -m poc_foundry.cli template-ci [--template NAME ...] [--preflight]
+    python -m poc_foundry.cli demo-security [--canary VALUE]
 
 Everything delegates to ``poc_foundry.core``. Argparse only; no heavy imports at module load.
 """
@@ -129,6 +130,18 @@ def _cmd_eval(args) -> int:
     return 1 if failed else 0
 
 
+def _cmd_demo_security(args) -> int:
+    from poc_foundry.core import security_demo
+
+    result = security_demo(runtime=args.runtime, canary=args.canary)
+    print(f"\nSECURITY DEMO {result['build_id']}")
+    for b in result["beats"]:
+        print(f"  [{'PASS' if b['passed'] else 'FAIL'}] {b['beat']}: {b['summary']}")
+    passed = sum(1 for b in result["beats"] if b["passed"])
+    print(f"\nSECURITY-DEMO: {passed}/{len(result['beats'])} beat(s) GREEN")
+    return 0 if result["ok"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="poc-foundry", description="Stage-3 PoC foundry (headless core)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -180,6 +193,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="dockerless static check only (resolves + services pinned; no VM)")
     t.add_argument("--runtime", default=None, help="sandbox runtime (kata|runc); default kata")
     t.set_defaults(func=_cmd_template_ci)
+
+    ds = sub.add_parser("demo-security",
+                        help="run the 3 live security beats (canary/Finding-0, egress, broker rejection)")
+    ds.add_argument("--canary", default=None,
+                    help="planted secret to prove absent from the VM (default PF_DEMO_CANARY)")
+    ds.add_argument("--runtime", default=None, help="sandbox runtime (kata|runc); default kata")
+    ds.set_defaults(func=_cmd_demo_security)
 
     args = p.parse_args(argv)
     return args.func(args)

@@ -190,3 +190,144 @@ def test_broker_vm_env_carries_no_orchestrator_secret():
                                      ("per-build-sacrificial-xyz", "<sacrificial>")])
     # the sacrificial token is INTENDED in the VM (it's sacrificial); the REAL key must be absent.
     assert "<real-model-key>" not in scan.leaked
+
+
+# ── S2c: the demo-security 3-beat analysis (PASS/FAIL logic, no Docker) ─────────
+class _StubExec:
+    def __init__(self, rc, out):
+        self.rc, self.stdout, self.stderr = rc, out, ""
+
+    @property
+    def combined(self):
+        return self.stdout
+
+    @property
+    def ok(self):
+        return self.rc == 0
+
+
+class _StubSandbox:
+    def __init__(self, broker, name):
+        self._b, self.name = broker, name
+
+    def exec(self, cmd, *, timeout_s=600):
+        return self._b._exec(cmd)
+
+    def destroy(self):
+        self._b.destroyed.append(self.name)
+
+
+class _StubBroker:
+    """A scripted broker for run_demo: serves a VM env dump + a curl outcome, a proxy log, and either
+    rejects (default) or allows an off-allowlist create — so each beat's PASS/FAIL is exercised."""
+
+    def __init__(self, *, vm_env, curl, proxy_log, reject_evil=True):
+        self._vm_env, self._curl, self._proxy_log = vm_env, curl, proxy_log
+        self._reject_evil = reject_evil
+        self._audit, self.created, self.destroyed = [], [], []
+
+    def create(self, *, mounts, caps=(), name="sbx", image=None, env_extra=None):
+        if image and image != "poc-foundry-sandbox":
+            if self._reject_evil:
+                self._audit.append(audit.make_entry("poc-demo", "rejected", "create",
+                                                    reason=f"image {image!r} not allowlisted",
+                                                    detail={"image": image}))
+                raise BrokerInvariantError(f"image {image!r} not allowlisted (rule #8)")
+        self.created.append(name)
+        return _StubSandbox(self, name)
+
+    def _exec(self, cmd):
+        if cmd.strip() == "env":
+            return _StubExec(0, "\n".join(f"{k}={v}" for k, v in self._vm_env.items()))
+        return _StubExec(*self._curl)   # the egress probe → (rc, http_code text)
+
+    def proxy_log(self, *, tail=200):
+        return self._proxy_log
+
+    def audit(self):
+        return list(self._audit)
+
+
+def _denied_log(host="example.com"):
+    return f"1700000000.1 5 10.0.0.9 TCP_DENIED/403 0 CONNECT {host}:443 - HIER_NONE/- -\n"
+
+
+def test_security_demo_all_three_beats_pass():
+    from poc_foundry.security import demo
+    vm_env = {"HTTPS_PROXY": "http://10.0.0.2:3128", "PF_SANDBOX_VLLM_KEY": "not-needed",
+              "PATH": "/usr/local/bin:/usr/bin"}
+    broker = _StubBroker(vm_env=vm_env, curl=(56, "000"), proxy_log=_denied_log())
+    res = demo.run_demo(broker, canary="CANARY-XYZ", build_id="poc-demo",
+                        secrets=[("CANARY-XYZ", "<canary>")])
+    assert res["ok"] and len(res["beats"]) == 3 and all(b["passed"] for b in res["beats"])
+    assert [b["beat"] for b in res["beats"]] == ["canary / Finding-0", "egress containment",
+                                                 "broker rejection"]
+    assert "secdemo" in broker.created and broker.destroyed   # the demo VM was reaped
+
+
+def test_security_demo_beats_fail_on_leak_open_egress_unblocked_create():
+    from poc_foundry.security import demo
+    # the canary leaked into the VM, the proxy did NOT deny (no TCP_DENIED), and the bad create is allowed
+    leaky_env = {"OPENAI_API_KEY": "CANARY-XYZ", "PATH": "/usr/bin"}
+    broker = _StubBroker(vm_env=leaky_env, curl=(0, "200"), proxy_log="", reject_evil=False)
+    res = demo.run_demo(broker, canary="CANARY-XYZ", build_id="poc-bad",
+                        secrets=[("CANARY-XYZ", "<canary>")])
+    assert not res["ok"] and not any(b["passed"] for b in res["beats"])
+    canary_beat = res["beats"][0]
+    assert canary_beat["detail"]["leaked"] == ["<canary>"]   # flagged by placeholder, never raw value
+
+
+def test_security_demo_events_are_emitted_and_canary_redacted():
+    from poc_foundry.security import demo
+    events = []
+    vm_env = {"HTTPS_PROXY": "http://10.0.0.2:3128"}
+    broker = _StubBroker(vm_env=vm_env, curl=(56, "000"), proxy_log=_denied_log())
+    demo.run_demo(broker, canary="CANARY-XYZ", build_id="poc-ev", emit=events.append,
+                  secrets=[("CANARY-XYZ", "<canary>")])
+    beat_events = [e for e in events if e["type"] == "beat"]
+    assert len(beat_events) == 3 and all(e["build_id"] == "poc-ev" for e in beat_events)
+    assert "CANARY-XYZ" not in json.dumps(events)   # the canary never reaches a shared event
+
+
+def test_demo_pure_analyzers():
+    from poc_foundry.security import demo
+    from poc_foundry.security.findings import egress_denied
+    # env parse: only plausible NAME=value lines become keys
+    env = demo.parse_env("FOO=bar\nPATH=/usr/bin\n  continuation-line\n12BAD=x")
+    assert env == {"FOO": "bar", "PATH": "/usr/bin"}
+    # egress: denied-in-log + blocked curl = pass; a 2xx through an open path = fail
+    assert demo.analyze_egress(56, "000", egress_denied(_denied_log()))["passed"]
+    assert not demo.analyze_egress(0, "200", egress_denied(""))["passed"]
+    # rejection: needs BOTH the raise and an audit entry
+    audited = [audit.make_entry("x", "rejected", "create", reason="bad image")]
+    assert demo.analyze_rejection(True, "bad image", audited)["passed"]
+    assert not demo.analyze_rejection(True, "bad image", [])["passed"]      # raised but not audited
+    assert not demo.analyze_rejection(False, "", audited)["passed"]         # audited but not raised
+
+
+# ── S2d: RunManager streams the security demo in the single slot ───────────────
+def test_runmanager_security_demo_streams_beats_and_finishes():
+    import threading
+    from poc_foundry.events import make_event
+    from poc_foundry.web.runmanager import RunBusy, RunManager
+
+    def fake_demo(*, event_sink, **kw):
+        event_sink(make_event("start", "security-demo-x", kind="security-demo"))
+        for name in ("canary / Finding-0", "egress containment", "broker rejection"):
+            event_sink(make_event("beat", "security-demo-x", beat=name, passed=True, summary="ok", detail={}))
+        event_sink(make_event("end", "security-demo-x", status="ok", ok=True))
+        return {"build_id": "security-demo-x", "ok": True, "beats": [{"passed": True}] * 3}
+
+    mgr = RunManager(security_demo_fn=fake_demo)
+    q = mgr.subscribe()
+    mgr.security_demo(canary="CANARY-XYZ")
+    mgr._thread.join(timeout=5)
+    drained = []
+    while not q.empty():
+        drained.append(q.get_nowait())
+    beats = [e for e in drained if e["type"] == "beat"]
+    assert len(beats) == 3 and all(b["passed"] for b in beats)
+    st = mgr.status()
+    assert st["state"] == "finished" and st["status"] == "ok" and st["build_id"] == "security-demo-x"
+    # single-slot: a concurrent run while busy would raise RunBusy (proven for builds in M3)
+    assert RunBusy is not None
