@@ -71,6 +71,18 @@ services:
       # only by the daemon). The orchestrator reads it at emit to feed security.incidents[]; the security
       # demo reads it directly as un-bypassable rule-#8 evidence.
       - PF_BROKER_AUDIT_LOG=/var/tmp/pf-broker/audit.log
+      # M4 S2b key-proxy (OPT-IN; design §5.2 / DECISIONS #31). UNSET → normal builds are byte-for-byte
+      # unchanged. When PF_KEYPROXY_UPSTREAM is set the broker provisions a per-build key-proxy: the REAL
+      # key goes ONLY to the proxy container (here), the VM gets a per-build SACRIFICIAL token + the
+      # proxy's base_url (PF_SANDBOX_MODEL_BASE_URL). Keeps a key-requiring provider's key out of the VM.
+      #   PF_KEYPROXY_UPSTREAM = the real model server ROOT, no /v1 (e.g. http://<vllm-host:port>)
+      #   PF_KEYPROXY_REAL_KEY = the real provider key — or, on the keyless vLLM, a CANARY to prove the
+      #                          mechanism (the demo shows it never reaches the VM, yet inference works).
+      # Put both in the gitignored ../.env (loaded by app + broker). The key-proxy runs the app image, so
+      # it must contain keyproxy.py → `docker compose ... build app` once. Demo: cli demo-security shows a
+      # 4th beat (right token → 200, wrong token → 401, real key absent).
+      # - PF_KEYPROXY_UPSTREAM=http://<vllm-host:port>
+      # - PF_KEYPROXY_REAL_KEY=<real-key-or-canary>
     volumes:
       - ../src:/app/src
       - ../config:/app/config

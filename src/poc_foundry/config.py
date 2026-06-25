@@ -50,6 +50,12 @@ class BuildConfig:
     sandbox_image: str
     proxy_image: str
     vllm_allow_host: str          # PF_VLLM_ALLOW_HOST — proxy's single private-host exception
+    # M4 S2b key-proxy (design §5.2; DECISIONS #31) — OPT-IN. When `keyproxy_upstream` is set the broker
+    # provisions a per-build key-proxy (the REAL model key stays orchestrator/daemon-side; the VM gets only
+    # a per-build sacrificial token + the proxy's base_url). UNSET → normal builds are byte-for-byte
+    # unchanged. The image is HARNESS-FIXED (rule #8) and added to the broker allowlist when enabled.
+    keyproxy_image: str           # PF_KEYPROXY_IMAGE — default the app image (has the keyproxy module)
+    keyproxy_upstream: str        # PF_KEYPROXY_UPSTREAM — the real model server ROOT (no /v1); "" = OFF
     default_role: str             # PF_DEFAULT_ROLE — blank role triples fall back here
     llm_timeout_s: int
     uv_cache_shared: bool         # PF_UV_CACHE_SHARED — reuse ONE uv-cache volume across builds
@@ -88,6 +94,11 @@ class BuildConfig:
     def kata_runtime(self) -> str:
         return os.environ.get("PF_SANDBOX_RUNTIME", "kata")
 
+    @property
+    def keyproxy_enabled(self) -> bool:
+        """The key-proxy is provisioned only when an upstream model endpoint is configured (opt-in)."""
+        return bool(self.keyproxy_upstream)
+
     def service_refs(self) -> set[str]:
         """`image:pinned_tag` for every fully-pinned vetted service — added to the broker allowlist."""
         out = set()
@@ -114,6 +125,8 @@ def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
         sandbox_image=os.environ.get("PF_SANDBOX_IMAGE", "poc-foundry-sandbox"),
         proxy_image=os.environ.get("PF_PROXY_IMAGE", "poc-foundry-proxy"),
         vllm_allow_host=os.environ.get("PF_VLLM_ALLOW_HOST", "").strip(),
+        keyproxy_image=os.environ.get("PF_KEYPROXY_IMAGE", "poc-foundry-app").strip() or "poc-foundry-app",
+        keyproxy_upstream=os.environ.get("PF_KEYPROXY_UPSTREAM", "").strip(),
         default_role=os.environ.get("PF_DEFAULT_ROLE", "architect").strip() or "architect",
         llm_timeout_s=_int_env("PF_LLM_TIMEOUT_S", 300),
         uv_cache_shared=os.environ.get("PF_UV_CACHE_SHARED", "").strip().lower() in ("1", "true", "yes"),

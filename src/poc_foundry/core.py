@@ -38,6 +38,8 @@ def _make_broker(cfg, build_id: str, runtime: str | None):
     docker.sock, so the orchestrator never mounts the socket. Unset → the in-process ``Broker``
     (the default; unchanged proven path)."""
     allowed = {cfg.sandbox_image, cfg.proxy_image} | cfg.service_refs()   # vetted siblings (image:tag)
+    if cfg.keyproxy_enabled:                       # M4 S2b: the key-proxy image is harness-fixed (rule #8)
+        allowed.add(cfg.keyproxy_image)
     vllm_key = os.environ.get("PF_SANDBOX_VLLM_KEY", "not-needed")
     sock = os.environ.get("PF_BROKER_SOCKET", "").strip()
     if sock:

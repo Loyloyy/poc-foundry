@@ -154,6 +154,15 @@ class Broker:
         self._uv_shared = bool(getattr(cfg, "uv_cache_shared", False))
         self.uv_volume = "pf-uvcache-shared" if self._uv_shared else f"pf-{short}-uvcache"
         self.proxy_url: str | None = None
+        # M4 S2b key-proxy (OPT-IN; design §5.2 / DECISIONS #31). When cfg.keyproxy_upstream is set the
+        # broker provisions a per-build key-proxy: the REAL key (read from env, daemon-side) goes ONLY to
+        # the proxy container; the VM gets a per-build rotatable SACRIFICIAL token + the proxy's base_url.
+        # UNSET → keyproxy_url stays None and every path below is byte-for-byte the unchanged build path.
+        self._keyproxy_upstream = (getattr(cfg, "keyproxy_upstream", "") or "").strip()
+        self._keyproxy_image = (getattr(cfg, "keyproxy_image", "poc-foundry-app") or "poc-foundry-app")
+        self._keyproxy_real_key = os.environ.get("PF_KEYPROXY_REAL_KEY", "").strip()
+        self.keyproxy_name = f"pf-{short}-keyproxy"
+        self.keyproxy_url: str | None = None
 
         self._sandboxes: dict[str, Sandbox] = {}
         self._provisioned = False
@@ -214,6 +223,8 @@ class Broker:
                       "-e", f"PF_VLLM_ALLOW_HOST={vllm_host}", proxy_image], check=True)
                 _run(["docker", "network", "connect", self.net_internal, self.proxy_name], check=True)
                 self.proxy_url = self._await_proxy()
+                if self._keyproxy_upstream:
+                    self._provision_keyproxy()
             except Exception:
                 self.destroy()
                 raise
@@ -241,6 +252,45 @@ class Broker:
             raise BrokerError(f"could not resolve proxy IP on {self.net_internal}")
         time.sleep(2)   # give squid a beat to bind :3128 after the container reports Running
         return f"http://{ip}:3128"
+
+    def _provision_keyproxy(self) -> None:
+        """Spin the per-build key-proxy (M4 S2b): dual-homed (egress + internal, like squid). The REAL key
+        is injected ONLY here (orchestrator/daemon-side); the VM later gets a per-build rotatable
+        SACRIFICIAL token + this proxy's base_url. The image is harness-fixed/allowlisted (rule #8). On
+        failure the caller's atomic provision() tears the whole environment down."""
+        if self._keyproxy_image not in self.allowed_images:
+            reason = f"key-proxy image {self._keyproxy_image!r} not in allowlist"
+            self._record_audit("rejected", "provision", reason=reason, detail={"image": self._keyproxy_image})
+            raise BrokerInvariantError(reason)
+        # Per-build rotatable sacrificial token — REPLACES the static vllm_key for the VM. The VM never
+        # sees the real key; this token buys inference via the proxy and nothing else.
+        self.vllm_key = "pf-sac-" + uuid.uuid4().hex
+        _run(["docker", "run", "-d", "--name", self.keyproxy_name, "--network", self.net_egress,
+              "-e", f"PF_KEYPROXY_UPSTREAM={self._keyproxy_upstream}",
+              "-e", f"PF_KEYPROXY_REAL_KEY={self._keyproxy_real_key}",
+              "-e", f"PF_SANDBOX_VLLM_KEY={self.vllm_key}",
+              self._keyproxy_image, "python", "-m", "poc_foundry.security.keyproxy"], check=True)
+        _run(["docker", "network", "connect", self.net_internal, self.keyproxy_name], check=True)
+        self.keyproxy_url = self._await_keyproxy()
+        self._log(f"provisioned key-proxy {self.keyproxy_name} at {self.keyproxy_url} (real key withheld)")
+
+    def _await_keyproxy(self, *, tries: int = 10) -> str:
+        """Wait for the key-proxy to be Running, then return its INTERNAL-net IP as a base URL (reached by
+        IP from the VM, same Kata-DNS rule as squid). Fails LOUD with logs if it never comes up."""
+        for _ in range(tries):
+            state = _run(["docker", "inspect", "-f", "{{.State.Running}}", self.keyproxy_name], check=False)
+            if state.stdout.strip() == "true":
+                break
+            time.sleep(1)
+        else:
+            logs = _run(["docker", "logs", self.keyproxy_name], check=False).combined[-800:]
+            raise BrokerError(f"key-proxy {self.keyproxy_name} did not start:\n{logs}")
+        ipfmt = '{{(index .NetworkSettings.Networks "%s").IPAddress}}' % self.net_internal
+        ip = _run(["docker", "inspect", "-f", ipfmt, self.keyproxy_name], check=False).stdout.strip()
+        if not ip:
+            raise BrokerError(f"could not resolve key-proxy IP on {self.net_internal}")
+        time.sleep(1)
+        return f"http://{ip}:8788"
 
     # ── invariant guards ─────────────────────────────────────────────────────
     def _check_image(self, image: str) -> None:
@@ -283,15 +333,7 @@ class Broker:
 
         full = f"pf-{self.build_id[-12:]}-{name}-{uuid.uuid4().hex[:6]}"
         full = full.replace("--", "-")
-        env = {
-            # The VM's ONLY exit is the proxy, reached by IP (Kata has no Docker name-DNS).
-            "HTTPS_PROXY": self.proxy_url, "HTTP_PROXY": self.proxy_url,
-            "https_proxy": self.proxy_url, "http_proxy": self.proxy_url,
-            "NO_PROXY": "localhost,127.0.0.1", "no_proxy": "localhost,127.0.0.1",
-            # Only the sacrificial inference key is ever exposed to the sandbox (Finding-0).
-            "PF_SANDBOX_VLLM_KEY": self.vllm_key,
-        }
-        env.update(env_extra or {})
+        env = self._build_vm_env(env_extra)
 
         argv = ["docker", "run", "-d", "--rm", "--name", full, *_runtime_flag(self.runtime),
                 "--network", self.net_internal]
@@ -310,6 +352,28 @@ class Broker:
         self._sandboxes[full] = sbx
         self._log(f"created sandbox {full} (runtime={self.runtime})")
         return sbx
+
+    def _build_vm_env(self, env_extra: dict | None) -> dict:
+        """The env handed to a sandbox VM — the ONLY exit is the egress proxy (by IP; Kata has no Docker
+        name-DNS), and the ONLY credential is the SACRIFICIAL inference token (Finding-0: never the real
+        key). When the key-proxy is provisioned (M4 S2b) the VM ALSO gets the proxy's base_url so a
+        key-requiring PoC calls the model THROUGH the proxy with the sacrificial token (the proxy swaps in
+        the real key, which the VM never sees). Pure dict-building → unit-testable without Docker."""
+        env = {
+            "HTTPS_PROXY": self.proxy_url, "HTTP_PROXY": self.proxy_url,
+            "https_proxy": self.proxy_url, "http_proxy": self.proxy_url,
+            "NO_PROXY": "localhost,127.0.0.1", "no_proxy": "localhost,127.0.0.1",
+            "PF_SANDBOX_VLLM_KEY": self.vllm_key,
+        }
+        if self.keyproxy_url:                       # opt-in: a key-requiring PoC calls the model via here
+            env["PF_SANDBOX_MODEL_BASE_URL"] = self.keyproxy_url
+            # The key-proxy is HTTP on an internal IP — it must BYPASS the squid proxy (else the VM's
+            # http_proxy routes the call to squid, which denies the internal IP). Add it to NO_PROXY.
+            host = self.keyproxy_url.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0]
+            no = f"localhost,127.0.0.1,{host}"
+            env["NO_PROXY"], env["no_proxy"] = no, no
+        env.update(env_extra or {})
+        return env
 
     def create_service(self, *, image: str, name: str, env: dict | None = None,
                        pinned_tag: str | None = None, ready_cmd: str | None = None) -> Sandbox:
@@ -385,6 +449,7 @@ class Broker:
         # Always attempt teardown of the named resources (rm/network rm/volume rm are idempotent —
         # no-ops if absent), so even a PARTIAL provision is fully cleaned. Order: sandboxes →
         # proxy → networks → volume (a network can't be removed while a container is attached).
+        _run(["docker", "rm", "-f", self.keyproxy_name], check=False)   # M4 S2b (no-op if never spun)
         _run(["docker", "rm", "-f", self.proxy_name], check=False)
         _run(["docker", "network", "rm", self.net_internal, self.net_egress], check=False)
         if not self._uv_shared:                       # a shared uv-cache PERSISTS across builds (the speed-up)

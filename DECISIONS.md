@@ -1304,3 +1304,39 @@ flagged as a "leak." **Fix (in `scrub.py`, the right general place):** a `_SKIP_
 name-allowlist short-circuits `_classify` — so the scrubber also stops needlessly rewriting that public
 fingerprint in emitted reports. `run_spine_tests.py` **152** (+1 scrub test). This is exactly the
 diagnosability `leaked_keys` was added for (one round-trip from symptom to fix).
+
+## #33 — M4 S2b-infra: the key-proxy container + opt-in per-build provisioning (2026-06-25)
+
+Completes the key-proxy from testable-core (#31) to a live topology — the REAL control for key-requiring
+providers, demonstrated honestly on the keyless box with a canary. **Strictly OPT-IN** (`PF_KEYPROXY_UPSTREAM`
+unset → every path is byte-for-byte the proven build path); a real topology touch, so sliced carefully +
+fakes-first.
+
+- **Where the key lives.** The REAL key (`PF_KEYPROXY_REAL_KEY`) is read daemon-side and injected ONLY into
+  the key-proxy container. The VM gets a per-build **rotatable sacrificial** token (`pf-sac-<hex>`, replaces
+  the static `vllm_key`) + `PF_SANDBOX_MODEL_BASE_URL` = the proxy. A key-requiring PoC calls the model
+  through the proxy with the sacrificial token; the proxy swaps in the real key (`keyproxy.swap_authorization`,
+  #31) — the VM never sees it (Finding-0, now also covers `PF_KEYPROXY_REAL_KEY`).
+- **Topology.** `Broker._provision_keyproxy` (inside the atomic `provision`, so a failure tears the env
+  down) spins the proxy dual-homed (egress + internal, reached BY IP like squid — Kata DNS), running the
+  app image's `python -m poc_foundry.security.keyproxy`. `_await_keyproxy` waits Running → internal IP →
+  `keyproxy_url = http://<ip>:8788`. `_build_vm_env` (extracted from `create` for unit-testability) injects
+  the base_url only when `keyproxy_url` is set. Reaped in `_destroy` (idempotent).
+- **Rule #8 holds.** The key-proxy image is harness-fixed: `_make_broker` adds `cfg.keyproxy_image`
+  (default the app image) to the allowlist ONLY when enabled; `_provision_keyproxy` rejects + audits a
+  non-allowlisted image. `create*` params stay harness-fixed; only `exec` carries LLM content.
+- **No model-calling template exists** (all current templates are pure/deterministic) → the key-proxy can't
+  be exercised by a normal build. So it's validated by a DIRECT demo beat-4 (`analyze_keyproxy`), run from
+  inside the VM using its own injected env vars (the orchestrator never needs the daemon-generated
+  sacrificial token): right token → 200 (proxy forwarded to upstream), wrong token → 401 (proxy is the
+  gatekeeper). On the keyless vLLM the 401-on-wrong-token comes from the PROXY, so the mechanism is proven
+  regardless of upstream auth; upstream = the vLLM root, "real key" = a canary.
+- **Config.** `keyproxy_image` (`PF_KEYPROXY_IMAGE`, default `poc-foundry-app`) + `keyproxy_upstream`
+  (`PF_KEYPROXY_UPSTREAM`) + `keyproxy_enabled`. Override.example documents the `.env` keys + the one-time
+  `build app` (the key-proxy container runs the BAKED app image → needs keyproxy.py in the image).
+- **Local:** `run_spine_tests.py` **157** (+5: analyze_keyproxy, run_demo's 4th beat, `_build_vm_env`
+  normal-vs-keyproxy, the rule-#8 image rejection, `_make_broker` allowlisting). Web tab renders extra
+  streamed beats generically (the key-proxy card appears only when provisioned). `dist/` rebuilt.
+- **Acceptance (server, pending):** set `PF_KEYPROXY_UPSTREAM` = the vLLM root + `PF_KEYPROXY_REAL_KEY` =
+  a canary in `.env`, `build app`, recreate broker, run `cli demo-security` → a GREEN 4th beat with the
+  canary absent from the VM. A normal build with the env UNSET must be unchanged (regression check).

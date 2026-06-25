@@ -245,6 +245,9 @@ class _StubBroker:
     def _exec(self, cmd):
         if cmd.strip() == "env":
             return _StubExec(0, "\n".join(f"{k}={v}" for k, v in self._vm_env.items()))
+        if "/v1/models" in cmd:                      # the key-proxy probe (M4 S2b)
+            return _StubExec(0, "PF_HTTP=401\nPF_EXIT=0" if "pf-wrong-token" in cmd
+                             else "PF_HTTP=200\nPF_EXIT=0")
         return _StubExec(0, self._curl)   # the egress probe → in-band PF_HTTP/PF_EXIT markers
 
     def proxy_log(self, *, tail=200):
@@ -324,6 +327,72 @@ def test_demo_pure_analyzers():
     assert demo.analyze_rejection(True, "bad image", audited)["passed"]
     assert not demo.analyze_rejection(True, "bad image", [])["passed"]      # raised but not audited
     assert not demo.analyze_rejection(False, "", audited)["passed"]         # audited but not raised
+
+
+# ── S2b-infra: the opt-in key-proxy (container provisioning + the demo beat) ────
+def test_analyze_keyproxy_needs_inference_ok_and_wrong_token_denied():
+    from poc_foundry.security import demo
+    ok, bad = "PF_HTTP=200\nPF_EXIT=0", "PF_HTTP=401\nPF_EXIT=0"
+    assert demo.analyze_keyproxy(ok, bad)["passed"]
+    assert demo.analyze_keyproxy(ok, bad)["detail"] == {"inference_http": "200", "wrong_token_http": "401"}
+    assert not demo.analyze_keyproxy("PF_HTTP=500\nPF_EXIT=0", bad)["passed"]   # inference failed
+    assert not demo.analyze_keyproxy(ok, "PF_HTTP=200\nPF_EXIT=0")["passed"]    # wrong token NOT denied
+
+
+def test_security_demo_runs_keyproxy_beat_when_base_url_present():
+    from poc_foundry.security import demo
+    vm_env = {"HTTPS_PROXY": "http://10.0.0.2:3128", "PF_SANDBOX_VLLM_KEY": "pf-sac-xyz",
+              "PF_SANDBOX_MODEL_BASE_URL": "http://10.0.0.9:8788"}
+    broker = _StubBroker(vm_env=vm_env, curl=_CURL_DENIED, proxy_log=_denied_log(), vllm_key="pf-sac-xyz")
+    res = demo.run_demo(broker, canary="CANARY-XYZ", build_id="poc-kp",
+                        secrets=[("CANARY-XYZ", "<canary>")], proxy_poll_tries=1)
+    names = [b["beat"] for b in res["beats"]]
+    assert names == ["canary / Finding-0", "egress containment", "key-proxy (real key withheld)",
+                     "broker rejection"]
+    kp = next(b for b in res["beats"] if b["beat"].startswith("key-proxy"))
+    assert kp["passed"] and res["ok"]
+
+
+def test_build_vm_env_normal_unchanged_and_keyproxy_injects_base_url():
+    b = _provisioned_broker(vllm_key="not-needed")
+    b.proxy_url = "http://10.0.0.2:3128"
+    env = b._build_vm_env(None)   # normal path: NO key-proxy → no model base_url
+    assert "PF_SANDBOX_MODEL_BASE_URL" not in env
+    assert env["PF_SANDBOX_VLLM_KEY"] == "not-needed" and env["HTTPS_PROXY"] == "http://10.0.0.2:3128"
+    b.keyproxy_url = "http://10.0.0.9:8788"          # provisioned → base_url + the per-build sacrificial
+    b.vllm_key = "pf-sac-abc123"
+    env2 = b._build_vm_env({"PF_SERVICE_PG_HOST": "10.0.0.5"})
+    assert env2["PF_SANDBOX_MODEL_BASE_URL"] == "http://10.0.0.9:8788"
+    assert env2["PF_SANDBOX_VLLM_KEY"] == "pf-sac-abc123" and env2["PF_SERVICE_PG_HOST"] == "10.0.0.5"
+    # the key-proxy IP must BYPASS squid (else the VM's http_proxy routes the call to squid → denied)
+    assert "10.0.0.9" in env2["NO_PROXY"] and "10.0.0.9" in env2["no_proxy"]
+
+
+def test_keyproxy_provision_rejects_unallowlisted_image():
+    # the key-proxy image is harness-fixed (rule #8) — provisioning a non-allowlisted one is rejected+audited
+    b = _provisioned_broker()
+    b._keyproxy_upstream = "http://upstream:8008"   # default keyproxy image (poc-foundry-app) NOT allowlisted
+    try:
+        b._provision_keyproxy()
+        raise AssertionError("expected BrokerInvariantError")
+    except BrokerInvariantError:
+        pass
+    rej = [e for e in b.audit() if e["event"] == "rejected" and e["method"] == "provision"]
+    assert rej and "key-proxy image" in rej[0]["reason"]
+
+
+def test_make_broker_allowlists_keyproxy_image_only_when_enabled(monkeypatch):
+    from types import SimpleNamespace
+
+    from poc_foundry import core
+    monkeypatch.delenv("PF_BROKER_SOCKET", raising=False)
+    cfg = SimpleNamespace(sandbox_image="poc-foundry-sandbox", proxy_image="poc-foundry-proxy",
+                          keyproxy_enabled=True, keyproxy_image="poc-foundry-app",
+                          keyproxy_upstream="http://vllm:8008", service_refs=lambda: set(),
+                          kata_runtime="kata", uv_cache_shared=False)
+    assert "poc-foundry-app" in core._make_broker(cfg, "poc-x", "runc").allowed_images
+    cfg.keyproxy_enabled = False
+    assert "poc-foundry-app" not in core._make_broker(cfg, "poc-y", "runc").allowed_images
 
 
 # ── S2d: RunManager streams the security demo in the single slot ───────────────

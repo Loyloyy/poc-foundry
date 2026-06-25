@@ -370,12 +370,21 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
       deny-on-mismatch, `redact`; + a stdlib reverse-proxy `serve()` for the container) and
       `security/findings.py` (`scan_sandbox_env` Finding-0: prove no orchestrator secret reached the VM,
       reports by PLACEHOLDER). Local: `run_spine_tests.py` (**145**, +6). DECISIONS #31.
-      **REMAINING (server-bound):** (1) key-proxy CONTAINER + broker provisions it per-build on the
-      internal net + generates a per-build rotatable sacrificial token + injects the model base_url into
-      the VM (OPT-IN via `PF_KEYPROXY_*`; normal builds unchanged); the vLLM key-proxy-over-vLLM is
-      NOT applicable (keyless) and is labelled as such; both endpoints (`:8008` GLM main, `:8770` gpt-oss)
-      are reachable but only `:8008` is in the sandbox allowlist (correct — critic runs orchestrator-side).
-- [x] **S2c `demo-security` CLI + 3 live beats** (2026-06-25, local green — server-validate pending) —
+      both endpoints (`:8008` GLM main, `:8770` gpt-oss) are reachable but only `:8008` is in the sandbox
+      allowlist (correct — critic runs orchestrator-side).
+- [x] **S2b-infra key-proxy container + opt-in broker provisioning** (2026-06-25, local green —
+      server-validate pending) — OPT-IN via `PF_KEYPROXY_UPSTREAM`; normal builds byte-for-byte unchanged
+      (everything guarded). The broker (`provision`) spins a per-build key-proxy (`_provision_keyproxy`):
+      dual-homed (egress + internal, by IP), running the app image's `python -m poc_foundry.security.keyproxy`,
+      generates a per-build rotatable SACRIFICIAL token (replaces the static `vllm_key`), passes the REAL
+      key (env, daemon-side) + upstream + sacrificial to the proxy, and injects `PF_SANDBOX_MODEL_BASE_URL`
+      (the proxy) into the VM (`_build_vm_env`). Image harness-fixed/allowlisted (rule #8; `_make_broker`
+      adds it when enabled, `_provision_keyproxy` rejects+audits a non-allowlisted one). Reaped in
+      `_destroy`. Demo gains a 4th beat (`analyze_keyproxy`): from inside the VM, the sacrificial token →
+      200, a wrong token → 401, the real key absent — proven on the keyless box with a canary as the
+      "real" key. Local: `run_spine_tests.py` (**157**, +5). DECISIONS #33. Override.example documents the
+      `PF_KEYPROXY_*` env + the one-time `build app`.
+- [x] **S2c `demo-security` CLI + 3 live beats** (2026-06-25, ✅ SERVER-VALIDATED — 3/3 GREEN) —
       `core.security_demo()` (headless, rule #5) provisions a broker and runs `security/demo.run_demo`:
       beat-1 **canary/Finding-0** (`exec("env")` → `parse_env` → `findings.scan_sandbox_env` against
       `scrub.collect_secrets()` + the planted canary; PASS = nothing leaked), beat-2 **egress containment**
@@ -384,7 +393,7 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
       lands in `broker.audit()`). Pure analyzers fakes-tested; canary redacted from every shared output;
       a `beat` event per beat for the web tab. CLI `demo-security [--canary]`. Local:
       `run_spine_tests.py` (**149**, +4). DECISIONS #32. Canary via `PF_DEMO_CANARY`.
-- [x] **S2d Security-Demo web tab** (2026-06-25, local green — server-validate pending) — a Builds /
+- [x] **S2d Security-Demo web tab** (2026-06-25, ✅ SERVER-VALIDATED — renders 3 beats live) — a Builds /
       Security-demo tab switch (`App.tsx`); the Security tab POSTs `/api/security-demo` (→ new
       `RunManager.security_demo`, single slot, `_run_demo` runner) and renders the 3 beats live from the
       streamed `beat` events (reuses the M3 SSE seam; `useEventStream` gains `beats[]`). `frontend/`

@@ -29,6 +29,15 @@ _EGRESS_PROBE = (
 )
 
 
+def _keyproxy_probe(token_expr: str) -> str:
+    """A VM-side call to the model THROUGH the key-proxy (M4 S2b). Uses the VM's injected env vars —
+    ``$PF_SANDBOX_MODEL_BASE_URL`` (the proxy) + a token — so the orchestrator never needs to know the
+    per-build sacrificial token (it's daemon-generated). Double-quoted so the shell expands the vars."""
+    return (f'curl -sS -m 12 -o /dev/null -w "PF_HTTP=%{{http_code}}\\n" '
+            f'"$PF_SANDBOX_MODEL_BASE_URL/v1/models" -H "Authorization: Bearer {token_expr}" 2>&1; '
+            f'echo PF_EXIT=$?')
+
+
 # ── pure analyzers (stdlib only → fakes-testable) ─────────────────────────────
 def parse_env(text: str) -> dict:
     """Parse a sandbox ``exec('env')`` dump into ``{VAR: value}``. Conservative: only lines that look
@@ -88,6 +97,30 @@ def analyze_egress(curl_output: str, denied_in_log: bool) -> dict:
     return _beat("egress containment", passed, summary,
                  {"tcp_denied_in_proxy_log": bool(denied_in_log), "proxy_denied_via_curl": proxy_denied_via_curl,
                   "curl_blocked": curl_blocked, "http_code": code, "curl_exit": exit_code})
+
+
+def _http_code(out: str) -> str:
+    m = re.search(r"PF_HTTP=(\d+)", out or "")
+    return m.group(1) if m else ""
+
+
+def analyze_keyproxy(ok_output: str, bad_output: str) -> dict:
+    """Beat 4 (only when the key-proxy is provisioned, M4 S2b): PASS = the VM's call WITH its sacrificial
+    token succeeds (the proxy swapped in the real key → 200) AND a call with a WRONG token is denied (401)
+    — proving the proxy is the gatekeeper and the real key, held only by the proxy, never entered the VM."""
+    ok_code, bad_code = _http_code(ok_output), _http_code(bad_output)
+    forwarded = ok_code == "200"
+    denied = bad_code in ("401", "403")
+    passed = bool(forwarded and denied)
+    if passed:
+        summary = ("the key-proxy swapped the sacrificial token for the real key — inference works (200) "
+                   "while a wrong token is denied (401); the real key never entered the VM")
+    elif not forwarded:
+        summary = f"key-proxy FAILED — inference with the sacrificial token did not succeed (HTTP {ok_code or '?'})"
+    else:
+        summary = f"key-proxy FAILED — a WRONG token was not denied (HTTP {bad_code or '?'})"
+    return _beat("key-proxy (real key withheld)", passed, summary,
+                 {"inference_http": ok_code, "wrong_token_http": bad_code})
 
 
 def analyze_rejection(rejected: bool, reason: str, audit_entries) -> dict:
@@ -153,12 +186,19 @@ def run_demo(broker, cfg=None, *, canary: str = "", emit=None, build_id: str = "
         _ev.emit(emit, _ev.make_event("beat", build_id, beat=beat["beat"], passed=beat["passed"],
                                       summary=beat["summary"], detail=beat["detail"]))
 
-    # Beats 1 + 2 share one fresh VM (env dump, then the egress probe); reaped before reading the log.
+    # Beats 1 + 2 (+ optional 4) share one fresh VM (env dump → egress probe → key-proxy probes); reaped
+    # before reading the proxy log. The key-proxy beat runs ONLY when the VM was given a model base_url.
+    kp_base, kp_ok, kp_bad = "", None, None
     sbx = broker.create(mounts=[], name="secdemo")
     try:
         env_out = sbx.exec("env", timeout_s=60)
-        _push(analyze_canary(parse_env(env_out.combined), secrets, canary))
+        vm_env = parse_env(env_out.combined)
+        _push(analyze_canary(vm_env, secrets, canary))
         curl_out = sbx.exec(_EGRESS_PROBE, timeout_s=30)
+        kp_base = vm_env.get("PF_SANDBOX_MODEL_BASE_URL", "")
+        if kp_base:                          # M4 S2b: prove the swap from inside the VM (its own env vars)
+            kp_ok = sbx.exec(_keyproxy_probe("$PF_SANDBOX_VLLM_KEY"), timeout_s=30)
+            kp_bad = sbx.exec(_keyproxy_probe("pf-wrong-token-deadbeef"), timeout_s=30)
     finally:
         sbx.destroy()
     denied_log = False
@@ -169,6 +209,8 @@ def run_demo(broker, cfg=None, *, canary: str = "", emit=None, build_id: str = "
         if i + 1 < proxy_poll_tries:
             time.sleep(proxy_poll_delay)
     _push(analyze_egress(curl_out.combined, denied_log))
+    if kp_base and kp_ok is not None and kp_bad is not None:
+        _push(analyze_keyproxy(kp_ok.combined, kp_bad.combined))
 
     # Beat 3: an off-allowlist create* must be rejected (rule #8) AND land in the audit.
     rejected, reason = False, ""
