@@ -370,10 +370,10 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
       deny-on-mismatch, `redact`; + a stdlib reverse-proxy `serve()` for the container) and
       `security/findings.py` (`scan_sandbox_env` Finding-0: prove no orchestrator secret reached the VM,
       reports by PLACEHOLDER). Local: `run_spine_tests.py` (**145**, +6). DECISIONS #31.
-      both endpoints (`:8008` GLM main, `:8770` gpt-oss) are reachable but only `:8008` is in the sandbox
-      allowlist (correct — critic runs orchestrator-side).
-- [x] **S2b-infra key-proxy container + opt-in broker provisioning** (2026-06-25, local green —
-      server-validate pending) — OPT-IN via `PF_KEYPROXY_UPSTREAM`; normal builds byte-for-byte unchanged
+      both model endpoints (the main coder + the distinct-family critic) are reachable but only the main
+      endpoint is in the sandbox allowlist (correct — the critic runs orchestrator-side).
+- [x] **S2b-infra key-proxy container + opt-in broker provisioning** (2026-06-25, ✅ SERVER-VALIDATED —
+      4/4 beats GREEN incl. key-proxy) — OPT-IN via `PF_KEYPROXY_UPSTREAM`; normal builds byte-for-byte unchanged
       (everything guarded). The broker (`provision`) spins a per-build key-proxy (`_provision_keyproxy`):
       dual-homed (egress + internal, by IP), running the app image's `python -m poc_foundry.security.keyproxy`,
       generates a per-build rotatable SACRIFICIAL token (replaces the static `vllm_key`), passes the REAL
@@ -384,6 +384,11 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
       200, a wrong token → 401, the real key absent — proven on the keyless box with a canary as the
       "real" key. Local: `run_spine_tests.py` (**157**, +5). DECISIONS #33. Override.example documents the
       `PF_KEYPROXY_*` env + the one-time `build app`.
+      **Server result (2026-06-25):** `cli demo-security` ran **4/4 GREEN** with `PF_KEYPROXY_UPSTREAM` = the
+      vLLM root + `PF_KEYPROXY_REAL_KEY` = a canary — the key-proxy beat showed inference 200 (real key
+      swapped in) / wrong-token 401 / the canary absent from the VM. Gotcha fixed pre-validation: the
+      key-proxy IP must be in the VM's `NO_PROXY` (else the VM's `http_proxy` routes the HTTP call to squid,
+      which denies the internal IP); upstream must be the ROOT (no `/v1`, else a doubled path 404s).
 - [x] **S2c `demo-security` CLI + 3 live beats** (2026-06-25, ✅ SERVER-VALIDATED — 3/3 GREEN) —
       `core.security_demo()` (headless, rule #5) provisions a broker and runs `security/demo.run_demo`:
       beat-1 **canary/Finding-0** (`exec("env")` → `parse_env` → `findings.scan_sandbox_env` against
@@ -412,4 +417,7 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
       `security.incidents[]` as `[high]`. Local: `run_spine_tests.py` (**139**, +8 `test_m4_security.py`).
       DECISIONS #30. **Server:** set `PF_BROKER_AUDIT_LOG` on the `broker` service (override.example
       updated); the live rejection beat (S2c) reads this file as un-bypassable evidence.
-- **Acceptance:** the security demo runs both beats with proxy logs as evidence; `demo-security` CLI.
+- **Acceptance:** the security demo runs the beats with proxy logs as evidence; `demo-security` CLI. ✅
+- **M4 ✅ COMPLETE (2026-06-25, all server-validated):** S1 refine · S2a audit · S2b key-proxy core +
+  infra · S2c `demo-security` (4 beats) · S2d web tab · S3 `docs/PLATFORM.md`. Remaining = explicitly-
+  optional breadth only (JS template, multi-service composition, eval harness v2) + the logged residuals.

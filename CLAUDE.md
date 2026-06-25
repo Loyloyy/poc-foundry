@@ -52,7 +52,7 @@ deep-link, Stop "Stopping…" UX, caveats card. DECISIONS #27–#28. **Ops gotch
 `up -d --force-recreate` (not `restart`); `DC` must pass BOTH `-f` files (compose + override); web binds
 `127.0.0.1:8181`.
 
-**M4 — breadth (IN PROGRESS, 2026-06-25). Local: `run_spine_tests.py` (145) + contract (11) + hygiene.**
+**M4 ✅ COMPLETE (2026-06-25, all server-validated). Local: `run_spine_tests.py` (157) + contract (11) + hygiene.**
 - **S1 `refine` ✅ SERVER-VALIDATED** — `core.refine_build(id, *, coder_override)` re-attacks a finished
   build's descoped backlog on a stronger coder (backlog-only refine graph; reuses persisted workspace +
   red-first staged tests; per-call `models.set_role_alias` rebind, NOT a global `.env` flip; critic bar
@@ -61,13 +61,21 @@ deep-link, Stop "Stopping…" UX, caveats card. DECISIONS #27–#28. **Ops gotch
 - **S2a daemon rejection-audit ✅ SERVER-VALIDATED** — broker records rejected `create*`/lifecycle
   append-only to `PF_BROKER_AUDIT_LOG` (daemon-owned → durable + orchestrator-independent), no secret in
   any entry; `audit` RPC → `security.incidents[]`. DECISIONS #30. (`sandbox/audit.py`.)
-- **S2b key-proxy core ✅ local** — `security/keyproxy.py` (swap sacrificial→real, deny-on-mismatch,
-  redact) + `security/findings.py` (Finding-0 env scan). Reframed honestly: on-prem vLLM is KEYLESS, so the
-  key-proxy is the real control for key-requiring providers (OpenAI/Claude), demonstrated with a **canary**.
-  DECISIONS #31.
-- **REMAINING (next chat → `../stage3-planning/HANDOVER_M4b.md`):** S2c `demo-security` CLI + 3 live beats
-  (canary/Finding-0 · egress containment · broker rejection); S2b key-proxy container + broker provisioning
-  (opt-in `PF_KEYPROXY_*`); S2d Security-Demo web tab; S3 `docs/PLATFORM.md`.
+- **S2b key-proxy ✅ SERVER-VALIDATED (core + infra)** — `security/keyproxy.py` (swap sacrificial→real,
+  deny-on-mismatch, redact) + `security/findings.py` (Finding-0). On-prem vLLM is KEYLESS, so the key-proxy
+  is the real control for key-requiring providers, demonstrated with a **canary**. OPT-IN infra
+  (`PF_KEYPROXY_UPSTREAM`): the broker spins a per-build dual-homed key-proxy, generates a rotatable
+  sacrificial token, injects `PF_SANDBOX_MODEL_BASE_URL` (+ a `NO_PROXY` bypass) into the VM; real key
+  stays daemon-side. Normal builds byte-for-byte unchanged. DECISIONS #31, #33.
+- **S2c `demo-security` CLI + 4 live beats ✅ SERVER-VALIDATED (4/4)** — `core.security_demo` →
+  `security/demo.py`: canary/Finding-0 · egress containment · key-proxy (real key withheld) · broker
+  rejection. Pure analyzers fakes-tested; canary redacted. DECISIONS #32, #32c (sacrificial-token + curl
+  egress evidence), #32d (GPG_KEY is a public base-image constant, not a secret).
+- **S2d Security-Demo web tab ✅ SERVER-VALIDATED** — `RunManager.security_demo` + `/api/security-demo` +
+  a Builds/Security tab (`SecurityDemo.tsx`) rendering the beats live off the SSE seam. DECISIONS #32b.
+- **S3 `docs/PLATFORM.md` ✅** — the workshop teaching artifact (wiki patterns cited to real modules).
+- **Optional breadth (not done; only on request):** JS template (npm-on-server → rule #3 — raise first),
+  multi-service composition, eval harness v2.
 - **Residuals:** hint persistence (`chmod 777 playbooks/hints`); depot SearXNG pins; Langfuse exact-trace
   deep-link (capture `trace_id` at build time); `PF_MAX_RUN_WALL_CLOCK_S` to bound degenerate runs; the
   langgraph "unregistered msgpack type" warning on refine's checkpoint recovery (harmless; register

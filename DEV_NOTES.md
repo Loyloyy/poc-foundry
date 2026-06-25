@@ -578,3 +578,34 @@ The whole value is the verifier; **never tune the harness to manufacture green b
 5. **Give it room, bounded** — raise `PF_MAX_FIX_ATTEMPTS`/`PF_MAX_ITERATIONS`/call caps for more shots,
    but ALWAYS set `PF_MAX_RUN_WALL_CLOCK_S` (a strict critic + hard source + respec/replan looped ~90
    min with no run cap). The experience loop (M2c S3) also compounds success once Tier-2 promotion runs.
+
+## M4 S2 — security demo + key-proxy gotchas (2026-06-25/26)
+
+Learnings from building + server-validating the `demo-security` beats and the opt-in key-proxy:
+
+- **`.gitignore` has NO inline comments.** A `#` after a pattern on the SAME line becomes part of the
+  pattern. `build_env.json   # comment`, `workspaces/   # comment`, `*.sqlite   # comment` were therefore
+  NOT ignored (silently) — a latent secret-leak risk on a public repo. Fix: comments on their own lines.
+  Verify with `git check-ignore -q <path>`. (`builds/` worked only because it had no inline comment.)
+- **`GPG_KEY` is NOT a secret.** It's the CPython release signing-key FINGERPRINT, a PUBLIC constant baked
+  into every `python:*` image. `app` + the sandbox VM share the same base image, so Finding-0 flagged it
+  as a cross-image "leak" (its var name ends `_KEY` → `collect_secrets` classified it). Fixed in `scrub.py`
+  via `_SKIP_KEYS`. Lesson: shared base-image env vars that merely END in a secret-looking suffix are
+  false positives — `scan_sandbox_env` now reports `leaked_keys` (the VAR NAME) so this is a one-round-trip
+  diagnosis.
+- **The sacrificial token is SUPPOSED to be in the VM.** `PF_SANDBOX_VLLM_KEY` (the per-build sacrificial
+  inference token) is intentionally injected — Finding-0 must EXCLUDE it (only the REAL key must be absent).
+  `demo.run_demo` reads `broker.vllm_key` and drops it from the scanned set.
+- **Proxy-log flush lag.** squid writes its access log to a file tail'd to stdout; `docker logs` can lag the
+  immediate read, so `TCP_DENIED` may not be visible right after the probe. Fix: the egress probe uses
+  `curl -sS … 2>&1` so curl's OWN "403 from proxy" is in-band denial evidence, AND `run_demo` polls the
+  proxy log a few times. PASS = blocked AND (TCP_DENIED in log OR curl's proxy-403).
+- **Key-proxy routing: two traps.** (1) The key-proxy is HTTP on an INTERNAL IP — the VM's `http_proxy`
+  points at squid, so a call to the key-proxy gets routed to squid, which denies the internal IP. The
+  key-proxy host MUST be in the VM's `NO_PROXY` (`_build_vm_env` adds it). (2) `PF_KEYPROXY_UPSTREAM` must
+  be the model server ROOT with NO `/v1` — the proxy forwards `<upstream> + <the VM's request path>`, and
+  the VM calls `…/v1/models`, so a `/v1` upstream doubles the path → 404.
+- **The key-proxy container runs the BAKED app image** (`docker run poc-foundry-app python -m
+  poc_foundry.security.keyproxy`) — NOT the bind-mounted live src. So changes to `keyproxy.py` need a
+  `docker compose ... build app` before the key-proxy picks them up (broker/orchestrator changes are
+  bind-mounted and only need a container restart).

@@ -1094,9 +1094,9 @@ box is a sanctioned, already-established exception, NOT a deviation. (User steer
     `DC` must pass BOTH `-f` files (compose + override) or the broker/host-mounts vanish; port **8181**
     (8770/8008 are vLLM on the shared box; uvicorn binds 0.0.0.0 in-container, the boundary is the host
     `127.0.0.1:8181` publish).
-  - **Real-build learning (informs M4):** a non-degraded critic (distinct model family — e.g. `critic`→
-    gpt-oss vs `coder`→GLM) correctly BLOCKS gameable string-presence tests. On a hard source (PageIndex
-    tree-nav) the GLM coder can't satisfy it within budget → every criterion honestly descopes to the
+  - **Real-build learning (informs M4):** a non-degraded critic (a `critic` role bound to a DISTINCT model
+    family from `coder`) correctly BLOCKS gameable string-presence tests. On a hard source (PageIndex
+    tree-nav) the base coder can't satisfy it within budget → every criterion honestly descopes to the
     `refine` finish-path, and a degenerate respec/replan loop ran ~90 min (no run-level wall-clock cap).
     Takeaways: (1) `refine` (M4) is the real success-rate lever; (2) set `PF_MAX_RUN_WALL_CLOCK_S`;
     (3) DON'T tune the harness to manufacture green — that games the verifier, which is the whole value.
@@ -1130,7 +1130,7 @@ capability, never by lowering the critic bar (the whole-value invariant, #28).
   resolved FIRST in `resolve_role`, so the rebind reaches BOTH the coder loop (`chat_text("coder",…)`) AND
   the degraded-critic check (`same_family("critic","coder")` correctly reads a frontier coder as a distinct
   family). Set around the one refine run, cleared in `finally`. `coder_override` is a `.env` role name whose
-  triple points at the frontier endpoint (e.g. the neighbour gpt-oss-120b); blank = re-run on the base coder.
+  triple points at the frontier endpoint (e.g. a distinct neighbour critic-family endpoint); blank = re-run on the base coder.
 - **Critic never weakened** (#28): refine pins `respec_count`/`replan_count` to their caps, so the verdict
   ladder collapses to fix→descope (no re-spec/re-plan — refine re-attacks the SAME plan). An adequacy-failing
   green still descopes (not respec'd) → a gamed pass is never rewarded.
@@ -1148,8 +1148,8 @@ capability, never by lowering the critic bar (the whole-value invariant, #28).
   caps held (fix→descope, no re-spec/re-plan). Budget metered (`llm_calls=36, wall_s=1411`, no caps hit).
 - **Honest scope of the validation:** this run used the BASE coder; the met-flip came via re-verification
   (`met-existing`) against the now-fuller workspace, NOT new problem-solving. The "a *stronger* coder solves
-  a hard descoped criterion" claim is **deferred** (the user has no frontier endpoint; gpt-oss-120b isn't
-  meaningfully stronger) — the rebind path is identical + fakes-proven, so it's a zero-code residual.
+  a hard descoped criterion" claim is **deferred** (the user has no frontier endpoint; the neighbour critic
+  model isn't meaningfully stronger) — the rebind path is identical + fakes-proven, so it's a zero-code residual.
 - **Residual (real, low-priority):** langgraph warns "Deserializing unregistered type … Spec/Plan/
   IterationRecord … blocked in a future version" when `_recover_state` reads the checkpoint. Harmless today;
   pin it by registering `allowed_msgpack_modules` (or `LANGGRAPH_STRICT_MSGPACK`) when we next touch graph
@@ -1191,7 +1191,7 @@ beat-(b) reads it); the key-proxy + the two live beats + the Security-Demo tab f
 
 S2 (security demo + key-proxy) opened with a design check against reality (§5.2: "claims written against
 enforced reality only"). The `.env` showed the on-prem vLLM is **keyless** — every role's API key is `not-needed`,
-both endpoints (`:8008` GLM main, `:8770` gpt-oss critic) accept any token. The design's key-proxy premise
+both endpoints (the main coder endpoint + the distinct-family critic endpoint) accept any token. The design's key-proxy premise
 was "a single static key ⇒ ship a reverse-proxy to make it per-build revocable"; with NO key, a reverse
 proxy over vLLM would guard nothing → shipping it as-specified would be theatre (rules #9/#28).
 
@@ -1337,6 +1337,10 @@ fakes-first.
 - **Local:** `run_spine_tests.py` **157** (+5: analyze_keyproxy, run_demo's 4th beat, `_build_vm_env`
   normal-vs-keyproxy, the rule-#8 image rejection, `_make_broker` allowlisting). Web tab renders extra
   streamed beats generically (the key-proxy card appears only when provisioned). `dist/` rebuilt.
-- **Acceptance (server, pending):** set `PF_KEYPROXY_UPSTREAM` = the vLLM root + `PF_KEYPROXY_REAL_KEY` =
-  a canary in `.env`, `build app`, recreate broker, run `cli demo-security` → a GREEN 4th beat with the
-  canary absent from the VM. A normal build with the env UNSET must be unchanged (regression check).
+- **SERVER-VALIDATED (2026-06-25):** with `PF_KEYPROXY_UPSTREAM` = the vLLM ROOT + `PF_KEYPROXY_REAL_KEY` =
+  a canary, `build app` + recreate broker, `cli demo-security` ran **4/4 GREEN** — the key-proxy beat showed
+  inference 200 (real key swapped in) / wrong-token 401 / the canary absent from the VM. **Two gotchas
+  fixed pre-validation:** (1) the key-proxy IP must be in the VM's `NO_PROXY` — else the VM's `http_proxy`
+  routes the HTTP call to squid, which denies the internal IP (`_build_vm_env` adds it); (2) the upstream
+  must be the ROOT (no `/v1`) — the proxy appends the VM's `/v1/models` path, so a `/v1` upstream doubles
+  it → 404. Normal builds (env unset) unchanged by construction (every path guarded). **M4 COMPLETE.**

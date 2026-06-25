@@ -3,12 +3,16 @@
 .env.*
 !.env.example
 docker-compose.override.yml
-build_env.json                 # gitignored sidecar: real role→model-id map
+# gitignored sidecar: the real role→model-id map. NOTE: .gitignore has NO inline comments — a `#`
+# after a pattern on the SAME line becomes part of the pattern, so comments MUST be on their own line.
+build_env.json
 
 # ── Build outputs (server-local, gitignored — publishing a PoC is a human call)
 builds/
-workspaces/                    # local-disk sandbox workspaces + uv cache
-*.sqlite                       # checkpoint / state DBs
+# local-disk sandbox workspaces + uv cache
+workspaces/
+# checkpoint / state DBs
+*.sqlite
 
 # ── Diagnostic run artifacts. Bake-off traces can capture the model endpoint in an error message
 #    (HTTPError repr includes the URL) — NEVER commit them. Also just run noise.
