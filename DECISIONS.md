@@ -1645,3 +1645,18 @@ CORPUS), and `_embed`/`retrieve` are verified in the sandbox (criterion tests + 
 `gradio-rag-pgvector` keeps the hash embedding (its purpose IS the deterministic-plumbing demo). Local:
 **172 fakes** + contract 11 + hygiene. *Server: rebuild the sandbox image, re-run the build, re-verify
 queries 2 & 3 now retrieve the right doc + get real answers.*
+
+**#38 follow-on — verifiable GROUNDING (2026-06-29).** With real embeddings the build ran clean but the
+non-degraded critic DESCOPED the core: the tests checked citation presence + discrimination + length but
+"never check that the LLM's answer is actually grounded in the retrieved document — a stub attaching a
+correct id without using the doc's content could pass." Legitimate (grounding IS the point of RAG; it
+would also have caught the earlier ungrounded "I don't know [2]"). The hard part: the LLM paraphrases, so
+you can't assert exact content. Fix = guide the tester (knowledge note) to assert GROUNDING via LEXICAL
+OVERLAP — strip the `[N]` marker, then require the answer share ≥2 distinctive content words (len≥4,
+non-stopword) with the CITED doc's `content` (read from CORPUS at test time). A genuinely grounded answer
+reuses the doc's vocabulary; a stub / generic / "I don't know" does not — so it proves the LLM used the
+retrieved doc WITHOUT asserting non-deterministic prose, and it transitively enforces retrieval quality
+(wrong doc → "I don't know" → no overlap → fail). Coder unchanged (its `generate_reply` already answers
+from the retrieved doc); only the TEST gains the grounding check. Template-only (knowledge note,
+bind-mounted — no sandbox rebuild). Green bar 172. *Server: re-run → expect the core to pass with a
+grounding assertion the critic accepts → done, demonstrates_core_value=yes (genuinely verified RAG).*
