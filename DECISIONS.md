@@ -1660,3 +1660,15 @@ retrieved doc WITHOUT asserting non-deterministic prose, and it transitively enf
 from the retrieved doc); only the TEST gains the grounding check. Template-only (knowledge note,
 bind-mounted — no sandbox rebuild). Green bar 172. *Server: re-run → expect the core to pass with a
 grounding assertion the critic accepts → done, demonstrates_core_value=yes (genuinely verified RAG).*
+
+**#37/#38 follow-on — the model-connectivity guard belonged in the smoke as CONSTRUCT-ONLY, not a
+round-trip (2026-06-29).** After the fastembed swap the scaffold smoke went RED. Isolated: fastembed
+runs fine in Kata (`KATA EMBED OK 384`) and the full smoke passes 4/4 in runc with the model reached
+directly — so the failure was the connectivity guard's `_answer` ROUND-TRIP, which in the Kata build
+goes through the egress proxy and is a slow ~15s reasoning call. Putting a live, slow, proxy-dependent
+model round-trip in the *scaffold* smoke was wrong — it makes a fast start-green check depend on model
+reachability/latency at P3, nuking the build before any real work. Fix: the guard's real job is to catch
+the CLIENT-CONSTRUCTION break (the openai/httpx `proxies` bug fails at `OpenAI()` construction, no
+network) → made it CONSTRUCT-ONLY (offline, fast, no proxy). The actual answer round-trip is verified by
+the criterion tests in the iteration VMs (where the proxy path works). Green bar 172. *Server: re-run →
+scaffold smoke GREEN, then iterations with semantic retrieval + grounded LLM answers.*

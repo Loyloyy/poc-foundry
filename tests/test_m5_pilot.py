@@ -202,5 +202,5 @@ def test_rag_llm_smoke_guards_the_model_connectivity_contract():
     from pathlib import Path
     smoke = (Path(__file__).resolve().parents[1] / "templates" / "gradio-rag-llm" / "files"
              / "tests" / "test_smoke.py").read_text()
-    assert "PF_SANDBOX_MODEL_BASE_URL" in smoke and "_answer(" in smoke
+    assert "PF_SANDBOX_MODEL_BASE_URL" in smoke and "OpenAI(" in smoke   # construct-only (offline)
     assert "pytest.skip" in smoke   # skipped offline so it never blocks dockerless CI
