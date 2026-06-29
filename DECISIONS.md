@@ -1383,3 +1383,11 @@ Local: `run_spine_tests.py` **160** (+3 `test_m5_pilot.py`: tester demands discr
 criteria discrimination-shaped, format suffix still last) + contract 11 + hygiene clean.
 *Server (pending): re-run the same RAG pilot — expect the critic to PASS discriminating tests instead
 of churning, and the build to reach `done` (or descope far fewer criteria).*
+
+**Follow-on (same pilot, 2026-06-29):** the re-run then hit `openai.LengthFinishReasonError` in P1
+spec — the architect's structured-output completion truncated at the **4000** `max_tokens` default
+before closing the Spec JSON (a reasoning model spends completion tokens on chain-of-thought first;
+the richer discrimination prompt tipped it over). Fixed by giving the spec call the SAME headroom the
+critic call already uses: `build_chat_model("architect", max_tokens=8000)` in `p1_spec`. Both
+structured `.with_structured_output` calls (architect + critic) are now at 8000; the deterministic
+plan + text-based tester are unaffected. Green bar still 160.

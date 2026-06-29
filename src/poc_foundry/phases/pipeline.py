@@ -108,7 +108,10 @@ def p1_spec(state, ctx: Ctx) -> dict:
 
     art = ctx.run_folder.artifact
     svcs = getattr(ctx.template, "services", [])
-    llm = build_chat_model("architect").with_structured_output(Spec)
+    # 8000 (not the 4000 default) for headroom: a reasoning model spends completion tokens on its
+    # chain-of-thought before emitting the structured Spec JSON; at 4000 the JSON can be truncated mid-
+    # object → openai LengthFinishReasonError. The critic call uses the same headroom for the same reason.
+    llm = build_chat_model("architect", max_tokens=8000).with_structured_output(Spec)
     with tracing.span("spec", artifact=art.id):
         spec = llm.invoke([("system", prompts.spec_system(bool(svcs))),
                            ("human", prompts.spec_prompt(art, ctx.template.interface, svcs))])
