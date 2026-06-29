@@ -22,9 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # uv (fast resolver/installer used inside the VM), plus pytest + ruff baked in so a build doesn't pay
 # to install them every iteration. `psycopg[binary]` (libpq bundled in the wheel) is baked too as the
 # common SIBLING-SERVICE driver, so a service-using PoC (e.g. pgvector) can `import psycopg` in the
-# iteration VMs — which don't run `uv pip install` (only the clean-room does). Per-PoC deps beyond
-# these are installed by `uv` into the workspace at runtime.
-RUN pip install --upgrade pip && pip install uv pytest ruff 'psycopg[binary]'
+# iteration VMs — which don't run `uv pip install` (only the clean-room does). `openai` is baked for the
+# same reason: a MODEL-CALLING PoC (the gradio-rag-llm template) imports it in the iteration VMs to call
+# PF_SANDBOX_MODEL_BASE_URL. Per-PoC deps beyond these are installed by `uv` into the workspace at runtime.
+RUN pip install --upgrade pip && pip install uv pytest ruff 'psycopg[binary]' openai
 
 # A fixed, non-root build user so workspace ownership maps predictably across virtio-fs
 # (uid/gid mapping is an M0(a) probe item). The workspace is bind-mounted RW at /work; tests/ is

@@ -424,9 +424,15 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
 
 ## M5 — pilots, real model-calling builds, breadth (design §7)
 The shift from "works on fixtures" to "produces real, useful PoCs from real Stage-2 artifacts."
-- [~] **A1 RAG pilot — first real artifact end-to-end** (2026-06-29, in progress). Ran
-      `dra-20260615-112222-fa650c-m` "Self-hosted RAG over a private document store" →
-      `gradio-rag-pgvector` on the server. **First real-artifact build surfaced a structural weakness**
+- [x] **A1 RAG pilot — first real artifact end-to-end ✅ SUCCESS (2026-06-29, server-validated).** Final
+      run: `status=done`, `demonstrates_core_value=yes`, **all 4 criteria met** (incl. query-dependent
+      retrieval — different topics cite different doc ids), **clean run** (fixes=0/respecs=0/replans=0),
+      integrity ledger OK (14 test ids) + 0 incidents, clean-room install=test=demo=True, ~10 min. The
+      non-degraded critic `accept→next` on GENUINE retrieval evidence each pass; fix #6's re-author guard
+      fired live (`authored test did not parse — re-authoring once`). **The platform does the RAG floor,
+      cleanly.** Getting here took six thin fixes (below).
+      Ran `dra-20260615-112222-fa650c-m` "Self-hosted RAG over a private document store" →
+      `gradio-rag-pgvector` on the server. **The first real-artifact build surfaced a structural weakness**
       (the point of the pilot ladder): the non-degraded critic correctly rejected every iter0 as
       *gameable* (citation-marker-present tests a constant stub satisfies) → respec→replan→descope churn
       (the degenerate loop). **Root cause + fix = DECISIONS #34:** a bar mismatch — the tester was told
@@ -456,11 +462,18 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
       `RED→GREEN` with the non-degraded critic `accept→next` on GENUINE retrieval evidence — the platform
       does the RAG floor.** (iter2 exposed fix #6; a `replan` wastefully re-attacks met iterations — logged
       residual.) Local: **168 fakes** (+14 `test_m5_pilot.py`) + contract 11 + hygiene clean. DECISIONS #34.
-      *Server re-run with fix #6 pending → expect a clean(er) `done`.*
+      With fix #6 the re-run went **`done` 4/4 with zero churn** (see the success line above).
 - [ ] **A2 MCP pilot** — new template (chatbot + small MCP server, crisp tool-call assertions; §7 pilot 2).
 - [ ] **A3 Durable-Agent-Execution pilot** — kill-and-resume LangGraph demo (§7 pilot 3).
-- [ ] **B model-calling template** — a real LLM-chatbot template whose PoC calls the vLLM from the VM
-      (`PF_SANDBOX_MODEL_BASE_URL`), making the key-proxy load-bearing in a normal build (handover §2.B).
+- [~] **B model-calling template** — a real LLM-chatbot template whose PoC calls the vLLM from the VM,
+      making the key-proxy load-bearing in a normal build (handover §2.B). **B0 ✅ (DECISIONS #35):** the
+      broker now injects `PF_SANDBOX_MODEL_BASE_URL` (the egress-allowlisted endpoint) into EVERY VM, not
+      just when the key-proxy is on. **B1 ✅ local (DECISIONS #35):** new `gradio-rag-llm` template —
+      pgvector retrieval + a REAL `_answer()` model call, with the `[<int>]` citation CODE-appended as the
+      deterministic test anchor (tests assert structure, never the model's prose); `openai` pinned + baked
+      into the sandbox image. Local: **171 fakes** + contract 11 + hygiene; preflight resolves+pins.
+      **B2 (server, pending):** rebuild the sandbox image (`build sandbox`), `template-ci --preflight`,
+      then a real build → confirm the PoC calls the model + emits `done` with the deterministic anchor.
 - [ ] **C deferred breadth** (only as the pilots need it): multi-service composition · eval harness v2 ·
       depot caches · JS template (rule-#3 conversation first).
 - **Acceptance:** a real Stage-2 artifact yields a PoC that genuinely *demonstrates core value* (human

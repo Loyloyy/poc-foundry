@@ -372,6 +372,13 @@ class Broker:
             host = self.keyproxy_url.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0]
             no = f"localhost,127.0.0.1,{host}"
             env["NO_PROXY"], env["no_proxy"] = no, no
+        elif getattr(self.cfg, "vllm_allow_host", ""):
+            # NORMAL (keyless) path (M5 B0): a model-calling PoC reaches the egress-ALLOWLISTED model
+            # endpoint directly THROUGH the egress proxy (vllm_allow_host is squid's private-host
+            # exception). OpenAI-client-shaped base_url (…/v1); the only credential is the sacrificial
+            # PF_SANDBOX_VLLM_KEY (the keyless vLLM ignores it). No NO_PROXY change — the call SHOULD go
+            # via the proxy (that is the allowlisted route). Scrubbed out of emitted output at P7.
+            env["PF_SANDBOX_MODEL_BASE_URL"] = f"http://{self.cfg.vllm_allow_host}/v1"
         env.update(env_extra or {})
         return env
 

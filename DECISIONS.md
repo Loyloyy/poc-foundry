@@ -1499,3 +1499,69 @@ fakes** (+3: fence-variant extraction, half-open-fence fallback, re-author-on-un
 recalibration [the only gate change] → (5) citation-format pin + coder anchor → (6) fence-robust
 extraction + compile-and-re-author. iter0 core + iter1 already pass with the critic ACCEPTING genuine
 retrieval evidence; this fix unblocks iter2. Server re-run pending → expect a clean(er) `done`.*
+
+**✅ RESULT — RAG pilot DONE 4/4, clean (2026-06-29).** With all six fixes, `dra-…fa650c-m` →
+`gradio-rag-pgvector` emitted `status=done`, `demonstrates_core_value=yes`, **all 4 criteria met**
+(core citation+id-match+discrimination; verbatim snippet of the cited doc; no marker on unrelated;
+query-dependent retrieval — different topics cite different ids). **Zero churn** (fixes=0, respecs=0,
+replans=0; `degraded_critic=False`), integrity ledger OK (14 test ids) + 0 incidents, clean-room
+install=test=demo=True, hygiene scrubber ran, ~10 min / 14 llm_calls. The non-degraded critic
+`accept→next` on genuine retrieval evidence each pass — proving the recalibration (#4) kept its teeth
+while becoming satisfiable. Fix #6's compile-and-re-author guard fired in production (`authored test
+did not parse — re-authoring once`) and recovered. **The platform demonstrably produces a real,
+verified RAG PoC from a real Stage-2 artifact — the §7 floor.** Residual (logged, not a blocker): a
+`replan` re-attacks already-met iterations from scratch instead of only the unmet tail — a structural
+graph efficiency fix for later, plus `PF_MAX_RUN_WALL_CLOCK_S` to bound degenerate runs.
+
+## #35 — M5 B0: inject the model endpoint into the VM in the NORMAL (keyless) case (2026-06-29)
+
+Prereq for a model-calling template (M5 B): today the VM gets `PF_SANDBOX_MODEL_BASE_URL` ONLY when the
+opt-in key-proxy is provisioned, so a PoC has no endpoint to call on the normal keyless path. Extended
+`Broker._build_vm_env`: when the key-proxy is OFF but `cfg.vllm_allow_host` is set, inject an
+OpenAI-client-shaped `PF_SANDBOX_MODEL_BASE_URL = http://<vllm_allow_host>/v1`. Safe by construction —
+`vllm_allow_host` is already squid's single allowlisted private-host exception (the VM could always
+reach it), the only credential remains the sacrificial `PF_SANDBOX_VLLM_KEY` (the keyless vLLM ignores
+it; Finding-0 holds), and the call STAYS routed through the egress proxy (NOT added to NO_PROXY — that
+is the allowlisted route; only the internal-IP key-proxy needs the bypass). The endpoint is scrubbed
+from emitted output at P7. Key-proxy precedence + normal-no-allow-host (no injection) both preserved.
+Local: **169 fakes** (+1 `test_m5_pilot.py`). Next (B1): a `gradio-rag-llm` template whose
+`generate_reply` does deterministic retrieval + a REAL LLM call to generate the answer, with a
+CODE-appended `[N]` citation as the DETERMINISTIC test anchor (assert the citation/structure, not the
+model's prose) — keeps verification sound while exercising the model endpoint (and the key-proxy).
+
+**B1 — `gradio-rag-llm` template (real LLM generation; 2026-06-29).** New template: same proven
+pgvector retrieval as `gradio-rag-pgvector`, plus `_answer(question, context)` — a REAL call to the
+OpenAI-compatible endpoint at `PF_SANDBOX_MODEL_BASE_URL` (B0) with `PF_SANDBOX_VLLM_KEY`, model id
+DISCOVERED via `/v1/models` (no hard-coded name), `temperature=0`, lazy-imported so the smoke stays
+offline. `generate_reply` glue = retrieve → `_answer` from the retrieved doc → append `cite(doc)`.
+**Determinism design:** the LLM supplies the prose (non-deterministic) but the `[<int>]` citation is
+CODE-appended → the deterministic, verifiable test anchor. The `knowledge` note tells the tester to
+assert STRUCTURE only (citation presence/absence, the integer-id match, non-trivial reply length,
+different-topic→different-id discrimination) and NEVER the model's exact words — carrying forward the
+pilot's citation-format pin (`[<int>]`, not `[doc-N]`). `openai==1.51.0` pinned in the template AND
+baked into the sandbox image (iteration VMs don't `uv pip install`; same rationale as psycopg) → the
+sandbox image needs ONE rebuild on the server. Standalone `docker compose up` passes the model env
+through for a human. Local: **171 fakes** (+2) + contract 11 + hygiene; preflight resolves + pins
+pg→pgvector. *Server (pending): rebuild sandbox image, `template-ci --preflight`, then a real build.*
+
+## #36 — emitted Gradio UI didn't launch + the clean-room demo gate only IMPORTED it (2026-06-29)
+
+Running an emitted RAG bundle standalone (`docker compose up`) crashed: gradio 4.44.1 +
+an UNPINNED `fastapi`/`starlette` (pip pulled a too-new release) → `TypeError: unhashable type:
+'dict'` in gradio's TemplateResponse → gradio's localhost self-check failed → "must set share=True" →
+exit. The PoC's LOGIC was fine (tests pass against pgvector) but the UI never launched.
+
+The deeper finding: the clean-room **demo gate only did `import app`** — it never LAUNCHED the server,
+so it reported `demo=True` while the UI was broken. A verification gap (verification is the value):
+the gate proved the module imports, not that the app runs.
+
+Two fixes, both templates (`gradio-rag-pgvector` + `gradio-rag-llm`): (a) PIN the web stack —
+`fastapi==0.112.2` + `starlette==0.37.2` (a COMPATIBLE pair — fastapi 0.112.2 needs
+starlette>=0.37.2,<0.38; contemporaneous with gradio 4.44.1) — in `requirements.txt`;
+(b) the `pf:demo` block now LAUNCHES `app.py` in the background, polls `http://localhost:7860/` for up
+to 25s (stdlib urllib, no curl dep), and fails if it never serves — so the clean-room now verifies the
+UI actually runs, and this class of dep/launch regression can't pass again. Local: **171 fakes** +
+contract 11 + hygiene. *Server (pending): the exact pin is best-effort — the strengthened demo gate
+will CONFIRM it on the next build (clean-room demo goes red if the combo is still wrong → adjust from
+the error). Fast manual check: add the pins to an existing emitted `workspace/requirements.txt` and
+re-run `docker compose up`.*

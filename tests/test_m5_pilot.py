@@ -143,3 +143,52 @@ def test_tester_write_reauthors_on_unparseable_test(monkeypatch):
     code = pipeline._tester_write(ctx, ["c"], "goal", "iface")
     assert calls["n"] == 2          # it re-authored exactly once
     assert _compiles(code) and "def test_ok" in code
+
+
+# ── B0 (model-calling substrate): the VM must learn the model endpoint even WITHOUT the key-proxy,
+#    so a model-calling PoC can reach the egress-allowlisted vLLM directly. ──
+def test_vm_env_injects_allowlisted_model_endpoint_without_keyproxy():
+    from poc_foundry.sandbox.broker import Broker
+    cfg = SimpleNamespace(sandbox_image="poc-foundry-sandbox", proxy_image="poc-foundry-proxy",
+                          kata_runtime="kata", uv_cache_shared=False, vllm_allow_host="10.0.0.8:8008")
+    b = Broker("poc-m5", cfg, allowed_images={"poc-foundry-sandbox", "poc-foundry-proxy"})
+    b.proxy_url = "http://10.0.0.2:3128"
+    env = b._build_vm_env(None)
+    # normal (keyless) path now injects an OpenAI-client-shaped base_url to the allowlisted endpoint
+    assert env["PF_SANDBOX_MODEL_BASE_URL"] == "http://10.0.0.8:8008/v1"
+    # it stays ROUTED THROUGH the egress proxy (the allowlisted path) — allow-host NOT bypassed
+    assert "10.0.0.8" not in env.get("NO_PROXY", "")
+    # the opt-in key-proxy still WINS when provisioned (its URL + NO_PROXY bypass)
+    b.keyproxy_url = "http://10.0.0.9:8788"
+    env2 = b._build_vm_env(None)
+    assert env2["PF_SANDBOX_MODEL_BASE_URL"] == "http://10.0.0.9:8788"
+    assert "10.0.0.9" in env2["NO_PROXY"]
+
+
+# ── B1: the model-calling template ───────────────────────────────────────────
+def test_rag_llm_template_resolves_pins_and_anchors_on_citation():
+    from poc_foundry.phases.context import load_template
+    from poc_foundry.core import preflight_templates
+    t = load_template("gradio-rag-llm")
+    assert t.services == [{"name": "pg", "vetted": "pgvector"}]
+    assert "generate_reply" in t.interface
+    kl = t.knowledge.lower()
+    # the deterministic-anchor strategy: cite the [<int>] marker, NEVER the model's prose
+    assert "deterministic" in kl and "never assert exact" in kl
+    assert "_answer" in t.knowledge          # points the coder at the real model-call helper
+    assert "[doc-n]" in kl                    # warns against the unsatisfiable format (pilot lesson)
+    r = preflight_templates(["gradio-rag-llm"])[0]
+    assert r["resolves"] and r["services_pinned"]
+
+
+def test_rag_llm_scaffold_helpers_are_offline_and_deterministic():
+    # the scaffold core.py must import + expose the working helpers WITHOUT a DB or model (smoke path)
+    import importlib.util
+    from pathlib import Path
+    p = Path(__file__).resolve().parents[1] / "templates" / "gradio-rag-llm" / "files" / "core.py"
+    spec = importlib.util.spec_from_file_location("rag_llm_core", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.cite({"id": 3}) == "[3]"                       # integer-id [N] format
+    assert mod.retrieve("totally unrelated zzzz") == []       # lexical gate, no DB needed
+    assert mod._embed("pgvector") == mod._embed("pgvector")   # deterministic embedding

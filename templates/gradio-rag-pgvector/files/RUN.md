@@ -24,10 +24,26 @@ Needs `PF_SERVICE_PG_HOST` pointing at a running pgvector (the harness sets it; 
 PYTHONPATH=.deps python -m pytest -q
 ```
 
-## 3. Smoke the UI wiring (does not launch a server)
+## 3. Launch the UI and verify it actually serves a page
+Starts the Gradio server in the background, waits for it to answer on :7860, then stops it. This
+catches UI-launch regressions (e.g. an unpinned web-stack dependency), not just an import.
 <!-- pf:demo -->
 ```bash
-PYTHONPATH=.deps python -c "import app; print('UI module imports OK')"
+PYTHONPATH=.deps python app.py & APP_PID=$!
+PYTHONPATH=.deps python -c "
+import time, sys, urllib.request
+for _ in range(25):
+    try:
+        urllib.request.urlopen('http://localhost:7860/', timeout=2)
+        print('UI launched + served a page OK'); break
+    except Exception:
+        time.sleep(1)
+else:
+    sys.exit(1)
+"
+RC=$?
+kill $APP_PID 2>/dev/null || true
+exit $RC
 ```
 
 ## 4. Launch the full stack (interactive)

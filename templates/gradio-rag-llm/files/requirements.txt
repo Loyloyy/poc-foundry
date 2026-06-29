@@ -1,6 +1,7 @@
 # Pinned start-green deps. gradio needs huggingface_hub<0.26 (HfFolder import; the M1 lesson).
 # psycopg is also baked into the sandbox image, but pin it here so the emitted bundle installs
-# standalone (clean-room + a human running `docker compose up`).
+# standalone (clean-room + a human running `docker compose up`). openai is the OpenAI-compatible
+# client used to call the model at PF_SANDBOX_MODEL_BASE_URL.
 gradio==4.44.1
 huggingface_hub==0.24.7
 # Pin gradio's web stack: an unpinned fastapi/starlette pulls a too-new release that breaks gradio
@@ -9,3 +10,4 @@ huggingface_hub==0.24.7
 fastapi==0.112.2
 starlette==0.37.2
 psycopg[binary]==3.2.3
+openai==1.51.0
