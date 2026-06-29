@@ -37,7 +37,12 @@ from poc_foundry.phases.context import (
     ws_mount,
 )
 
-_CODE_BLOCK = re.compile(r"```(?:python)?\n(?P<body>.*?)\n```", re.DOTALL)
+# Match a fenced block tolerantly: the opening fence may carry ANY info string (``python``, ``py``,
+# ``python3``, or a trailing space — ` ```python `), and the closing fence need not be preceded by a
+# newline. The old strict ``(?:python)?\n`` form silently failed on those variants and fell through to
+# returning the RAW response WITH the fence → a SyntaxError in the staged test (pilot DECISIONS #34).
+_CODE_BLOCK = re.compile(r"```[^\n]*\n(?P<body>.*?)```", re.DOTALL)
+_FENCE_LINE = re.compile(r"^\s*```[A-Za-z0-9_+-]*\s*$")
 
 
 def _now_iso() -> str:
@@ -46,7 +51,11 @@ def _now_iso() -> str:
 
 def _extract_code(resp: str) -> str:
     m = _CODE_BLOCK.search(resp)
-    return (m.group("body") if m else resp).strip() + "\n"
+    body = m.group("body") if m else resp
+    # Defensive belt-and-suspenders: even if the fence regex did not match (a malformed/half-open
+    # fence), NEVER let a bare ```/```python line reach the staged file — it would be a SyntaxError.
+    body = "\n".join(ln for ln in body.splitlines() if not _FENCE_LINE.match(ln))
+    return body.strip() + "\n"
 
 
 # ── P0 ingest ────────────────────────────────────────────────────────────────
@@ -235,10 +244,22 @@ def p3_scaffold(state, ctx: Ctx) -> dict:
 # ── P4 iterate (red-first tester + CoderEngine + cumulative staged VERIFY) ───
 def _tester_write(ctx: Ctx, criteria, goal: str, interface: str, research: str = "") -> str:
     from poc_foundry.models import chat_text
-    resp = chat_text("tester", prompts.tester_prompt(criteria, goal, interface, research=research,
-                                                     knowledge=getattr(ctx.template, "knowledge", "")),
-                     system=prompts.TESTER_SYSTEM)
-    return _extract_code(resp)
+    prompt = prompts.tester_prompt(criteria, goal, interface, research=research,
+                                   knowledge=getattr(ctx.template, "knowledge", ""))
+    # Defense-in-depth: a staged test that does not even PARSE (e.g. a stray markdown fence the
+    # extractor missed) can never go red→green, silently dooming the iteration (pilot DECISIONS #34).
+    # Validate it compiles; if not, RE-AUTHOR once (the tester is non-deterministic). Only the failure
+    # path costs the extra call.
+    code = ""
+    for attempt in range(2):
+        code = _extract_code(chat_text("tester", prompt, system=prompts.TESTER_SYSTEM))
+        try:
+            compile(code, "<staged-test>", "exec")
+            return code
+        except SyntaxError:
+            if attempt == 0:
+                ctx.say("P4: authored test did not parse — re-authoring once")
+    return code   # best-effort; red-first / collect-only will still surface a persistently broken test
 
 
 def _verify_file(sbx, rel: str) -> bool:

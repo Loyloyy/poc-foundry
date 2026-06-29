@@ -100,3 +100,46 @@ def test_critic_prompt_keeps_teeth_against_constant_stub():
     p = prompts.critic_adequacy_prompt("c", "src", "iface").lower()
     assert "constant" in p and "echo stub" in p
     assert "assert true" in p and "is not none" in p
+
+
+# ── tester-output robustness (DECISIONS #34 follow-on 5): a staged test that doesn't PARSE (a stray
+#    markdown fence the extractor missed) silently dooms the iteration. Harden _extract_code + re-author. ──
+def _compiles(src):
+    compile(src, "<t>", "exec")
+    return True
+
+
+def test_extract_code_strips_fence_variants():
+    from poc_foundry.phases.pipeline import _extract_code
+    body = "def test_x():\n    assert 1 == 1"
+    # clean fence, language tag, trailing space after the tag (the iter2 bug), bare fence
+    for opener in ("```python", "```py", "```python ", "```"):
+        out = _extract_code(f"{opener}\n{body}\n```")
+        assert _compiles(out), f"failed for opener {opener!r}: {out!r}"
+        assert "```" not in out
+
+
+def test_extract_code_strips_stray_fence_on_fallback():
+    from poc_foundry.phases.pipeline import _extract_code
+    # a half-open fence (no closing) — regex won't match; the defensive line-strip must still save it
+    out = _extract_code("```python\ndef test_x():\n    assert True")
+    assert "```" not in out and _compiles(out)
+
+
+def test_tester_write_reauthors_on_unparseable_test(monkeypatch):
+    import poc_foundry.models as M
+    from poc_foundry.phases import pipeline
+
+    calls = {"n": 0}
+
+    def fake_chat_text(role, prompt, system=None, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "```python\nthis is (not valid python\n```"   # broken first
+        return "```python\ndef test_ok():\n    assert True\n```"  # clean on re-author
+
+    monkeypatch.setattr(M, "chat_text", fake_chat_text)
+    ctx = SimpleNamespace(template=SimpleNamespace(knowledge=""), say=lambda *a, **k: None)
+    code = pipeline._tester_write(ctx, ["c"], "goal", "iface")
+    assert calls["n"] == 2          # it re-authored exactly once
+    assert _compiles(code) and "def test_ok" in code

@@ -447,9 +447,16 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
       `critic_adequacy_prompt` to judge OBSERVABLE behaviour only (adequate when no CONSTANT stub passes;
       may NOT demand proof-of-mechanism / reject on a hypothetical lookup table) — **teeth retained** (the
       original presence-only test is still rejected; security gates untouched). Hardened the RAG knowledge
-      note to verify the snippet against the doc the reply ACTUALLY cites (ranking-robust → fixes the 2nd-spec
-      "STUCK"). Local: **165 fakes** (+11 `test_m5_pilot.py`) + contract 11 + hygiene clean. DECISIONS #34.
-      *Server (pending): re-run → expect the critic to PASS the grounded green iteration → build `done`.*
+      note to verify the snippet against the doc the reply ACTUALLY cites (ranking-robust). **(5)
+      citation-format pin** — the staged test was UNSATISFIABLE (`_find_cited_doc` parsed a `[doc-N]` string
+      vs the scaffold's `[<int>]`); pinned the format + int-id in the knowledge note + anchored the coder to
+      compose the helpers. **(6) fence-robust extraction** — a ` ```python ` info-string variant leaked the
+      markdown fence into `test_iter_2.py` → SyntaxError → iter unbuildable; loosened `_CODE_BLOCK` + strip
+      stray fences + `compile()`-and-re-author-once. **RESULT (server, 2026-06-29): iter0 (core) + iter1
+      `RED→GREEN` with the non-degraded critic `accept→next` on GENUINE retrieval evidence — the platform
+      does the RAG floor.** (iter2 exposed fix #6; a `replan` wastefully re-attacks met iterations — logged
+      residual.) Local: **168 fakes** (+14 `test_m5_pilot.py`) + contract 11 + hygiene clean. DECISIONS #34.
+      *Server re-run with fix #6 pending → expect a clean(er) `done`.*
 - [ ] **A2 MCP pilot** — new template (chatbot + small MCP server, crisp tool-call assertions; §7 pilot 2).
 - [ ] **A3 Durable-Agent-Execution pilot** — kill-and-resume LangGraph demo (§7 pilot 3).
 - [ ] **B model-calling template** — a real LLM-chatbot template whose PoC calls the vLLM from the VM

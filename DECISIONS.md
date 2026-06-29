@@ -1475,3 +1475,27 @@ mismatch. Local: **165 fakes** (+ format-pin assertion) + contract 11 + hygiene 
 *Running tally — the RAG pilot drove five thin fixes, escalating exactly as a good pilot should:
 (1) discrimination prompt → (2) spec max_tokens → (3) corpus grounding → (4) critic recalibration (the
 one gate change) → (5) citation-format pin + coder anchor. Only #4 touched a gate. Server re-run pending.*
+
+**Follow-on 5 — the staged test didn't PARSE (markdown-fence leak; same pilot, 2026-06-29).** With the
+core proven (iter0+iter1 `accept→next`), iter2 wedged: the error-research diagnosed it exactly —
+`test_iter_2.py` started with a ` ```python ` line → `SyntaxError`, so the cumulative gate could never
+go green and the coder (which edits core.py, not the RO staged test) was doomed. Root cause: the fence
+extractor `_CODE_BLOCK = r"```(?:python)?\n(?P<body>.*?)\n```"` required `python` IMMEDIATELY before
+`\n`; the tester emitted a fence variant (trailing space / info-string), the regex missed, and
+`_extract_code` fell through to returning the RAW response WITH the fence. (iter0/iter1 emitted clean
+fences, so it surfaced only intermittently — and the lessons.md "seed distant topics / doc-id
+diversity" was, again, the coder's hallucinated guess, not the cause.)
+
+Fix (two layers, no gate): (a) loosen `_CODE_BLOCK` to accept any info-string (` ```py `, ` ```python `,
+trailing space) and a fence not preceded by `\n`, AND defensively strip ANY bare fence line on the
+fallback path so a malformed fence can NEVER reach the staged file; (b) defense-in-depth in
+`_tester_write` — `compile()` the authored test and RE-AUTHOR once if it doesn't parse (the tester is
+non-deterministic; only the failure path costs the extra call). This closes the whole class of
+syntactic test bugs (this was the 2nd tester-output bug after the `[doc-N]` format). Local: **168
+fakes** (+3: fence-variant extraction, half-open-fence fallback, re-author-on-unparseable) + contract
+11 + hygiene clean.
+
+*Tally now SIX fixes: (1) discrimination → (2) spec max_tokens → (3) corpus grounding → (4) critic
+recalibration [the only gate change] → (5) citation-format pin + coder anchor → (6) fence-robust
+extraction + compile-and-re-author. iter0 core + iter1 already pass with the critic ACCEPTING genuine
+retrieval evidence; this fix unblocks iter2. Server re-run pending → expect a clean(er) `done`.*
