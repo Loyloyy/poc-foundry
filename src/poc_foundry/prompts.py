@@ -53,7 +53,7 @@ def spec_system(has_services: bool = False) -> str:
 SPEC_SYSTEM = spec_system(False)
 
 
-def spec_prompt(art, interface: str, services: list | None = None) -> str:
+def spec_prompt(art, interface: str, services: list | None = None, knowledge: str = "") -> str:
     services = services or []
     if services:
         names = ", ".join(s.get("name", "") for s in services)
@@ -63,6 +63,12 @@ def spec_prompt(art, interface: str, services: list | None = None) -> str:
     else:
         svc_line = "- Do NOT require networks, GPUs, databases, or services.\n"
     body = f"{summarize_artifact(art)}\n\nTarget interface (fixed): {interface}"
+    if knowledge.strip():   # what FIXED data the scaffold ships — criteria must be grounded in it
+        body += ("\n\n# The PoC's knowledge base (FIXED — do not invent contents)\n" + knowledge.strip()
+                 + "\nGround every criterion in THIS data: the artifact shapes the THEME, but the PoC can "
+                 "only retrieve/answer from the fixed corpus above. Do NOT invent document contents, "
+                 "facts, or values that are not in it (a criterion the fixed corpus cannot satisfy is "
+                 "unbuildable). Phrase the positive case around a topic the corpus actually covers.")
     suffix = (
         "Produce a PoC spec with:\n"
         "- goal: one sentence describing what the chatbot demonstrates.\n"
@@ -92,7 +98,7 @@ TESTER_SYSTEM = (
 
 
 def tester_prompt(criteria, goal: str, interface: str, core_module: str = "core",
-                  research: str = "") -> str:
+                  research: str = "", knowledge: str = "") -> str:
     if isinstance(criteria, str):
         criteria = [criteria]
     crit_block = "\n".join(f"{i}. {c}" for i, c in enumerate(criteria, 1))
@@ -103,6 +109,9 @@ def tester_prompt(criteria, goal: str, interface: str, core_module: str = "core"
         f"(import it as `from {core_module} import generate_reply`)\n\n"
         f"# Success criteria to encode as tests\n{crit_block}"
     )
+    if knowledge.strip():   # what FIXED data the scaffold ships + how to prove real behaviour over it
+        body += ("\n\n# The PoC's knowledge base (FIXED) + how to prove real behaviour\n"
+                 + knowledge.strip())
     if research.strip():   # advisory research notes land in the BODY (suffix stays last)
         body += "\n\n# Research notes (advisory, from fetched sources)\n" + research.strip()
     suffix = (

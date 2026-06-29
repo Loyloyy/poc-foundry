@@ -434,9 +434,16 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
       criterion." Fixed author-side (pure-string): `tester_prompt`, `spec_prompt`, and
       `playbooks/testing.md` now demand **DISCRIMINATION** (a constant return value must FAIL; contrast a
       should-fire vs should-not input) — which the RAG scaffold already supports, so the coder's real glue
-      passes it. Local: **160 fakes** (+3 `test_m5_pilot.py`) + contract 11 + hygiene clean.
-      *Server (pending): re-run the same pilot — expect the critic to PASS discriminating tests and the
-      build to reach `done` (or descope far fewer criteria).*
+      passes it. **Two follow-on slices the re-runs then exposed (all DECISIONS #34):** (2) the architect's
+      structured spec hit the 4000 `max_tokens` default → `LengthFinishReasonError`; bumped `p1_spec` to
+      8000 (the critic call already used that headroom). (3) **corpus grounding** — the architect invented
+      facts the template's FIXED `core.CORPUS` can't retrieve (e.g. "$2.4M Aurora budget") → coder stuck;
+      added a generic opt-in `knowledge` field on templates, injected into spec+tester prompts (the RAG
+      note steers tests to import `core.CORPUS` and assert a verbatim phrase from a retrieved doc → proves
+      real retrieval, no fact-duplication). None of the three touch the critic/gates (their strictness is
+      the design working). Local: **163 fakes** (+9 `test_m5_pilot.py`) + contract 11 + hygiene clean.
+      *Server (pending): re-run the same pilot — expect the critic to PASS retrieval-grounded discriminating
+      tests and the build to reach `done`.*
 - [ ] **A2 MCP pilot** — new template (chatbot + small MCP server, crisp tool-call assertions; §7 pilot 2).
 - [ ] **A3 Durable-Agent-Execution pilot** — kill-and-resume LangGraph demo (§7 pilot 3).
 - [ ] **B model-calling template** — a real LLM-chatbot template whose PoC calls the vLLM from the VM

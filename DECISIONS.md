@@ -1391,3 +1391,29 @@ the richer discrimination prompt tipped it over). Fixed by giving the spec call 
 critic call already uses: `build_chat_model("architect", max_tokens=8000)` in `p1_spec`. Both
 structured `.with_structured_output` calls (architect + critic) are now at 8000; the deterministic
 plan + text-based tester are unaffected. Green bar still 160.
+
+**Follow-on 2 — corpus grounding (same pilot, 2026-06-29):** with the discrimination + max_tokens
+fixes, the re-run progressed but exposed the DEEPER weakness the pilot ladder was meant to find. The
+critic now (correctly) demands proof of REAL retrieval — "the reply must contain content from the
+retrieved document, not just a citation marker a stub could print." The architect tried to satisfy
+that with a CONCRETE fact ("After ingesting 'Project Aurora's budget is $2.4M' … returns '$2.4M'") —
+but **invented a fact the template's FIXED corpus does not contain**, so retrieval can never produce
+it → coder stuck → descope (and the integrity ledger correctly caught a hard-coding gaming attempt:
+"LEDGER FAIL … recorded but not passed → gamed iteration not rewarded"). Root cause: the spec/tester
+don't know the template's actual corpus, so they improvise scenarios from the ARTIFACT that the
+scaffold can't answer.
+
+Fix = a generic, opt-in **`knowledge`** field on a template (`template.json` → `Template.knowledge`),
+injected into BOTH `spec_prompt` and `tester_prompt` (suffix still last). The RAG template's note says:
+the PoC answers ONLY from the fixed `core.CORPUS` (4 docs: RAG / pgvector / citations / Gradio), do
+NOT invent facts not in it, and — to PROVE real retrieval without fact-duplication — a test should
+`from core import CORPUS`, pick a doc, query with its title words, and assert the reply contains a
+VERBATIM phrase read out of that doc's `content` at test time (only genuine retrieval produces the
+doc's own content) plus discrimination (unrelated query → that phrase absent + no-match). This is
+self-grounding (no template.json↔core.py fact drift), satisfiable by the coder's real ~3-line glue,
+AND non-gameable in the critic's eyes. Templates without a `knowledge` note are unchanged (empty
+string → no section). Local: **163 fakes** (+3) + contract 11 + hygiene clean.
+
+*Net: the RAG pilot drove three thin author-side slices — (1) discrimination, (2) spec max_tokens
+headroom, (3) corpus grounding — none touching the critic/gates (their strictness is the design
+working). Server re-run pending to confirm `done`.*

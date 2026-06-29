@@ -50,3 +50,31 @@ def test_tester_prompt_keeps_format_suffix_last_after_change():
     # regression: the playbook compose still keeps the hard-rule/format suffix LAST
     p = prompts.tester_prompt(["c"], "g", "iface")
     assert p.rstrip().endswith("```python block.")
+
+
+# ── corpus grounding (DECISIONS #34 follow-on): the spec/tester must be grounded in the template's
+#    FIXED corpus, else the architect invents facts the scaffold can't retrieve → stuck/descope. ──
+_KB = "The PoC answers ONLY from a FIXED corpus exposed as `core.CORPUS`. Topics: A, B, C."
+
+
+def test_spec_prompt_injects_knowledge_and_forbids_invention():
+    p = prompts.spec_prompt(_art(), "iface", services=[{"name": "pg"}], knowledge=_KB)
+    assert "core.CORPUS" in p
+    assert "do not invent" in p.lower()
+    # absent → no knowledge section (other templates unaffected)
+    assert "knowledge base" not in prompts.spec_prompt(_art(), "iface").lower()
+
+
+def test_tester_prompt_injects_knowledge_before_suffix():
+    p = prompts.tester_prompt(["c"], "g", "iface", knowledge=_KB)
+    assert "core.CORPUS" in p
+    # the format/hard-rule suffix must still come AFTER the injected knowledge
+    assert p.index("core.CORPUS") < p.rindex("```python block.")
+
+
+def test_rag_template_declares_corpus_knowledge():
+    from poc_foundry.phases.context import load_template
+    t = load_template("gradio-rag-pgvector")
+    assert "CORPUS" in t.knowledge and "verbatim" in t.knowledge.lower()
+    # a template without a knowledge note loads cleanly with an empty string
+    assert load_template("gradio-chatbot").knowledge == ""

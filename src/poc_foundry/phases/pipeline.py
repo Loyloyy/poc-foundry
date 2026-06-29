@@ -114,7 +114,8 @@ def p1_spec(state, ctx: Ctx) -> dict:
     llm = build_chat_model("architect", max_tokens=8000).with_structured_output(Spec)
     with tracing.span("spec", artifact=art.id):
         spec = llm.invoke([("system", prompts.spec_system(bool(svcs))),
-                           ("human", prompts.spec_prompt(art, ctx.template.interface, svcs))])
+                           ("human", prompts.spec_prompt(art, ctx.template.interface, svcs,
+                                                         knowledge=getattr(ctx.template, "knowledge", "")))])
     if isinstance(spec, dict):
         spec = Spec(**spec)
     spec = _normalize_spec(spec, ctx.template)
@@ -234,7 +235,8 @@ def p3_scaffold(state, ctx: Ctx) -> dict:
 # ── P4 iterate (red-first tester + CoderEngine + cumulative staged VERIFY) ───
 def _tester_write(ctx: Ctx, criteria, goal: str, interface: str, research: str = "") -> str:
     from poc_foundry.models import chat_text
-    resp = chat_text("tester", prompts.tester_prompt(criteria, goal, interface, research=research),
+    resp = chat_text("tester", prompts.tester_prompt(criteria, goal, interface, research=research,
+                                                     knowledge=getattr(ctx.template, "knowledge", "")),
                      system=prompts.TESTER_SYSTEM)
     return _extract_code(resp)
 

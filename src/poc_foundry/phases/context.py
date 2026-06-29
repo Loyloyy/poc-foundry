@@ -35,6 +35,8 @@ class Template:
     stack: list[dict]
     license: str | None = None
     services: list[dict] = field(default_factory=list)   # [{name, vetted}] — sibling services this PoC needs
+    knowledge: str = ""   # optional grounding note: what FIXED data the scaffold ships (e.g. core.CORPUS)
+                          # + how a test can prove real behaviour over it — injected into spec+tester prompts
 
 
 def load_template(name: str, templates_root: Path | None = None) -> Template:
@@ -53,6 +55,7 @@ def load_template(name: str, templates_root: Path | None = None) -> Template:
         stack=list(manifest.get("stack", [])),
         license=manifest.get("license"),
         services=list(manifest.get("services", [])),
+        knowledge=str(manifest.get("knowledge", "")).strip(),
     )
 
 
