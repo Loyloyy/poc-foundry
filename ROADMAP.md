@@ -421,3 +421,27 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
 - **M4 ✅ COMPLETE (2026-06-25, all server-validated):** S1 refine · S2a audit · S2b key-proxy core +
   infra · S2c `demo-security` (4 beats) · S2d web tab · S3 `docs/PLATFORM.md`. Remaining = explicitly-
   optional breadth only (JS template, multi-service composition, eval harness v2) + the logged residuals.
+
+## M5 — pilots, real model-calling builds, breadth (design §7)
+The shift from "works on fixtures" to "produces real, useful PoCs from real Stage-2 artifacts."
+- [~] **A1 RAG pilot — first real artifact end-to-end** (2026-06-29, in progress). Ran
+      `dra-20260615-112222-fa650c-m` "Self-hosted RAG over a private document store" →
+      `gradio-rag-pgvector` on the server. **First real-artifact build surfaced a structural weakness**
+      (the point of the pilot ladder): the non-degraded critic correctly rejected every iter0 as
+      *gameable* (citation-marker-present tests a constant stub satisfies) → respec→replan→descope churn
+      (the degenerate loop). **Root cause + fix = DECISIONS #34:** a bar mismatch — the tester was told
+      only "a naive echo stub must fail" while the critic rejects any "trivial stub unrelated to the
+      criterion." Fixed author-side (pure-string): `tester_prompt`, `spec_prompt`, and
+      `playbooks/testing.md` now demand **DISCRIMINATION** (a constant return value must FAIL; contrast a
+      should-fire vs should-not input) — which the RAG scaffold already supports, so the coder's real glue
+      passes it. Local: **160 fakes** (+3 `test_m5_pilot.py`) + contract 11 + hygiene clean.
+      *Server (pending): re-run the same pilot — expect the critic to PASS discriminating tests and the
+      build to reach `done` (or descope far fewer criteria).*
+- [ ] **A2 MCP pilot** — new template (chatbot + small MCP server, crisp tool-call assertions; §7 pilot 2).
+- [ ] **A3 Durable-Agent-Execution pilot** — kill-and-resume LangGraph demo (§7 pilot 3).
+- [ ] **B model-calling template** — a real LLM-chatbot template whose PoC calls the vLLM from the VM
+      (`PF_SANDBOX_MODEL_BASE_URL`), making the key-proxy load-bearing in a normal build (handover §2.B).
+- [ ] **C deferred breadth** (only as the pilots need it): multi-service composition · eval harness v2 ·
+      depot caches · JS template (rule-#3 conversation first).
+- **Acceptance:** a real Stage-2 artifact yields a PoC that genuinely *demonstrates core value* (human
+  grade of the report); weaknesses surfaced are fixed as thin slices; zero leaks, green bar green.

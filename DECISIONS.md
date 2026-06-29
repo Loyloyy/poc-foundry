@@ -1344,3 +1344,42 @@ fakes-first.
   routes the HTTP call to squid, which denies the internal IP (`_build_vm_env` adds it); (2) the upstream
   must be the ROOT (no `/v1`) — the proxy appends the VM's `/v1/models` path, so a `/v1` upstream doubles
   it → 404. Normal builds (env unset) unchanged by construction (every path guarded). **M4 COMPLETE.**
+
+## #34 — M5 RAG pilot: align the author-side anti-gaming bar with the critic's (2026-06-29)
+
+**The first real-artifact RAG pilot** (`dra-…fa650c-m` "Self-hosted RAG over a private document store"
+→ `gradio-rag-pgvector`) exposed a structural weakness, exactly what the pilot ladder (design §7) is
+for. The build churned **respec→replan→descope** to exhaustion: every iter0 went RED→GREEN in 1
+attempt, but the non-degraded critic (distinct family — working correctly) rejected each as *gameable*
+— "the test only checks a citation marker/phrase appears, which a stub could satisfy without real
+pgvector retrieval."
+
+**Root cause = a BAR MISMATCH between authoring and judging.**
+- The **tester** was told (only) to make assertions so *"a naive echo stub would FAIL them."*
+- The **critic** rejects if *"a trivial stub UNRELATED to the criterion would satisfy it."*
+
+A *constant-output* stub (`return "[1] foo"`) is not an echo stub but IS a trivial input-insensitive
+stub: it clears the tester's bar yet fails the critic's. So the tester wrote `assert "[" in reply`,
+the coder satisfied it with a near-stub, and the correct critic bounced every iteration forever (the
+degenerate ~90-min loop the residuals list flagged).
+
+**Fix (author-side, thin — the critic's strictness is by design and stays unchanged).** Make the spec
+criteria + the tester tests demand **DISCRIMINATION, not mere presence**: a constant return value must
+FAIL, achieved by contrasting a should-fire input against a should-not input. For RAG this is the
+positive (in-corpus query → citation + verbatim snippet) vs. negative (unrelated query → no-match, no
+citation) pair — which the scaffold already supports (the `retrieve` lexical gate returns `[]` for
+unrelated queries; the stub fallback is the no-match reply), so the coder's real ~3-line glue passes
+it. The tester does NOT need corpus internals — just the relevant-vs-irrelevant contrast.
+
+Three edits, all pure-string (`prompts.py` + `playbooks/testing.md`):
+- `tester_prompt` suffix: "The bar is DISCRIMINATION … a constant return value MUST FAIL … exercise at
+  least TWO contrasting inputs per criterion."
+- `spec_prompt` criteria line: criteria must be "DISCRIMINATING — phrased so a constant canned answer
+  would FAIL it, by contrasting a should-fire case against a should-not case."
+- `playbooks/testing.md` (injected into every tester prompt): replaced the weak "naive echo stub"
+  bullet with a "Discriminate — don't just check presence" bullet (constant return value must fail).
+
+Local: `run_spine_tests.py` **160** (+3 `test_m5_pilot.py`: tester demands discrimination, spec
+criteria discrimination-shaped, format suffix still last) + contract 11 + hygiene clean.
+*Server (pending): re-run the same RAG pilot — expect the critic to PASS discriminating tests instead
+of churning, and the build to reach `done` (or descope far fewer criteria).*

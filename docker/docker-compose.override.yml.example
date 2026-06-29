@@ -33,6 +33,11 @@ services:
       # ../playbooks/hints`. Without it the build still succeeds — the hint is just skipped (tolerated-
       # absent) — but the loop won't persist. Curated playbooks still inject (read-only) regardless.
       - ../playbooks:/app/playbooks
+      # Stage-2 artifacts (READ-ONLY input, rule #6) — mount the ai-engineer-research artifacts dir so
+      # `cli build <artifact-id>` resolves it under PF_ARTIFACTS_ROOT. Must match the mount target
+      # below AND PF_ARTIFACTS_ROOT (set in ../.env to /app/artifacts). Adjust the host path to where
+      # Stage 2 writes them. Needed on the `app` (CLI) path, not just `web`.
+      - /path/to/ai-engineer-research/artifacts:/app/artifacts:ro
 
   # ---- M3 web UI: it RUNS builds (single-slot RunManager) so it needs the SAME host-specific bits as
   #      `app` — the broker RPC socket + PF_WORKSPACE_DIR at the same path. Mirror them here. (The
