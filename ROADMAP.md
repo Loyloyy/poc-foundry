@@ -471,8 +471,20 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
       anchor). One honest `respec` (critic rejected a keyword-gameable test set, then `accept→next`'d a
       stronger one), `fixes=0`, 0 incidents, clean-room install=test=demo=True (demo now LAUNCHES the UI),
       ~22 min (reasoning-model cost). Validated B0 endpoint-injection + the reasoning-model `max_tokens`
-      fix + the gradio pin/demo-gate (#36) end-to-end. Remaining optional: run with `PF_KEYPROXY_UPSTREAM`
-      set to exercise the key-proxy in a real model-calling build (the path is proven; just not run here).
+      fix + the gradio pin/demo-gate (#36) end-to-end. **CORRECTION (#37):** the first two "done" builds
+      were actually riding the snippet FALLBACK — `_answer` failed at `OpenAI()` construction on an
+      openai/httpx `proxies` break, silently swallowed by the coder's `except`. Pinned `httpx<0.28`
+      (template + sandbox image) → hand-verified the re-built bundle genuinely calls the model (`4.2s` +
+      a real LLM paraphrase); added a model-connectivity guard to the template smoke so a broken call now
+      FAILS the build instead of silently degrading. **B is genuinely model-calling as of #37.** Remaining
+      optional: run with `PF_KEYPROXY_UPSTREAM` set to exercise the key-proxy in a real model-calling
+      build (the path is proven; just not run here).
+      **#37 (model call) + #38 (real embeddings):** hand-testing exposed (a) the LLM call was silently
+      failing on an openai/httpx `proxies` break → pinned `httpx<0.28` + added a model-connectivity guard;
+      (b) retrieval QUALITY was poor (the deterministic HASH embedding sent natural queries to the wrong
+      doc) → switched `gradio-rag-llm` to REAL semantic embeddings (`fastembed` + `BAAI/bge-small-en-v1.5`,
+      384-d) baked into the sandbox image (fully offline, no user endpoint) with a calibrated cosine
+      threshold (0.4). Self-sufficient per the design goal. *Server: rebuild sandbox + re-run + re-verify.*
       **B0 ✅ (DECISIONS #35):** the
       broker now injects `PF_SANDBOX_MODEL_BASE_URL` (the egress-allowlisted endpoint) into EVERY VM, not
       just when the key-proxy is on. **B1 ✅ local (DECISIONS #35):** new `gradio-rag-llm` template —

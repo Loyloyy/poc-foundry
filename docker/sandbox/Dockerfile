@@ -13,7 +13,11 @@ ENV PYTHONUNBUFFERED=1 \
     UV_CACHE_DIR=/uv-cache \
     # PoCs are gradio-first: kill phone-home + CDN fonts at the image level (design §5.3).
     GRADIO_ANALYTICS_ENABLED=False \
-    HF_HUB_DISABLE_TELEMETRY=1
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    # Shared, world-readable caches for the BAKED embedding model so the non-root build user reads it
+    # offline at runtime (a model-calling RAG PoC embeds with fastembed). Set BEFORE the bake below.
+    FASTEMBED_CACHE_PATH=/opt/fastembed_cache \
+    HF_HOME=/opt/hf_cache
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git curl ca-certificates build-essential \
@@ -27,7 +31,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # PF_SANDBOX_MODEL_BASE_URL. Per-PoC deps beyond these are installed by `uv` into the workspace at runtime.
 # `httpx<0.28` is REQUIRED with openai 1.51.0: openai passes `proxies=` to httpx, removed in 0.28, so
 # an unpinned httpx makes `OpenAI()` construction raise (a model-calling PoC then silently can't call).
-RUN pip install --upgrade pip && pip install uv pytest ruff 'psycopg[binary]' openai 'httpx<0.28'
+RUN pip install --upgrade pip && pip install uv pytest ruff 'psycopg[binary]' openai 'httpx<0.28' \
+        'fastembed>=0.4,<0.6'
+
+# Pre-download the embedding model into the shared cache so a model-calling RAG PoC (gradio-rag-llm)
+# embeds FULLY OFFLINE in the iteration/clean-room VMs (no HF egress needed, no per-build download).
+# Done here (image build has full internet) as root, then made world-readable for the `builder` user.
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')" \
+    && chmod -R a+rX /opt/fastembed_cache /opt/hf_cache
+
+# Force HF offline at RUNTIME (set AFTER the bake so the download above could reach HF): the sandbox
+# VM uses ONLY the cached model — never phones home (its egress is the allowlisting proxy anyway).
+ENV HF_HUB_OFFLINE=1
 
 # A fixed, non-root build user so workspace ownership maps predictably across virtio-fs
 # (uid/gid mapping is an M0(a) probe item). The workspace is bind-mounted RW at /work; tests/ is

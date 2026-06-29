@@ -181,14 +181,26 @@ def test_rag_llm_template_resolves_pins_and_anchors_on_citation():
     assert r["resolves"] and r["services_pinned"]
 
 
-def test_rag_llm_scaffold_helpers_are_offline_and_deterministic():
-    # the scaffold core.py must import + expose the working helpers WITHOUT a DB or model (smoke path)
+def test_rag_llm_scaffold_imports_light_and_exposes_helpers():
+    # importing core must stay LIGHT — fastembed/psycopg/openai are lazy, so it loads on the dev box;
+    # the model-backed _embed/retrieve are exercised in the sandbox (criterion tests), not here.
     import importlib.util
     from pathlib import Path
     p = Path(__file__).resolve().parents[1] / "templates" / "gradio-rag-llm" / "files" / "core.py"
     spec = importlib.util.spec_from_file_location("rag_llm_core", p)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    assert mod.cite({"id": 3}) == "[3]"                       # integer-id [N] format
-    assert mod.retrieve("totally unrelated zzzz") == []       # lexical gate, no DB needed
-    assert mod._embed("pgvector") == mod._embed("pgvector")   # deterministic embedding
+    assert mod.cite({"id": 3}) == "[3]"                  # integer-id [N] format (fastembed-free)
+    assert mod.EMBED_DIM == 384                          # bge-small-en-v1.5 output dim
+    assert 0 < mod.RELEVANCE_THRESHOLD < 2               # cosine-distance cutoff
+    assert len(mod.CORPUS) >= 2 and all("id" in d and "content" in d for d in mod.CORPUS)
+
+
+def test_rag_llm_smoke_guards_the_model_connectivity_contract():
+    # the model-connectivity guard must ship in the suite so a broken model call FAILS the build
+    # (instead of silently degrading to the snippet fallback) — the openai/httpx `proxies` lesson.
+    from pathlib import Path
+    smoke = (Path(__file__).resolve().parents[1] / "templates" / "gradio-rag-llm" / "files"
+             / "tests" / "test_smoke.py").read_text()
+    assert "PF_SANDBOX_MODEL_BASE_URL" in smoke and "_answer(" in smoke
+    assert "pytest.skip" in smoke   # skipped offline so it never blocks dockerless CI

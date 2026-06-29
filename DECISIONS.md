@@ -1590,3 +1590,58 @@ llm_calls (the reasoning-model cost; the PoC's own model calls run inside the VM
 validated B0 (endpoint injection) + B1 (the template) + the reasoning fix + #36 (pin + demo gate)
 together. Remaining optional: a run with `PF_KEYPROXY_UPSTREAM` set to exercise the key-proxy inside a
 real model-calling build (the mechanism is proven by the M4 demo beat; just not combined with a build).
+
+## #37 — B was NOT actually calling the model (openai/httpx `proxies`); fixed + guarded (2026-06-29)
+
+HONEST CORRECTION to the "B done" claim. Hand-testing the emitted bundle revealed the PoC's `_answer`
+was failing at **`OpenAI()` construction** with `TypeError: Client.__init__() got an unexpected keyword
+argument 'proxies'` — the well-known `openai` 1.51.0 ↔ `httpx` ≥0.28 break (openai passes `proxies=`;
+httpx removed it in 0.28). The template pinned `openai` but left `httpx` unpinned → pip pulled 0.28+.
+The coder's bare `except: → snippet()` fallback SILENTLY swallowed it, so BOTH earlier "done 4/4" builds
+passed entirely on the deterministic snippet fallback — **the LLM was never called.** The structural
+tests couldn't catch it (the exact limitation flagged earlier, now a live failure). My initial probe
+worked only because the `poc-foundry-app` image bakes a compatible httpx; a bare `pip install
+openai==1.51.0` did not.
+
+Fix: pin `httpx==0.27.2` in the template `requirements.txt` AND `httpx<0.28` in the sandbox image bake
+(iteration/clean-room VMs use the baked client). **VERIFIED by hand (2026-06-29):** on the re-built
+bundle, `_answer("what is pgvector", ctx)` → `4.2s` + `'It adds a vector column type to Postgres.'` — a
+real LLM paraphrase (NOT the verbatim snippet), at model latency. So `gradio-rag-llm` is NOW genuinely
+model-calling.
+
+Guard so it can't silently regress: added `test_model_endpoint_actually_answers_when_configured` to the
+template's `tests/test_smoke.py` — when `PF_SANDBOX_MODEL_BASE_URL` is set (every build/clean-room VM via
+B0), `_answer` MUST return non-empty model output, else the SCAFFOLD SMOKE fails the build; skipped
+offline so it never blocks the dockerless fakes/CI. This turns a broken client / unreachable endpoint /
+empty-content into a hard build failure instead of a silent snippet fallback. Local: **172 fakes** (+1)
++ contract 11 + hygiene. Lesson: a silent fallback around the load-bearing call + structural-only tests
+= an unverified claim; the connectivity guard is the missing red-first check for the model call itself.
+
+## #38 — real semantic embeddings (fastembed, baked into the sandbox), self-sufficient (2026-06-29)
+
+Hand-testing the model-calling PoC exposed that retrieval QUALITY was poor: the `gradio-rag-pgvector`
+template's **deterministic stdlib HASH embedding** (a bag-of-words trick chosen in #15/M2a for
+reproducible, offline-unit-testable retrieval) sent 2 of 3 natural-language queries to the WRONG
+document, so the (now-working) LLM honestly answered "I don't know." That hash-embedding decision was
+MINE (a prior session, authoring the template to prove the pgvector sibling path) — defensible for that
+narrow goal, wrong for a template meant to *showcase real RAG*; and I carried it into `gradio-rag-llm`
+(B1) this session without re-examining it. Per the user (platform should build cutting-edge PoCs and NOT
+depend on a user-supplied endpoint), switched `gradio-rag-llm` to REAL embeddings:
+
+- **`fastembed`** (ONNX, NO PyTorch — small + CPU-only) + **`BAAI/bge-small-en-v1.5`** (384-d).
+- **Baked into the sandbox image** (`docker/sandbox/Dockerfile`): `pip install fastembed` + pre-download
+  the model into a world-readable shared cache (`FASTEMBED_CACHE_PATH`/`HF_HOME`), then `HF_HUB_OFFLINE=1`
+  for runtime. So a BUILD embeds fully offline — no HF egress, no per-build download, no user endpoint
+  (the self-sufficiency the user wanted). The emitted standalone bundle pins `fastembed>=0.4,<0.6` and a
+  human downloads the model from HF on first run (normal for any real app).
+- `retrieve` drops the brittle lexical word-overlap gate for a **cosine-distance threshold** (pgvector
+  `<=>`, `RELEVANCE_THRESHOLD=0.4`). **Calibrated** (throwaway fastembed run): in-topic queries land at
+  the RIGHT doc ~0.08-0.10, unrelated ~0.55 — a clean gap, so 0.4 separates them. Still deterministic →
+  reproducible retrieval, but now matches by MEANING (paraphrases find the right doc).
+
+Tradeoff accepted: retrieval is no longer offline-unit-testable on the dev box (needs the model) — so
+the dev-box fakes check only the fastembed-free surface (`cite`, `EMBED_DIM=384`, `RELEVANCE_THRESHOLD`,
+CORPUS), and `_embed`/`retrieve` are verified in the sandbox (criterion tests + the connectivity guard).
+`gradio-rag-pgvector` keeps the hash embedding (its purpose IS the deterministic-plumbing demo). Local:
+**172 fakes** + contract 11 + hygiene. *Server: rebuild the sandbox image, re-run the build, re-verify
+queries 2 & 3 now retrieve the right doc + get real answers.*

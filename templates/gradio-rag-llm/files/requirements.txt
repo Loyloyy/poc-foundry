@@ -11,6 +11,11 @@ fastapi==0.112.2
 starlette==0.37.2
 psycopg[binary]==3.2.3
 openai==1.51.0
+# Real semantic embeddings: fastembed (ONNX, NO PyTorch — small + CPU-only) + BAAI/bge-small-en-v1.5
+# (384-d). The sandbox image bakes the model so a BUILD runs fully offline; a human running the bundle
+# standalone downloads it from Hugging Face on first use. Range (not an exact pin) because fastembed
+# manages its own onnxruntime dep — lock once the resolved version is confirmed on the server.
+fastembed>=0.4,<0.6
 # openai 1.51.0 passes `proxies=` to httpx, which REMOVED that kwarg in 0.28 → `OpenAI()` construction
 # raises `TypeError: unexpected keyword argument 'proxies'`. Pin httpx <0.28 so the client builds.
 httpx==0.27.2

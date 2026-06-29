@@ -4,23 +4,29 @@
 This PoC retrieves from a REAL **pgvector** sibling (Postgres + the `vector` extension, reached BY IP
 via ``PF_SERVICE_PG_HOST``) and then calls a REAL model (the OpenAI-compatible endpoint at
 ``PF_SANDBOX_MODEL_BASE_URL`` with ``PF_SANDBOX_VLLM_KEY``) to write a grounded answer from the
-retrieved document. Retrieval + embeddings are a deterministic stdlib hashing trick (no model, no
-network) so RETRIEVAL stays reproducible + unit-testable; the citation marker is appended IN CODE, so
+retrieved document. Retrieval uses REAL semantic embeddings — a small, efficient, CPU-only sentence
+model (``BAAI/bge-small-en-v1.5`` via **fastembed**/ONNX, no PyTorch), baked into the sandbox image so a
+build runs fully offline — plus **pgvector** for the similarity search. Embeddings are deterministic
+(same text → same vector), so retrieval stays reproducible. The citation marker is appended IN CODE, so
 the deterministic, verifiable part of a reply is the ``[id]`` marker — NOT the model's free-form prose.
 
-The scaffold ships the plumbing WORKING — `_connect`/`_ensure_corpus`, `search` (pgvector ranking),
-`retrieve` (ranking + a lexical relevance gate), `snippet` (a verbatim quote), `cite` (a `[id]` marker),
-and `_answer` (the REAL LLM call) — plus a STUB `generate_reply`. **Build iterations implement
-`generate_reply` by composing these** (a few lines — see its docstring). Importing this module touches
-no DB and no model (`psycopg` + `openai` are imported lazily), so the stdlib smoke test runs offline.
+The scaffold ships the plumbing WORKING — `_connect`/`_ensure_corpus`, `search` (pgvector cosine
+ranking), `retrieve` (semantic search + a distance threshold), `snippet` (a verbatim quote), `cite`
+(a `[id]` marker), and `_answer` (the REAL LLM call) — plus a STUB `generate_reply`. **Build iterations
+implement `generate_reply` by composing these** (a few lines — see its docstring). Importing this module
+is light (`fastembed`/`psycopg`/`openai` are imported lazily); the embedding model loads on first use.
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import time
 
-EMBED_DIM = 64
+EMBED_DIM = 384   # BAAI/bge-small-en-v1.5 (fastembed) output dimension
+
+# Cosine-distance cutoff (pgvector `<=>`: 0 = identical … 2 = opposite). A query whose nearest corpus
+# doc is FARTHER than this is treated as out-of-corpus → no citation. Calibrated on this corpus:
+# in-topic queries land ~0.08-0.10, unrelated ~0.55, so 0.4 separates them cleanly. Tunable.
+RELEVANCE_THRESHOLD = 0.4
 
 # The PoC's fixed knowledge base — topical to the artifact (RAG / retrieval / pgvector / gradio) so
 # domain queries find a match; (id, title, content). Single-spaced content so a snippet is a verbatim
@@ -41,32 +47,28 @@ CORPUS = [
 ]
 
 
-def _tokens(text: str) -> set[str]:
-    return {t for t in "".join(c.lower() if c.isalnum() else " " for c in text).split() if t}
+_EMBEDDER = None
+
+
+def _embedder():
+    """The embedding model — a small, efficient, CPU-only sentence embedder (BAAI/bge-small-en-v1.5 via
+    fastembed/ONNX, NO PyTorch). Loaded once, lazily; the sandbox image bakes the model so a build runs
+    fully offline. Deterministic (same text → same vector) → reproducible retrieval."""
+    global _EMBEDDER
+    if _EMBEDDER is None:
+        from fastembed import TextEmbedding  # lazy: importing this module stays light
+        _EMBEDDER = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+    return _EMBEDDER
 
 
 def _embed(text: str) -> list[float]:
-    """Deterministic stdlib embedding: hash each alphanumeric token into one of EMBED_DIM buckets
-    (bag-of-words), then L2-normalize. Pure + reproducible (no model, no network)."""
-    vec = [0.0] * EMBED_DIM
-    for tok in _tokens(text):
-        vec[int(hashlib.sha1(tok.encode()).hexdigest(), 16) % EMBED_DIM] += 1.0
-    norm = sum(v * v for v in vec) ** 0.5
-    return [v / norm for v in vec] if norm else vec
+    """Real semantic embedding of ``text`` → a 384-d vector. Deterministic, CPU-only, no PyTorch."""
+    vec = next(iter(_embedder().embed([text])))
+    return [float(x) for x in vec]
 
 
 def _vec_literal(vec: list[float]) -> str:
     return "[" + ",".join(f"{v:.6f}" for v in vec) + "]"
-
-
-_VOCAB: set[str] | None = None
-
-
-def _vocab() -> set[str]:
-    global _VOCAB
-    if _VOCAB is None:
-        _VOCAB = set().union(*(_tokens(d["title"] + " " + d["content"]) for d in CORPUS))
-    return _VOCAB
 
 
 def _connect(retries: int = 30):
@@ -102,13 +104,14 @@ def _ensure_corpus(conn) -> None:
 
 
 def search(query: str, k: int = 1) -> list[dict]:
-    """The k corpus documents ranked nearest to ``query`` by pgvector L2 distance — ``[{id, title,
-    content, distance}]``. Always returns up to k rows (no relevance gate; use ``retrieve`` for that)."""
+    """The k corpus documents ranked nearest to ``query`` by pgvector COSINE distance (`<=>`) —
+    ``[{id, title, content, distance}]``. Always returns up to k rows (no relevance gate; use
+    ``retrieve`` for that)."""
     conn = _connect()
     try:
         _ensure_corpus(conn)
         with conn.cursor() as cur:
-            cur.execute("SELECT id, title, content, embedding <-> %s::vector AS dist "
+            cur.execute("SELECT id, title, content, embedding <=> %s::vector AS dist "
                         "FROM docs ORDER BY dist LIMIT %s", (_vec_literal(_embed(query)), k))
             return [{"id": r[0], "title": r[1], "content": r[2], "distance": float(r[3])}
                     for r in cur.fetchall()]
@@ -117,11 +120,10 @@ def search(query: str, k: int = 1) -> list[dict]:
 
 
 def retrieve(query: str, k: int = 1) -> list[dict]:
-    """Relevant corpus docs for ``query``, best-first (pgvector ranking) — or ``[]`` if the query shares
-    NO vocabulary with the corpus. The lexical gate makes "unrelated query → no citation" RELIABLE."""
-    if not (_tokens(query) & _vocab()):
-        return []
-    return search(query, k)
+    """Relevant corpus docs for ``query`` (semantic similarity search in pgvector), best-first — or
+    ``[]`` if the nearest doc is FARTHER than RELEVANCE_THRESHOLD (out-of-corpus → no citation). Real
+    embeddings match by MEANING, so a paraphrased question still finds the right document."""
+    return [h for h in search(query, k) if h["distance"] <= RELEVANCE_THRESHOLD]
 
 
 def snippet(doc: dict, n: int = 8) -> str:
@@ -173,8 +175,9 @@ def generate_reply(message: str, history: list | None = None) -> str:
 
     This template generates the answer with a REAL LLM (`_answer`) but appends the citation in CODE
     (`cite`), so the DETERMINISTIC, verifiable part of a reply is the `[<int id>]` marker — the model's
-    prose varies and must NOT be asserted on. Retrieval (`retrieve`, with a lexical gate → `[]` for an
-    unrelated query) and `cite` (→ `[1]`, an INTEGER id) are ALREADY WORKING. The target shape::
+    prose varies and must NOT be asserted on. Retrieval (`retrieve`, semantic search with a distance
+    threshold → `[]` for an unrelated query) and `cite` (→ `[1]`, an INTEGER id) are ALREADY WORKING.
+    The target shape::
 
         docs = retrieve(message)
         if not docs:
