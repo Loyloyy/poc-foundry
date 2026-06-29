@@ -440,10 +440,16 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
       facts the template's FIXED `core.CORPUS` can't retrieve (e.g. "$2.4M Aurora budget") → coder stuck;
       added a generic opt-in `knowledge` field on templates, injected into spec+tester prompts (the RAG
       note steers tests to import `core.CORPUS` and assert a verbatim phrase from a retrieved doc → proves
-      real retrieval, no fact-duplication). None of the three touch the critic/gates (their strictness is
-      the design working). Local: **163 fakes** (+9 `test_m5_pilot.py`) + contract 11 + hygiene clean.
-      *Server (pending): re-run the same pilot — expect the critic to PASS retrieval-grounded discriminating
-      tests and the build to reach `done`.*
+      real retrieval, no fact-duplication). **(4) critic recalibration (gate change; planning chat
+      unavailable, on the user's direction).** Even with the ideal grounded criterion (coder reached green),
+      the non-degraded critic respec'd it as "a lookup stub could satisfy it without pgvector" — an
+      IMPOSSIBLE bar for a black-box test, making the RAG floor unbuildable. Recalibrated
+      `critic_adequacy_prompt` to judge OBSERVABLE behaviour only (adequate when no CONSTANT stub passes;
+      may NOT demand proof-of-mechanism / reject on a hypothetical lookup table) — **teeth retained** (the
+      original presence-only test is still rejected; security gates untouched). Hardened the RAG knowledge
+      note to verify the snippet against the doc the reply ACTUALLY cites (ranking-robust → fixes the 2nd-spec
+      "STUCK"). Local: **165 fakes** (+11 `test_m5_pilot.py`) + contract 11 + hygiene clean. DECISIONS #34.
+      *Server (pending): re-run → expect the critic to PASS the grounded green iteration → build `done`.*
 - [ ] **A2 MCP pilot** — new template (chatbot + small MCP server, crisp tool-call assertions; §7 pilot 2).
 - [ ] **A3 Durable-Agent-Execution pilot** — kill-and-resume LangGraph demo (§7 pilot 3).
 - [ ] **B model-calling template** — a real LLM-chatbot template whose PoC calls the vLLM from the VM

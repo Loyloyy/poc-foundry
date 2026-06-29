@@ -78,3 +78,23 @@ def test_rag_template_declares_corpus_knowledge():
     assert "CORPUS" in t.knowledge and "verbatim" in t.knowledge.lower()
     # a template without a knowledge note loads cleanly with an empty string
     assert load_template("gradio-chatbot").knowledge == ""
+
+
+# ── critic recalibration (DECISIONS #34 follow-on 3): the non-degraded critic was applying an
+#    IMPOSSIBLE bar to a black-box test ("a lookup stub could satisfy it without pgvector"), making the
+#    RAG template unbuildable. Re-anchor it to OBSERVABLE behavioral adequacy — without losing teeth. ──
+def test_critic_prompt_is_blackbox_behavioral_and_defaults_adequate():
+    p = prompts.critic_adequacy_prompt("the criterion", "def test_x(): assert True", "iface")
+    low = p.lower()
+    assert "black-box" in low
+    assert "default to adequate" in low
+    # explicitly out-of-scope: requiring proof of internal mechanism / rejecting on a lookup table
+    assert "lookup table" in low
+    assert "out of scope" in low
+
+
+def test_critic_prompt_keeps_teeth_against_constant_stub():
+    # the bar that catches the ORIGINAL presence-only gaming (a constant stub passing) must remain
+    p = prompts.critic_adequacy_prompt("c", "src", "iface").lower()
+    assert "constant" in p and "echo stub" in p
+    assert "assert true" in p and "is not none" in p
