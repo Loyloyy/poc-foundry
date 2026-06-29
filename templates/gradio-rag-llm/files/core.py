@@ -138,12 +138,17 @@ def cite(doc: dict) -> str:
 _MODEL_ID: str | None = None
 
 
-def _answer(question: str, context: str, max_tokens: int = 256) -> str:
+def _answer(question: str, context: str, max_tokens: int = 2048) -> str:
     """The REAL model call: ask the OpenAI-compatible endpoint (``PF_SANDBOX_MODEL_BASE_URL`` +
     ``PF_SANDBOX_VLLM_KEY``, injected by the build harness) to answer ``question`` GROUNDED ONLY in
     ``context`` (the retrieved document). ``temperature=0`` for stability. Lazy-imports ``openai`` so
     importing this module stays offline. The wording will vary run-to-run — tests must assert STRUCTURE
-    (the code-appended citation), never the exact prose."""
+    (the code-appended citation), never the exact prose.
+
+    NOTE: ``max_tokens`` is generous (2048) on purpose — the endpoint may serve a REASONING model that
+    spends completion tokens on chain-of-thought before the answer; too small a budget returns an EMPTY
+    ``content``. If a model exposes a separate reasoning channel and ``content`` is still empty, fall
+    back to it so the caller never gets an empty answer."""
     global _MODEL_ID
     from openai import OpenAI  # lazy: the stdlib smoke test imports this module without the SDK
 
@@ -159,7 +164,8 @@ def _answer(question: str, context: str, max_tokens: int = 256) -> str:
                    "content": "Answer the question using ONLY the provided context. Be concise. "
                               "If the context does not contain the answer, say you don't know."},
                   {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}])
-    return (resp.choices[0].message.content or "").strip()
+    msg = resp.choices[0].message
+    return (msg.content or getattr(msg, "reasoning_content", None) or "").strip()
 
 
 def generate_reply(message: str, history: list | None = None) -> str:

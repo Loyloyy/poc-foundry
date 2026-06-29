@@ -1565,3 +1565,15 @@ contract 11 + hygiene. *Server (pending): the exact pin is best-effort — the s
 will CONFIRM it on the next build (clean-room demo goes red if the combo is still wrong → adjust from
 the error). Fast manual check: add the pins to an existing emitted `workspace/requirements.txt` and
 re-run `docker compose up`.*
+
+**B1 follow-on — the on-prem model is a REASONING model (2026-06-29).** First `gradio-rag-llm` build
+descoped iter0; the staged test was correct (clean `[N]` parsing) but the model call returned
+`content=None`. Direct probe: the served model is `GLM-5.1` (a reasoning model); with `_answer`'s
+`max_tokens=256` the whole budget went to chain-of-thought and `content` came back empty (same class as
+the spec `LengthFinishReasonError`). At `max_tokens=2048` it returns clean content (`finish_reason=stop`).
+Fix: `_answer` default `max_tokens` 256→2048 + fall back to `reasoning_content` if `content` is ever
+empty. (The coder's lessons blamed citation formatting — a hallucinated symptom; the real cause was the
+empty model response making the reply just `" [N]"`, which failed the "non-trivial reply" assertion.)
+Caveat to watch on the re-run: a reasoning model is SLOW and the criterion tests call it several times
+per attempt → the model-calling build may strain wall-clock; if so, reduce per-test model calls or cap
+iterations. Template-only change (bind-mounted, no rebuild). Green bar 171.
