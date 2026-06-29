@@ -1450,3 +1450,28 @@ the doc the reply ACTUALLY cites (parse the id) rather than a pre-picked doc —
 a neighbour doc doesn't wedge the coder (the likely cause of the 2nd-spec "STUCK"). Local: **165 fakes**
 (+5 over the pilot: critic is black-box/behavioral/defaults-adequate + still catches a constant stub).
 *Server re-run pending: expect the critic to PASS the grounded green iteration → build `done`.*
+
+**Follow-on 4 — the staged test was UNSATISFIABLE (citation-format bug; same pilot, 2026-06-29).**
+With the critic recalibrated, the blocker moved to the CODER (`fix→fix, did not reach green` → descope,
+no more respec). Pulled the staged test: it was otherwise IDEAL (discrimination + verbatim-snippet-of-
+the-CITED-doc, ranking-robust) but its `_find_cited_doc` did `re.compile(r"\[doc-[^\]]+\]")` then
+`cited_id = marker.strip("[]")` (→ a STRING like "doc-1") and compared `d["id"] == cited_id`. The
+scaffold's `cite()` emits `[1]` (INTEGER id), not `[doc-1]`, and CORPUS ids are ints — so the parser can
+NEVER match for any implementation (string "doc-1" ≠ int 1; and CORPUS ids can't become strings without
+breaking the `int PRIMARY KEY` pgvector schema). The tester invented a format/id-type it didn't know.
+The coder couldn't win regardless. (The lessons.md "threshold tuning / LLMs paraphrase" was the coder
+model's own generic-RAG hallucinated reflection — a wrong mental model, since this scaffold has NO LLM
+and NO tunable threshold — a secondary risk, not the blocker.)
+
+Fix (author-side, no gate): (a) PIN the citation format + id type in the RAG `knowledge` note — the
+marker is `[<int>]` (e.g. `[1]`), CORPUS ids are INTEGERS, find the cited doc by reading the integer
+between the brackets and matching `d['id'] == int(N)`; explicitly "do NOT assume `[doc-N]`/`[source:title]`
+(string-vs-int is the classic unsatisfiable-test bug)". (b) ANCHOR the scaffold `generate_reply`
+docstring: "DETERMINISTIC SCAFFOLD — retrieve/snippet/cite are ALREADY WORKING; ~3 lines of glue; do NOT
+add embeddings/thresholds/LLM calls or follow generic RAG advice; use `cite()` UNCHANGED (the test parses
+`[<int>]`)" — replacing the old "adapt the marker, it may want `[doc-1]`" advice that invited the
+mismatch. Local: **165 fakes** (+ format-pin assertion) + contract 11 + hygiene clean.
+
+*Running tally — the RAG pilot drove five thin fixes, escalating exactly as a good pilot should:
+(1) discrimination prompt → (2) spec max_tokens → (3) corpus grounding → (4) critic recalibration (the
+one gate change) → (5) citation-format pin + coder anchor. Only #4 touched a gate. Server re-run pending.*

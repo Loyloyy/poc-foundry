@@ -76,6 +76,8 @@ def test_rag_template_declares_corpus_knowledge():
     from poc_foundry.phases.context import load_template
     t = load_template("gradio-rag-pgvector")
     assert "CORPUS" in t.knowledge and "verbatim" in t.knowledge.lower()
+    # the citation-format pin that prevents the unsatisfiable-test bug (int id, not [doc-N])
+    assert "INTEGER" in t.knowledge and "[doc-1]" in t.knowledge
     # a template without a knowledge note loads cleanly with an empty string
     assert load_template("gradio-chatbot").knowledge == ""
 

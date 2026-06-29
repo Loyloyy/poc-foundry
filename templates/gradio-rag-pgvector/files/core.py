@@ -137,7 +137,15 @@ def cite(doc: dict) -> str:
 
 def generate_reply(message: str, history: list | None = None) -> str:
     """SCAFFOLD STUB — build iterations implement retrieval HERE using ``retrieve`` / ``cite`` /
-    ``snippet`` (no SQL needed). The target shape::
+    ``snippet`` (no SQL needed).
+
+    THIS IS A DETERMINISTIC SCAFFOLD. Retrieval (``retrieve`` — pgvector ranking + a lexical relevance
+    gate that returns ``[]`` for unrelated queries), the verbatim grounding quote (``snippet``), and the
+    citation marker (``cite`` → ``[<int id>]``, e.g. ``[1]``) are ALREADY IMPLEMENTED AND WORKING. Your
+    job is ~3 lines of GLUE composing them. Do NOT add embeddings, similarity thresholds, an LLM call,
+    or any new retrieval logic — and ignore generic "how to build RAG" advice (threshold tuning,
+    prompting a model to quote verbatim): none of it applies here. ``snippet`` already returns a verbatim
+    substring; the lexical gate already gives the no-match path. The target shape::
 
         docs = retrieve(message)
         if not docs:
@@ -145,11 +153,10 @@ def generate_reply(message: str, history: list | None = None) -> str:
         d = docs[0]
         return f"{cite(d)} {snippet(d)}"          # → e.g. "[1] Retrieval augmented generation grounds ..."
 
-    IMPORTANT — MATCH THE CITATION FORMAT THE STAGED TEST ASSERTS. Read the test first: it may want
-    ``[1]`` (the default `cite`), ``[doc-1]`` (return ``f"[doc-{d['id']}]"``), or ``[source:<title>]``
-    (return ``f"[source:{d['title']}]"``). Producing the wrong marker shape is the usual reason a first
-    attempt fails — so adapt the marker to the test, don't assume ``[1]``. Extend for the spec's other
-    criteria too (multiple matches → cite each in id order; absent topic → no marker). The stub below
-    does NO retrieval, so a real criterion test is RED first.
+    CITATION FORMAT: use ``cite(d)`` UNCHANGED — it yields ``[<int id>]`` (e.g. ``[1]``), which is the
+    format the staged test parses (it reads the integer between the brackets). Do NOT switch to
+    ``[doc-1]`` / ``[source:title]`` — that mismatches the test's parser. Extend for the spec's other
+    criteria (multiple matches → cite each in id order; absent topic → no marker). The stub below does
+    NO retrieval, so a real criterion test is RED first.
     """
     return "I couldn't find any relevant documents."
