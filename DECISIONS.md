@@ -1577,3 +1577,16 @@ empty model response making the reply just `" [N]"`, which failed the "non-trivi
 Caveat to watch on the re-run: a reasoning model is SLOW and the criterion tests call it several times
 per attempt → the model-calling build may strain wall-clock; if so, reduce per-test model calls or cap
 iterations. Template-only change (bind-mounted, no rebuild). Green bar 171.
+
+**✅ RESULT — B (model-calling template) SERVER-VALIDATED (2026-06-29).** With the reasoning-model
+`max_tokens` fix, `gradio-rag-llm` built from `dra-…fa650c-m` → `status=done`,
+`demonstrates_core_value=yes`, **all 4 criteria met**. The PoC's `generate_reply` calls the real vLLM
+(GLM-5.1) to generate the answer and code-appends `[N]` — the platform's first model-calling PoC.
+Integrity held: `respecs=1` (critic correctly bounced a keyword-gameable test set, then `accept→next`'d
+a stronger one), `fixes=0`, `replans=0`, 0 incidents, clean ledger (15 test ids). Clean-room
+install=test=demo=True — and `demo=True` now means the Gradio UI ACTUALLY LAUNCHED (the #36 strengthened
+gate), so the gradio pin (#36) + the demo-gate fix are proven end-to-end too. ~22 min / 31 orchestrator
+llm_calls (the reasoning-model cost; the PoC's own model calls run inside the VM, unmetered). One run
+validated B0 (endpoint injection) + B1 (the template) + the reasoning fix + #36 (pin + demo gate)
+together. Remaining optional: a run with `PF_KEYPROXY_UPSTREAM` set to exercise the key-proxy inside a
+real model-calling build (the mechanism is proven by the M4 demo beat; just not combined with a build).

@@ -9,3 +9,6 @@ huggingface_hub==0.24.7
 fastapi==0.112.2
 starlette==0.37.2
 psycopg[binary]==3.2.3
+# pytest is baked into the sandbox image (the clean-room uses that), but pin it here too so the emitted
+# bundle's RUN.md test block works for a HUMAN running it standalone (no sandbox image).
+pytest==8.3.3

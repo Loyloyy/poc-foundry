@@ -465,8 +465,15 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
       With fix #6 the re-run went **`done` 4/4 with zero churn** (see the success line above).
 - [ ] **A2 MCP pilot** — new template (chatbot + small MCP server, crisp tool-call assertions; §7 pilot 2).
 - [ ] **A3 Durable-Agent-Execution pilot** — kill-and-resume LangGraph demo (§7 pilot 3).
-- [~] **B model-calling template** — a real LLM-chatbot template whose PoC calls the vLLM from the VM,
-      making the key-proxy load-bearing in a normal build (handover §2.B). **B0 ✅ (DECISIONS #35):** the
+- [x] **B model-calling template ✅ SERVER-VALIDATED (2026-06-29).** `gradio-rag-llm` built from the real
+      RAG artifact → `status=done`, `demonstrates_core_value=yes`, **all 4 criteria met** — the platform's
+      FIRST PoC that actually calls the vLLM (GLM-5.1) to GENERATE grounded answers (code-appended `[N]`
+      anchor). One honest `respec` (critic rejected a keyword-gameable test set, then `accept→next`'d a
+      stronger one), `fixes=0`, 0 incidents, clean-room install=test=demo=True (demo now LAUNCHES the UI),
+      ~22 min (reasoning-model cost). Validated B0 endpoint-injection + the reasoning-model `max_tokens`
+      fix + the gradio pin/demo-gate (#36) end-to-end. Remaining optional: run with `PF_KEYPROXY_UPSTREAM`
+      set to exercise the key-proxy in a real model-calling build (the path is proven; just not run here).
+      **B0 ✅ (DECISIONS #35):** the
       broker now injects `PF_SANDBOX_MODEL_BASE_URL` (the egress-allowlisted endpoint) into EVERY VM, not
       just when the key-proxy is on. **B1 ✅ local (DECISIONS #35):** new `gradio-rag-llm` template —
       pgvector retrieval + a REAL `_answer()` model call, with the `[<int>]` citation CODE-appended as the
