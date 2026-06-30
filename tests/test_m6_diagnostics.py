@@ -1,0 +1,128 @@
+"""M6 diagnostics fixes — make a STUCK/descoped iteration debuggable and stop the recovery rungs from
+being fed the harness's own meta-message.
+
+Covers three fixes surfaced by the thin-template run (every criterion descoped with no usable trail):
+  1. coder edit-extraction is robust to a multi-block reasoning-model response (largest fence wins),
+     and the coder records its RAW last response + a non-blank last_output even when no edit applied;
+  2. reflection (`_reflect`) is grounded in the REAL failure detail, not the bare `note`;
+  3. research-on-gaps (`_looks_like_error`) skips a meta-message instead of web-searching it; and a
+     struggling iteration leaves a forensic trail (`_persist_iter_forensics`).
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+
+
+# ── Fix 3: coder edit-extraction robustness + forensics fields ───────────────
+def test_coder_applies_largest_block_from_a_multi_block_response(tmp_path):
+    """A reasoning model emits SEVERAL fenced snippets (a thought, then the full file). With one
+    editable file the coder must apply the LARGEST block — not bail because there is >1 block."""
+    from poc_foundry.coder import BespokeCoder
+
+    (tmp_path / "core.py").write_text("def reply(m):\n    return ''\n")
+
+    multi = (
+        "Here's my plan, first a sketch:\n"
+        "```python\n# sketch: return echo\n```\n"
+        "and now the full file:\n"
+        "```python\ndef reply(m):\n    return 'ECHO: ' + m\n```\n")
+
+    def llm(role, prompt, system=None):
+        return multi
+
+    def verify():
+        ok = "ECHO:" in (tmp_path / "core.py").read_text()
+        return ok, ("1 passed" if ok else "E assert")
+
+    res = BespokeCoder(llm=llm).run(
+        workspace=tmp_path, goal="echo", editable_files=["core.py"],
+        test_sources={"t.py": "assert"}, verify=verify, max_attempts=2)
+    assert res.passed and res.attempts == 1
+    assert res.last_response == multi                     # raw response captured for forensics
+
+
+def test_coder_records_response_and_nonblank_output_when_no_edit_applies(tmp_path):
+    """When the model emits NO code block at all, no edit applies and verify never runs — the result
+    must still carry the raw response + a non-blank last_output (the symptom that hid the failure was a
+    blank output making the incident the meta-string)."""
+    from poc_foundry.coder import BespokeCoder
+
+    (tmp_path / "core.py").write_text("x = 1\n")
+
+    def llm(role, prompt, system=None):
+        return "I think you should just return the message, no code here."
+
+    res = BespokeCoder(llm=llm).run(
+        workspace=tmp_path, goal="g", editable_files=["core.py"],
+        test_sources={"t.py": "assert"}, verify=lambda: (True, "1 passed"), max_attempts=2)
+    assert not res.passed
+    assert res.last_response                              # the raw prose response was captured
+    assert "edit not applied" in res.last_output         # last_output is non-blank → real incident
+
+
+# ── Fix 2: research/reflection no longer fed a meta-message ──────────────────
+def test_looks_like_error_distinguishes_real_errors_from_meta_messages():
+    from poc_foundry.phases.pipeline import _looks_like_error
+
+    assert _looks_like_error("E   AssertionError: assert '[1]' in reply")
+    assert _looks_like_error("ModuleNotFoundError: no module named 'foo'")
+    assert _looks_like_error("Traceback (most recent call last):")
+    assert not _looks_like_error("fix-attempt cap reached")
+    assert not _looks_like_error("")
+
+
+# ── Fix 1/3: reflection grounded in the real detail + forensic trail ─────────
+def _fake_ctx(tmp_path: Path):
+    said: list = []
+    return SimpleNamespace(build_dir=str(tmp_path), say=lambda *a, **k: said.append(a)), said
+
+
+def test_reflect_grounds_the_lesson_in_the_real_detail_not_the_note(tmp_path, monkeypatch):
+    """`_reflect` must put the REAL failure (verify output) into the incident the coder reflects on,
+    not the bare 'fix-attempt cap reached' note."""
+    import poc_foundry.models as M
+    from poc_foundry.phases import pipeline
+
+    captured = {}
+
+    def fake_chat_text(role, prompt, system=None, **kw):
+        captured["prompt"] = prompt
+        return "- bullet one\n- bullet two"
+
+    monkeypatch.setattr(M, "chat_text", fake_chat_text)
+    ctx, _said = _fake_ctx(tmp_path)
+    it = SimpleNamespace(goal="answer from corpus", acceptance=["cite the matching doc"])
+    real_error = "E   AssertionError: assert '[1]' in 'not implemented'"
+
+    pipeline._reflect(ctx, 0, it, "abandoned", 3, [], "fix-attempt cap reached", detail=real_error)
+
+    assert real_error in captured["prompt"]              # the model reflects on the REAL error
+    lessons = (tmp_path / "iterations" / "0" / "lessons.md").read_text()
+    assert real_error in lessons and "fix-attempt cap reached" not in lessons.split("##")[0]
+
+
+def test_persist_iter_forensics_writes_the_trail(tmp_path):
+    from poc_foundry.phases import pipeline
+
+    ctx, _said = _fake_ctx(tmp_path)
+    pipeline._persist_iter_forensics(
+        ctx, 1, test_src="def test_x():\n    assert generate_reply('hi')\n",
+        coder_response="```python\ndef generate_reply(m): ...\n```",
+        verify_output="E   AssertionError: no citation", note="coder did not reach green")
+
+    d = tmp_path / "iterations" / "1"
+    assert (d / "staged_test.py").read_text().startswith("def test_x()")
+    incident = (d / "incident.txt").read_text()
+    assert "AssertionError: no citation" in incident      # the real verify output is preserved
+    assert "def generate_reply" in incident               # the raw coder response is preserved
+
+
+def test_persist_iter_forensics_marks_a_never_applied_edit(tmp_path):
+    from poc_foundry.phases import pipeline
+
+    ctx, _said = _fake_ctx(tmp_path)
+    pipeline._persist_iter_forensics(ctx, 0, test_src="", coder_response="", verify_output="",
+                                     note="fix-attempt cap reached")
+    incident = (tmp_path / "iterations" / "0" / "incident.txt").read_text()
+    assert "no verify ran" in incident

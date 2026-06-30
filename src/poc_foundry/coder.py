@@ -42,6 +42,7 @@ class CoderResult:
     signatures: list[str] = field(default_factory=list)
     note: str = ""
     edited: list[str] = field(default_factory=list)
+    last_response: str = ""   # the coder's RAW last model response (forensics when it never greened)
 
 
 # A verify step: run the staged tests in the sandbox, return (ok, combined_output).
@@ -76,12 +77,16 @@ def _apply_whole(workspace: Path, resp: str, editable: set[str],
                  forbidden: set[str]) -> tuple[bool, str, list[str]]:
     edits = {m.group("path").strip().lstrip("./"): m.group("body")
              for m in _FILE_BLOCK.finditer(resp)}
-    if not edits:  # fallback: exactly one code block + exactly one editable file
+    if not edits and len(editable) == 1:
+        # No `*** FILE:` tag, one editable file: take the LARGEST fenced code block. A reasoning model
+        # working a big change often emits SEVERAL fences while thinking (snippets, the diff, the final
+        # file); the full-file answer is the biggest. (Was: require EXACTLY one block — which silently
+        # rejected every multi-block response, capping the loop with no edit ever applied.)
         blocks = _ANY_BLOCK.findall(resp)
-        if len(blocks) == 1 and len(editable) == 1:
-            edits = {next(iter(editable)): blocks[0]}
+        if blocks:
+            edits = {next(iter(editable)): max(blocks, key=len)}
     if not edits:
-        return False, "no '*** FILE: <path>' blocks found", []
+        return False, "no applicable code block (no '*** FILE:' tag and no fenced code found)", []
     written: list[str] = []
     for path, body in edits.items():
         if path in forbidden:
@@ -174,6 +179,7 @@ class BespokeCoder:
         sigs: list[str] = []
         failure: str | None = None
         last_output = ""
+        last_response = ""
         edited: list[str] = []
 
         for attempt in range(1, max_attempts + 1):
@@ -183,7 +189,9 @@ class BespokeCoder:
                                           edit_format, failure, repeated, playbook))
             except Exception as e:  # noqa: BLE001 — record, never crash the build
                 return CoderResult(False, attempt, round(time.time() - t0, 1), edit_format,
-                                   last_output, sigs, note=f"model error: {e!r}", edited=edited)
+                                   last_output, sigs, note=f"model error: {e!r}", edited=edited,
+                                   last_response=last_response)
+            last_response = resp
 
             if edit_format == "whole":
                 applied, why, written = _apply_whole(workspace, resp, editable_set, forbidden)
@@ -193,6 +201,9 @@ class BespokeCoder:
                 if failure:
                     sigs.append(_signature(failure))
                 failure = f"(edit not applied: {why})"
+                # surface the apply failure as the running 'output' so the incident/forensics never go
+                # blank when NO edit ever applies (the symptom that hid the thin-template failure).
+                last_output = failure
                 continue
             edited = sorted(set(edited) | set(written))
 
@@ -200,10 +211,11 @@ class BespokeCoder:
             last_output = output
             if ok:
                 return CoderResult(True, attempt, round(time.time() - t0, 1), edit_format,
-                                   output, sigs, edited=edited)
+                                   output, sigs, edited=edited, last_response=last_response)
             if failure:
                 sigs.append(_signature(failure))
             failure = output
 
         return CoderResult(False, max_attempts, round(time.time() - t0, 1), edit_format,
-                           last_output, sigs, note="fix-attempt cap reached", edited=edited)
+                           last_output, sigs, note="fix-attempt cap reached", edited=edited,
+                           last_response=last_response)

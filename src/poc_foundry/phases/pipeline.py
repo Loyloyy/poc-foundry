@@ -287,7 +287,36 @@ def _ledger_junit(sbx) -> set[str]:
     return passed
 
 
-def _reflect(ctx: Ctx, i: int, it, it_status: str, attempts: int, incidents: list, note: str) -> None:
+def _looks_like_error(text: str) -> bool:
+    """Does ``text`` carry a real code-error signal worth a web lookup? Guards the research rung from
+    googling a harness META-message (e.g. 'fix-attempt cap reached' → it returned login-lockout help).
+    A genuine pytest/traceback failure trips at least one of these tokens."""
+    t = (text or "").lower()
+    return any(tok in t for tok in
+               ("error", "assert", "traceback", "exception", "failed", "no module", "not defined"))
+
+
+def _persist_iter_forensics(ctx: Ctx, i: int, test_src: str, coder_response: str,
+                            verify_output: str, note: str) -> None:
+    """Forensic trail for a struggling/descoped iteration. The workspace is rolled back on descope, so
+    without this a descoped iteration leaves NO evidence (only an ungrounded lesson). Writes the staged
+    test the coder fought + its raw last response + the real verify output. Best-effort; never crashes."""
+    try:
+        dest = Path(ctx.build_dir) / "iterations" / str(i)
+        dest.mkdir(parents=True, exist_ok=True)
+        if test_src:
+            (dest / "staged_test.py").write_text(test_src)
+        (dest / "incident.txt").write_text(
+            f"# Iteration {i} incident\n\nnote: {note}\n\n"
+            f"## verify output (last)\n{(verify_output or '(no verify ran — no edit ever applied)')[:6000]}\n\n"
+            f"## coder last response (raw)\n{(coder_response or '(none captured)')[:8000]}\n")
+        ctx.say(f"P4 iter{i}: forensics → iterations/{i}/incident.txt")
+    except OSError:
+        pass
+
+
+def _reflect(ctx: Ctx, i: int, it, it_status: str, attempts: int, incidents: list, note: str,
+             detail: str = "") -> None:
     """Tier-1 reflection (design §5.3 P4.f, §5.9): on a STRUGGLING iteration, interrogate the coder
     ("what would have helped?") and write ``builds/<id>/iterations/<i>/lessons.md`` grounded in the
     concrete incident. Skipped when the iteration was clean (no incident, first-try green) — a lesson
@@ -300,7 +329,9 @@ def _reflect(ctx: Ctx, i: int, it, it_status: str, attempts: int, incidents: lis
                  or it_status in ("abandoned", "incident", "red-first-failed"))
     if not struggled:
         return
-    incident = ("; ".join(str(x) for x in incidents) or note
+    # Prefer the REAL failure (the coder's last verify output / raw response) over the harness
+    # meta-note — an ungrounded incident ('fix-attempt cap reached') makes the lesson a guess.
+    incident = (detail.strip() or "; ".join(str(x) for x in incidents) or note
                 or ("(forced reflection — validation hook)" if forced else "(repeated failures)"))
     try:
         from poc_foundry.models import chat_text
@@ -359,6 +390,11 @@ def _maybe_research(ctx: Ctx, state, i: int, it, fresh: bool):
 
     if state.research_pending and state.research_error:
         query, kind = state.research_error, "error"
+        if not _looks_like_error(query):
+            # the 'error' is a harness meta-message (e.g. a cap notice or a non-applied-edit), not a
+            # real code error — a web lookup can only return noise. Clear the request and skip.
+            ctx.say(f"P4 iter{i}: research skipped — no real error signal to look up")
+            return "", [], 0, {"research_pending": False}
     elif fresh and it.research_questions and state.last_research_iteration != i:
         query, kind = "; ".join(it.research_questions[:5]), "questions"
     else:
@@ -443,6 +479,7 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     red_first_ok, inv_ok = True, True
     crit_status, it_status, attempts, note = "pending", "pending", 0, ""
     coder_stuck, coder_error = False, ""   # → the research rung (b): a repeated-error abandon
+    coder_last_output, coder_last_response = "", ""   # forensics for a struggling/descoped iteration
 
     sbx = ctx.broker.create(
         mounts=[ws_mount(ctx.workspace_dir), staged_tests_mount(staging_tests)], name=f"iter{i}",
@@ -494,6 +531,7 @@ def p4_iterate(state, ctx: Ctx) -> dict:
                 edit_format="whole", max_attempts=getattr(ctx.cfg, "max_fix_attempts", 3),
                 playbook=guidance)
             attempts = res.attempts
+            coder_last_output, coder_last_response = res.last_output, res.last_response
             if integrity.blocking(incidents):
                 it_status, crit_status = "incident", "descoped"
                 note = "; ".join(str(x) for x in incidents if x.severity == "high")[:300]
@@ -521,7 +559,7 @@ def p4_iterate(state, ctx: Ctx) -> dict:
                 # research rung (b): p_critic escalates to targeted research before descope/replan.
                 dup = len(res.signatures) != len(set(res.signatures))
                 coder_stuck = dup or os.environ.get("PF_FORCE_RESEARCH") == "1"
-                coder_error = (res.last_output or note)[-1200:]
+                coder_error = (res.last_output or res.last_response or note)[-1200:]
                 ctx.say(f"P4 iter{i}: criterion DESCOPED after {attempts} attempt(s) "
                         f"({note}{'; STUCK' if coder_stuck else ''})")
     finally:
@@ -546,7 +584,12 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     for c in targets:                                    # reflect the outcome on THIS iteration's criteria
         c.status = crit_status
 
-    _reflect(ctx, i, it, it_status, attempts, incidents, note)   # Tier-1 lessons on a struggling iter
+    if it_status not in ("green", "met-existing"):       # forensic trail for a struggling/descoped iter
+        _persist_iter_forensics(ctx, i, test_src, coder_last_response, coder_last_output, note)
+    # Tier-1 lessons grounded in the REAL failure (the coder's verify output / raw response), not the
+    # bare meta-note — so the lesson diagnoses instead of guessing.
+    _reflect(ctx, i, it, it_status, attempts, incidents, note,
+             detail=(coder_last_output or coder_last_response))
 
     rec = IterationRecord(goal=it.goal, status=it_status, attempts=attempts,
                           tests_added=len(authored - set(state.authored_test_ids)))

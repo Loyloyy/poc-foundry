@@ -501,3 +501,23 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
       depot caches · JS template (rule-#3 conversation first).
 - **Acceptance:** a real Stage-2 artifact yields a PoC that genuinely *demonstrates core value* (human
   grade of the report); weaknesses surfaced are fixed as thin slices; zero leaks, green bar green.
+
+## M6 — harness generalisation (thin-template autonomy probe) 🟡 IN PROGRESS (2026-06-30)
+Goal: prove the harness can assemble a RAG PoC with only FRAMEWORK-level help (rails + primitives as
+libraries), not pre-written solution logic — the litmus test for handling cutting-edge artifacts.
+Local green bar: `run_spine_tests.py` (178) + contract (11) + hygiene.
+- [x] **Thin RAG template** `gradio-rag-thin` — same rails as `gradio-rag-llm` (Gradio, pgvector sibling,
+      offline embedder + model call exposed as `search`/`llm`/`_embed`/`CORPUS`), but `generate_reply` is
+      a stub and the `knowledge` note is a contract, not a recipe. Thick one kept for comparison. (DEC #39)
+- [x] **Run #1 (untuned) — INCONCLUSIVE but revealing.** Every criterion descoped at the cap, never green;
+      root cause was the harness DISCARDING the evidence (reflection + research fed the meta-message
+      `fix-attempt cap reached`; the coder's edits never applied because the parser rejected multi-block
+      reasoning output). DECISIONS #39.
+- [x] **Diagnostics fixes (general harness):** multi-block edit-extraction (largest fence) · `last_response`
+      + non-blank `last_output` · reflection grounded in the real failure · research skips meta-messages
+      (`_looks_like_error`) · forensic trail on descope (`_persist_iter_forensics`). Fakes `test_m6_diagnostics.py` (6).
+- [ ] **Run #2 (server, pending)** — rerun `gradio-rag-thin` on `dra-…fa650c-m` with the hardened harness;
+      now edits apply → read the REAL RAG attempt + REAL error from `iterations/<i>/incident.txt`, then judge
+      the capability question (can the loop assemble retrieve→ground→cite, or is a stronger coder needed?).
+- **Acceptance:** a clear, evidence-backed verdict on thin-template autonomy — either a verified green (the
+  loop genuinely composed RAG) or a documented capability gap with the real error in hand, never a blind descope.

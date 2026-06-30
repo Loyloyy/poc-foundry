@@ -1684,3 +1684,46 @@ fixes=0, 0 incidents. The #37/#38 chain (dead LLM call → crude retriever → m
 model-bake → construct-only guard) is RESOLVED: a green build now means "retrieves the right doc and
 grounds a real LLM answer in it." Minor residual: the architect sometimes emits a 1-criterion spec
 (spec-lint caveat) → a respec recovers it; harmless. **B (model-calling template) = DONE, verified.**
+
+## #39 — M6 thin-template autonomy probe + the diagnostics fixes it surfaced (2026-06-30)
+
+**Why.** The objective is a HARNESS that GENERALISES (Stage-2 research → buildable PoC), and a simple
+RAG is the litmus test: if it can't assemble RAG with only framework-level help, it won't handle the
+cutting-edge artifacts Stage 2 surfaces. The shipped `gradio-rag-llm` is over the line — it pre-writes
+`retrieve`/`_answer`/`cite`, leaving the coder ~5 lines of glue (solution-scaffolding = hardcoding the
+answer to THIS task; brittle when the aim changes). New template **`gradio-rag-thin`**: same RAILS
+(Gradio, the pgvector sibling, an offline embedder + a model-completion call exposed AS LIBRARIES —
+`search`/`llm`/`_embed`/`CORPUS`) but NO RAG logic; `generate_reply` is a stub and the `knowledge` note
+is trimmed to a CONTRACT, not a recipe. Kept `gradio-rag-llm` intact for a thick-vs-thin comparison.
+
+**Honest protocol:** ONE untuned run; do NOT tweak the template to force green; a descope is a MORE
+informative result than a scaffolded green; any fix goes into GENERAL capability, not template
+spoon-feeding; hand-test the emitted bundle.
+
+**Run #1 (artifact `dra-…fa650c-m`, server) — INCONCLUSIVE, but revealing.** EVERY criterion descoped
+at the 3-attempt cap (iter0 core + iter1, fix+replan budgets exhausted), never green once. The killer
+finding was NOT "the coder can't do RAG" — it was that **the harness threw away the evidence**:
+- `lessons.md` "Concrete incident" was `fix-attempt cap reached` in BOTH iters — `_reflect` was passed
+  the harness META-`note`, not the coder's real verify output → every lesson was an ungrounded GUESS.
+- `iterations/1/research.md` had queried the literal string `fix-attempt cap reached` and the web-research
+  agent returned **login-lockout help** ("close your browser") — proof the error fed to research was the
+  meta-message. That only happens when `res.last_output` is EMPTY → the coder's edits **never applied**.
+- Edit-parser cause (`coder._apply_whole`): with one editable file it required EXACTLY ONE fenced block;
+  a reasoning model emitting SEVERAL fences (a thought + the full file) was silently rejected → no edit →
+  cap reached with a blank trail. The thin template stressed **edit-extraction robustness**, which the
+  thick template (one tiny block) always dodged — so run #1 measured the parser, not the planner.
+
+**Fixes (general harness, NOT teaching-to-the-test; green bar 178):**
+1. **Edit-extraction robust to multi-block output** — one editable file ⇒ apply the LARGEST fenced block
+   instead of bailing on >1. (`coder._apply_whole`.)
+2. **Forensics never blank** — `CoderResult.last_response` (raw last model response) added; a
+   never-applied-edit now sets `last_output` to the apply-failure reason.
+3. **Reflection grounded in the REAL failure** — `_reflect(..., detail=)` prefers the coder's
+   verify-output/raw-response over the meta-`note`.
+4. **Research won't google a meta-message** — `_looks_like_error` gates the error-research rung (skips
+   `fix-attempt cap reached` & non-applied-edit notes).
+5. **Forensic trail on descope** — `_persist_iter_forensics` writes `iterations/<i>/staged_test.py` +
+   `incident.txt` (real verify output + raw coder response), which survive the workspace rollback.
+
+Next: rerun `gradio-rag-thin` once with the hardened harness → now the coder's edits apply, so we get the
+REAL RAG attempt + the REAL error, and can finally judge the capability question. Fakes: `test_m6_diagnostics.py` (6).
