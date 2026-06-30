@@ -249,3 +249,15 @@ def test_tester_and_critic_prompts_demand_a_shortcut_proof_test():
 
     critic = prompts.critic_adequacy_prompt("crit", "def test_x():\n    assert True\n", "iface")
     assert "shortcut" in critic.lower() and "echo" in critic.lower() # inadequate if an echo stub passes
+
+
+# ── tool-calling pilot (gradio-tool): kit+glue + a shortcut-proof tool contract ──────────────
+def test_gradio_tool_template_declares_tool_sibling_and_shortcut_proof_knowledge():
+    from poc_foundry.phases.context import load_template
+
+    t = load_template("gradio-tool")
+    assert t.editable_files == ["core.py"]                          # kit+glue: only the glue is editable
+    assert any(s.get("vetted") == "toolserver" for s in t.services)  # the private tool sibling
+    k = t.knowledge.lower()
+    assert "call_tool" in k and "opaque" in k                       # the tool-only value is the anchor
+    assert "shortcut-proof" in k and ("price_usd" in k or "sku" in k)

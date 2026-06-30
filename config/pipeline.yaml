@@ -52,6 +52,11 @@ vetted_services:
     image: opensearchproject/opensearch
     pinned_tag: "<pin-before-use>"
     role: search/lexical
+  - name: toolserver                 # tool-calling pilot (gradio-tool): private catalogue tool sibling
+    image: poc-foundry-toolserver     # built locally from templates/gradio-tool/files/toolserver
+    pinned_tag: "0.1.0"
+    role: tool-api
+    ready_cmd: "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""
 
 # ── Egress allowlist (design §5.2; the proxy is the sole exit) ───────────────
 # The orchestrator's own egress goes through this proxy too (Finding-0). The VM reaches the proxy on

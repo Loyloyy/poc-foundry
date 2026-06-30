@@ -505,7 +505,7 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
 ## M6 — harness generalisation (thin-template autonomy probe) 🟡 IN PROGRESS (2026-06-30)
 Goal: prove the harness can assemble a RAG PoC with only FRAMEWORK-level help (rails + primitives as
 libraries), not pre-written solution logic — the litmus test for handling cutting-edge artifacts.
-Local green bar: `run_spine_tests.py` (185) + contract (11) + hygiene.
+Local green bar: `run_spine_tests.py` (189) + contract (11) + hygiene.
 - [x] **Thin RAG template** `gradio-rag-thin` — same rails as `gradio-rag-llm` (Gradio, pgvector sibling,
       offline embedder + model call exposed as `search`/`llm`/`_embed`/`CORPUS`), but `generate_reply` is
       a stub and the `knowledge` note is a contract, not a recipe. Thick one kept for comparison. (DEC #39)
@@ -549,9 +549,21 @@ Local green bar: `run_spine_tests.py` (185) + contract (11) + hygiene.
       echo/lookup-passable tests (keeps mechanism-agnosticism; dropped the hard "default to adequate"). Tester
       told to write the generalisation case. Symmetric **weak-test re-author rung** (dual of #41): green-but-
       gameable → strengthen that test before respec. Fixed stale re-author log wording. Green bar 187. DEC #42.
-- [ ] **Run #6 (server, pending)** — rerun `gradio-rag-thin` on `dra-…fa650c-m`. Does the stronger bar force
-      real `search`/`llm` use (a paraphrase case the echo-toy can't fake)? Does the symmetric rung lift past
-      the gameable-test wall? If the coder STILL won't use the primitives when the test demands generalisation
-      → genuine capability frontier (→ Tier-1 worked example, or the stronger-coder gap). Then start **MCP**.
+- [x] **Run #6 — #1 works at the critic; bottleneck moved to the tester.** The critic now explicitly
+      rejects shortcut/lookup tests ("a stub that looks up the top doc via `search` and returns a word would
+      pass without real RAG"). But the tester couldn't reliably write a test that's shortcut-proof AND
+      red-first-valid AND satisfiable (oscillated: too-weak → red-first violations ×4 → ledger gap). Exposed a
+      bug: red-first violation REUSED the bad test instead of re-authoring. DECISIONS #43.
+- [x] **Red-first→re-author fix.** A red-first violation now re-authors the test with feedback (bounded),
+      instead of looping on it. Green bar 188.
+- [x] **Tool-calling pilot `gradio-tool` (cross-domain; design §7 MCP pilot, first slice).** kit+glue
+      (`toolkit.py` = `call_tool`+`llm`+`CATALOG_PRODUCTS`, editable `core.py`) + a private tool sibling
+      (`toolserver/`: stdlib HTTP, pinned `poc-foundry-toolserver:0.1.0`) with OPAQUE prices the model can't
+      know + a `/calls` audit. Shortcut-proof discriminator = the tool's exact opaque value. DEVIATION FLAGGED:
+      HTTP tool sibling, not MCP wire protocol (first slice). Preflight resolves; allowlisted; green bar 189. DEC #43.
+- [ ] **Run #7 (server, pending) — FIRST tool-pilot build (untuned, NEW domain).** `$DC --profile images build
+      toolserver`, then build `--template gradio-tool` (with a tool-shaped `--brief`). Does the loop compose a
+      real `call_tool` (a price the toy can't fake) — proving the general machinery holds outside RAG — or
+      game/descope? First-attempt outcome is the honest cross-domain signal.
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG
   using the real primitives, proven by a generalisation test a toy can't fake) or a documented capability gap.

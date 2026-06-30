@@ -1,0 +1,16 @@
+# Pinned start-green deps. gradio needs huggingface_hub<0.26 (HfFolder import; the M1 lesson).
+gradio==4.44.1
+huggingface_hub==0.24.7
+# Pin gradio's web stack: an unpinned fastapi/starlette pulls a too-new release that breaks gradio
+# 4.44.1's template rendering (the UI never launches). Versions contemporaneous with gradio 4.44.1.
+fastapi==0.112.2
+starlette==0.37.2
+# openai is the OpenAI-compatible client used to phrase the answer via PF_SANDBOX_MODEL_BASE_URL.
+openai==1.51.0
+# openai 1.51.0 passes `proxies=` to httpx, which REMOVED that kwarg in 0.28 → `OpenAI()` construction
+# raises `TypeError: unexpected keyword argument 'proxies'`. Pin httpx <0.28 so the client builds.
+httpx==0.27.2
+# pytest is baked into the sandbox image (the clean-room uses that), but pin it here too so the emitted
+# bundle's RUN.md test block works for a HUMAN running it standalone (no sandbox image).
+pytest==8.3.3
+# (The tool client uses only the stdlib `urllib` — no HTTP dependency needed.)

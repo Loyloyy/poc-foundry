@@ -708,9 +708,21 @@ def p_critic(state, ctx: Ctx) -> dict:
     elif status == "incident":
         disposition, reason = "descope", "integrity incident — gamed iteration not rewarded"
     elif status == "red-first-failed":
-        disposition, reason = (("fix", "red-first failure — re-author the test")
-                               if state.fix_count < K else
-                               ("descope", "red-first failures exhausted fix budget"))
+        # the staged test passed against the DO-NOTHING scaffold → the TEST is inadequate, not the code;
+        # reusing it just loops (run #6 burned 4 attempts this way). Re-author it once WITH feedback, then
+        # fall back to the fix/descope budget.
+        if state.reauthor_count < cfg.reauthor_cap:
+            disposition, reason = "fix", "red-first violation — re-authoring the test (it passed against the stub)"
+            upd["reauthor_pending"] = True
+            upd["reauthor_reason"] = ("the staged test passed against a DO-NOTHING stub (red-first violation): it "
+                                      "does not actually require the behaviour. Tighten it so the unimplemented "
+                                      "stub FAILS — assert the real positive signal — while staying shortcut-proof "
+                                      "(a constant/echo/lookup stub must also fail).")
+            upd["reauthor_count"] = state.reauthor_count + 1
+        elif state.fix_count < K:
+            disposition, reason = "fix", "red-first failure — retry"
+        else:
+            disposition, reason = "descope", "red-first failures exhausted budgets"
     else:  # abandoned — coder did not reach green
         # ESCALATION LADDER (design §5.8): a STUCK abandon (repeated error) not yet researched THIS
         # iteration → grant a fix BUT request targeted research first (p4 runs it on re-entry). The

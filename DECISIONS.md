@@ -1864,3 +1864,38 @@ Green bar 187. Next: run #6 — does the stronger bar force real `search`/`llm` 
 echo-toy can't fake), and does the symmetric rung lift the build past the gameable-test wall? If the
 coder still won't use the primitives even when the test demands generalisation → that's the genuine
 capability frontier (→ Tier-1 example, or the stronger-coder gap).
+
+## #43 — M6: red-first→re-author fix + the tool-calling pilot `gradio-tool` (cross-domain generalisation) (2026-07-01)
+
+**Red-first→re-author (general harness).** Run #6 burned 4 attempts looping on a red-first violation: the
+ladder SAID "re-author the test" but actually REUSED the stub-passable test. Fixed — a red-first violation
+(test green against the do-nothing scaffold) now triggers a one-shot test re-author WITH feedback ("your
+test passed against a do-nothing stub; tighten it, stay shortcut-proof"), bounded by `reauthor_cap`, then
+falls back to the fix/descope budget. Completes the #41/#42 re-author family.
+
+**`gradio-tool` — the tool-calling pilot (design §7 MCP pilot, FIRST SLICE).** Cross-domain validation of
+the general machinery (the user's real motive: "a PoC of ANY kind on its own", not just RAG). Reuses every
+RAG lesson:
+- **kit + glue:** primitives in non-editable `toolkit.py` (`call_tool` + `llm` + `CATALOG_PRODUCTS`),
+  editable `core.py` glue. The interface gate + the anti-shortcut bar carry over unchanged.
+- **A private tool sibling** (`toolserver/`: stdlib HTTP, no deps, tiny pinned image
+  `poc-foundry-toolserver:0.1.0`) serving a private catalogue with OPAQUE prices/SKUs the model cannot
+  know, and LOGGING every call (`/calls`) so a test can verify genuine invocation. Single source: the
+  template's `toolserver/` dir is both the broker's vetted-sibling build context (docker/compose.yaml) and
+  stamped into the emitted bundle — one server, no duplication.
+- **Shortcut-proof verification (the #1 principle, a NEW domain):** the discriminator is the tool's exact
+  OPAQUE return value — a reply stating the real price proves the tool was actually called; a model-only or
+  echo stub cannot fake it. The knowledge note also asks for a paraphrased query (generalisation) + the
+  optional `/calls` invocation audit. This is the MCP-pilot's core challenge (prove a real external tool was
+  invoked and its structured result used) — and it tests whether the harness's toy-catching machinery holds
+  in a domain it was NOT tuned on (an untuned template → first-attempt result is the honest signal, §3b).
+- **DEVIATION FLAGGED (design §7 names MCP):** first slice uses a plain HTTP tool sibling, NOT the MCP wire
+  protocol (JSON-RPC/SSE + an SDK dep). Captures the entire verification challenge offline/pinnable/simple;
+  real MCP transport is a later refinement. User-approved ("proceed with whatever is best"); raise with the
+  planning chat if MCP-protocol fidelity is required.
+
+Broker allowlist picks up `poc-foundry-toolserver:0.1.0` automatically via `service_refs()` (rule #8: image
+harness-fixed in pipeline.yaml, never templated). Local: preflight resolves + services_pinned; green bar 189
+(`run_spine_tests.py` + contract + hygiene); zero leaks (opaque catalogue values are invented, not real).
+Next (server): `$DC --profile images build toolserver`, then a build with `--template gradio-tool` — does the
+loop compose a real tool call (price the toy can't fake), or game/descope? First-attempt outcome either way.

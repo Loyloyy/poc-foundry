@@ -1,0 +1,23 @@
+{
+  "name": "gradio-tool",
+  "version": "0.1.0",
+  "description": "A start-GREEN Gradio chatbot that answers questions by CALLING A REAL EXTERNAL TOOL (a private product-catalogue sibling service over HTTP) and using its structured result, then phrasing the answer with a REAL model. Tool-calling pilot (MCP-in-spirit): the tool returns OPAQUE values the model cannot know, so a verifiable reply proves the tool was genuinely invoked. Ships ONLY primitives (the tool client + the model call); the build writes the glue.",
+  "stamp_dir": "files",
+  "editable_files": ["core.py"],
+  "smoke_test": "tests/test_smoke.py",
+  "suite": "tests",
+  "interface": "core.generate_reply(message: str, history: list | None = None) -> str",
+  "run_cmd": "docker compose up --build",
+  "services": [
+    {"name": "toolserver", "vetted": "toolserver"}
+  ],
+  "stack": [
+    {"layer": "ui", "choice": "gradio", "pinned_version": "4.44.1"},
+    {"layer": "tool-server", "choice": "stdlib-http", "pinned_version": "0.1.0"},
+    {"layer": "model-client", "choice": "openai", "pinned_version": "1.51.0"},
+    {"layer": "language", "choice": "python", "pinned_version": "3.12"}
+  ],
+  "template_repo": null,
+  "license": "MIT",
+  "knowledge": "This PoC answers a user's question by CALLING A REAL EXTERNAL TOOL — a private product-catalogue service — and using its structured result; a question about a product NOT in the catalogue gets a no-match reply. The tool-calling LOGIC is what the build writes (in the editable `core.py`); the PRIMITIVES are provided as a library in `toolkit` (imported by `core.py`, not rewritten): `call_tool(product)` → the private lookup, returning `{product, sku, price_usd, found}` where the `sku`/`price_usd` are OPAQUE values obtainable ONLY by calling the tool (the model cannot know them); `llm(prompt, system=...)` → a real model completion (wording VARIES run to run); and `CATALOG_PRODUCTS` → the product names the tool knows (you may NOT invent prices/SKUs).\nBecause the model's prose is non-deterministic and the prices are tool-only, criteria/tests must assert what only a GENUINE TOOL CALL can produce — NEVER the model's exact wording. Make each criterion DISCRIMINATING and SHORTCUT-PROOF: a stub that does NOT call the tool (a constant, an echo of the product name, or the model answering from memory) MUST FAIL. The strongest check: for an in-catalogue product, the reply must contain the tool's EXACT returned value (the `price_usd` or `sku` from `call_tool`) — compute the expected value by calling `call_tool` in the test and assert it appears in the reply; an in-memory or echo stub cannot produce that opaque value. Contrast with an out-of-catalogue product → a no-match reply with no price. For GENERALISATION, phrase the in-catalogue case DIFFERENTLY from a bare product name (e.g. 'how much does the lattice router x1 set me back?') so a literal keyword match alone is insufficient. You MAY additionally verify genuine invocation by GETting the tool sibling's `/calls` endpoint (at `http://$PF_SERVICE_TOOLSERVER_HOST:8000/calls`) and asserting the queried product was recorded."
+}

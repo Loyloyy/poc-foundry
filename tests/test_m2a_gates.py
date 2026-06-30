@@ -344,6 +344,14 @@ def test_critic_fixes_then_reauthors_then_replans_then_descopes_a_failing_coder(
     assert desc["verdict"] == "proceed" and desc["descope_report"]                          # honest descope
 
 
+def test_critic_reauthors_a_red_first_violation_instead_of_reusing(tmp_path, monkeypatch):
+    from poc_foundry.phases.pipeline import p_critic
+    ctx = _critic_ctx(monkeypatch, tmp_path)
+    upd = p_critic(_critic_state("red-first-failed", reauthor_count=0), ctx)
+    assert upd["verdict"] == "fix"                     # re-author the bad test, not reuse-and-loop
+    assert upd["reauthor_pending"] is True and upd["reauthor_count"] == 1
+
+
 def test_critic_descopes_an_integrity_incident_never_rewards_gaming(tmp_path, monkeypatch):
     from poc_foundry.phases.pipeline import p_critic
     ctx = _critic_ctx(monkeypatch, tmp_path, adequate=True)    # even if a later test looks adequate...

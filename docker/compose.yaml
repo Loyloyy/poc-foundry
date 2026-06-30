@@ -94,6 +94,15 @@ services:
     env_file:
       - ../.env                          # supplies PF_VLLM_ALLOW_HOST for the private-host exception
 
+  # ---- Private tool-server image (BUILD target) for the tool-calling pilot (gradio-tool). The broker
+  #      spins it as a vetted SIBLING (image pinned in pipeline.yaml). Single source: the template's
+  #      toolserver/ dir, so the emitted bundle and the broker sibling build the SAME server. ----
+  toolserver:
+    build:
+      context: ../templates/gradio-tool/files/toolserver
+    image: poc-foundry-toolserver:0.1.0
+    profiles: ["images"]
+
 networks:
   depot-net:
     external: true

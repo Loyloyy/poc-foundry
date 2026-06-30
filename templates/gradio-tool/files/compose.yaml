@@ -1,0 +1,36 @@
+# Standalone run of the emitted PoC (design §5.6: continuation/demo = `docker compose up` with the
+# REAL sibling service). The private tool server + the Gradio app on one network; the app reaches the
+# tool by the compose service name `toolserver` (PF_SERVICE_TOOLSERVER_HOST). For the build harness the
+# broker provides the tool sibling AND the model endpoint and injects them by IP/URL instead — this
+# file is for a human running the bundle.
+#
+# The app calls a model: set PF_SANDBOX_MODEL_BASE_URL (an OpenAI-compatible base URL ending in /v1)
+# and PF_SANDBOX_VLLM_KEY in your shell before `docker compose up`. With an on-prem keyless vLLM the
+# key can be any non-empty string.
+
+services:
+  toolserver:
+    build:
+      context: ./toolserver
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    image: python:3.12-slim
+    working_dir: /app
+    depends_on:
+      toolserver:
+        condition: service_healthy
+    environment:
+      PF_SERVICE_TOOLSERVER_HOST: toolserver
+      GRADIO_ANALYTICS_ENABLED: "False"
+      PF_SANDBOX_MODEL_BASE_URL: ${PF_SANDBOX_MODEL_BASE_URL:-}
+      PF_SANDBOX_VLLM_KEY: ${PF_SANDBOX_VLLM_KEY:-not-needed}
+    volumes:
+      - .:/app
+    command: bash -lc "pip install -q -r requirements.txt && python app.py"
+    ports:
+      - "7860:7860"
