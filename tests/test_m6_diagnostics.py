@@ -186,3 +186,54 @@ def test_interface_defs_parses_the_function_name():
     assert _interface_defs("core.generate_reply(m: str, h: list | None = None) -> str") == ["generate_reply"]
     both = _interface_defs("core.generate_reply(m)", ["CORPUS"])
     assert "generate_reply" in both and "CORPUS" in both
+
+
+# ── buggy-test recovery rung (stuck-after-research → re-author the staged test once) ──────────
+def _critic_state(tmp_path, **kw):
+    from poc_foundry.config import load_config
+    from poc_foundry.state import BuildState, IterationPlan, Plan, Spec
+    from poc_foundry.artifact import SuccessCriterion, IterationRecord
+
+    cfg = load_config(tmp_path / "builds")
+    ctx = SimpleNamespace(cfg=cfg, say=lambda *a, **k: None)
+    spec = Spec(goal="g", success_criteria=[SuccessCriterion(text="c", core=True)], buildable=True)
+    base = dict(build_id="poc-x", spec=spec,
+                plan=Plan(iterations=[IterationPlan(goal="g", acceptance=["c"], interface="x")]),
+                iteration=0, fix_count=1,
+                iteration_records=[IterationRecord(goal="g", status="abandoned", attempts=3)],
+                last_coder_stuck=True, last_coder_error="'1' in {1,2,3,4} is always False (str vs int)",
+                last_research_iteration=0)   # research rung already consumed this iteration
+    base.update(kw)
+    return BuildState(**base), ctx
+
+
+def test_critic_grants_one_reauthor_when_stuck_after_research(monkeypatch, tmp_path):
+    import poc_foundry.models as M
+    from poc_foundry.phases import pipeline
+
+    monkeypatch.setattr(M, "same_family", lambda a, b: False)   # non-degraded → K=3
+    st, ctx = _critic_state(tmp_path, reauthor_count=0)
+    upd = pipeline.p_critic(st, ctx)
+    assert upd["verdict"] == "fix"
+    assert upd["reauthor_pending"] is True and upd["reauthor_count"] == 1
+    assert "str vs int" in upd["reauthor_reason"]
+    assert not upd.get("research_pending")          # research consumed → re-author rung fires instead
+
+
+def test_critic_stops_reauthoring_once_budget_is_spent(monkeypatch, tmp_path):
+    import poc_foundry.models as M
+    from poc_foundry.phases import pipeline
+
+    monkeypatch.setattr(M, "same_family", lambda a, b: False)
+    st, ctx = _critic_state(tmp_path, reauthor_count=1)   # cap is 1 → no more re-authors
+    upd = pipeline.p_critic(st, ctx)
+    assert upd["verdict"] == "fix" and not upd.get("reauthor_pending")   # falls through to a plain fix
+
+
+def test_tester_prompt_includes_the_diagnosis_only_when_reauthoring():
+    from poc_foundry import prompts
+
+    with_diag = prompts.tester_prompt("crit", "goal", "core.generate_reply(m)",
+                                      diagnosis="citation '1' (str) never in {1,2,3,4} (int)")
+    assert "UNSATISFIABLE" in with_diag and "str) never in" in with_diag
+    assert "UNSATISFIABLE" not in prompts.tester_prompt("crit", "goal", "core.generate_reply(m)")

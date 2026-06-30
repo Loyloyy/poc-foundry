@@ -24,6 +24,7 @@ critic:
   respec_cap: 1                    # spec revisions allowed (versioned)
   degraded_fix_limit_k: 2          # lower K when critic.family == coder.family (degraded-critic mode)
   replan_cap: 1                    # replan-remaining verdicts before forced descope
+  reauthor_cap: 1                  # M6: buggy-test re-authors per iteration (stuck-after-research rung)
 
 # ── License gate (design §3.15) ─────────────────────────────────────────────
 # permissive → may adapt code/**; copyleft/unknown → patterns-only, never copied, flagged in docs.

@@ -98,7 +98,7 @@ TESTER_SYSTEM = (
 
 
 def tester_prompt(criteria, goal: str, interface: str, core_module: str = "core",
-                  research: str = "", knowledge: str = "") -> str:
+                  research: str = "", knowledge: str = "", diagnosis: str = "") -> str:
     if isinstance(criteria, str):
         criteria = [criteria]
     crit_block = "\n".join(f"{i}. {c}" for i, c in enumerate(criteria, 1))
@@ -109,6 +109,15 @@ def tester_prompt(criteria, goal: str, interface: str, core_module: str = "core"
         f"(import it as `from {core_module} import generate_reply`)\n\n"
         f"# Success criteria to encode as tests\n{crit_block}"
     )
+    if diagnosis.strip():   # buggy-test recovery: a PRIOR test for this criterion could not be passed
+        body += ("\n\n# A previous test for this criterion was UNSATISFIABLE — re-author it CORRECTLY\n"
+                 "An earlier test could not be passed even by a correct implementation; the implementer "
+                 "reported:\n" + diagnosis.strip()[:800] + "\nRewrite the test so it FAITHFULLY encodes "
+                 "the criterion AND is actually satisfiable. Avoid the reported flaw — common ones: "
+                 "comparing citation ids extracted as STRINGS against integer ids (cast consistently), "
+                 "asserting the model's exact non-deterministic wording, requiring a marker the interface "
+                 "was never told to emit, or importing a name the module does not define. Assert only "
+                 "observable, deterministic behaviour the implementation can actually produce.")
     if knowledge.strip():   # what FIXED data the scaffold ships + how to prove real behaviour over it
         body += ("\n\n# The PoC's knowledge base (FIXED) + how to prove real behaviour\n"
                  + knowledge.strip())

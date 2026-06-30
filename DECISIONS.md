@@ -1770,3 +1770,41 @@ Fakes: `test_m6_diagnostics.py` now 10 (multi-block apply, last_response, reflec
 meta-guard, forensics, + the interface gate revert/allow/parse). Next: run #3 with the kit+glue thin
 template + the gate; if it still reinvents instead of composing `ragkit`, climb to Tier-1 (a worked
 example) — do NOT hardcode RAG specifics into the template.
+
+## #41 — M6 run #3: kit+glue WORKS (real RAG, no toy); the bottleneck shifts to tester quality → buggy-test recovery rung (2026-06-30)
+
+**Run #3 (kit+glue thin template + Tier-0 directive + interface gate) — the autonomy question answered
+positively, with a new bottleneck.** `workspace/core.py` shows the coder now composes REAL RAG with the
+provided primitives: `from ragkit import CORPUS, llm, search` → `search(message, k=3)` → a distance
+relevance gate → `llm(prompt, system=...)` grounding. **No fake corpus, no keyword toy.** The kit+glue +
+Tier-0 directive SOLVED the run-#2 gaming. Clean-room now `install=test=demo=True` (the interface gate
+also reverted a desperate `generate_reply` deletion — worked as designed). One criterion (grounding via
+word-overlap) genuinely MET. So: with only framework-level help (primitives as a library), the model
+builds real RAG unaided.
+
+**But `status=incomplete` (core descoped) — and the cause is TESTER quality, not coder capability:**
+- **An impossible, buggy tester-written test.** The `citations reference valid CORPUS id` test extracts
+  citation ids as STRINGS (`'1'` via regex) and checks them against INTEGER CORPUS ids (`{1,2,3,4}`) —
+  `'1' in {1,2,3,4}` is ALWAYS False. Unsatisfiable by construction. The coder's raw response shows it
+  diagnosed the exact str-vs-int bug but CAN'T fix it (it can't edit the test), and on fix-retry the
+  harness REUSES the same broken test → guaranteed descope. The critic doesn't catch this — it guards
+  against tests that are too LENIENT (gameable), never too STRICT/buggy.
+- **Citation determinism (coder subtlety):** for the core criterion it asked the LLM to emit `[id]`
+  citations (non-deterministic → sometimes absent) instead of CODE-appending them (the #36/#38 lesson).
+
+**Diagnosis: the bottleneck moved coder → tester.** A buggy/impossible staged test dooms a criterion
+regardless of coder skill, in ANY domain.
+
+**Fix — buggy-test recovery rung (general; green bar 185).** New escalation rung in the §5.8 ladder:
+when a coder is STUCK *after* the research rung is consumed (the test is likely the problem), re-author
+THIS iteration's staged test ONCE — feeding the coder's own diagnosis to the tester ("a prior test was
+unsatisfiable; here's why: …; rewrite it correctly, avoid str-vs-int id comparisons / asserting model
+prose / requiring an unemitted marker"). Re-gated by red-first + the critic, so it can't become a
+gameable freebie. Bounded by `reauthor_cap` (default 1/iteration, env `PF_REAUTHOR_CAP`). Also: a
+research SKIP now marks the rung consumed (so re-author becomes reachable). Ladder is now
+fix → research → **re-author-test** → replan → descope. `prompts.tester_prompt(diagnosis=…)`,
+`state.reauthor_*`, `cfg.reauthor_cap`. Fakes: `test_m6_diagnostics.py` (13).
+
+Next: run #4 — does the re-author rung rescue the str-vs-int criterion (and does the coder discover
+code-appended citations)? If the citation-determinism subtlety persists, climb to Tier-1 (a general
+"make the asserted part deterministic in your code, not via the model" worked example in the playbook).

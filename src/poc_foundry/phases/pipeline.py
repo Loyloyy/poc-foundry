@@ -242,10 +242,12 @@ def p3_scaffold(state, ctx: Ctx) -> dict:
 
 
 # ── P4 iterate (red-first tester + CoderEngine + cumulative staged VERIFY) ───
-def _tester_write(ctx: Ctx, criteria, goal: str, interface: str, research: str = "") -> str:
+def _tester_write(ctx: Ctx, criteria, goal: str, interface: str, research: str = "",
+                  diagnosis: str = "") -> str:
     from poc_foundry.models import chat_text
     prompt = prompts.tester_prompt(criteria, goal, interface, research=research,
-                                   knowledge=getattr(ctx.template, "knowledge", ""))
+                                   knowledge=getattr(ctx.template, "knowledge", ""),
+                                   diagnosis=diagnosis)
     # Defense-in-depth: a staged test that does not even PARSE (e.g. a stray markdown fence the
     # extractor missed) can never go red→green, silently dooming the iteration (pilot DECISIONS #34).
     # Validate it compiles; if not, RE-AUTHOR once (the tester is non-deterministic). Only the failure
@@ -403,9 +405,10 @@ def _maybe_research(ctx: Ctx, state, i: int, it, fresh: bool):
         query, kind = state.research_error, "error"
         if not _looks_like_error(query):
             # the 'error' is a harness meta-message (e.g. a cap notice or a non-applied-edit), not a
-            # real code error — a web lookup can only return noise. Clear the request and skip.
+            # real code error — a web lookup can only return noise. Clear the request and mark the
+            # research rung consumed for this iteration (so the re-author rung becomes reachable).
             ctx.say(f"P4 iter{i}: research skipped — no real error signal to look up")
-            return "", [], 0, {"research_pending": False}
+            return "", [], 0, {"research_pending": False, "last_research_iteration": i}
     elif fresh and it.research_questions and state.last_research_iteration != i:
         query, kind = "; ".join(it.research_questions[:5]), "questions"
     else:
@@ -470,7 +473,8 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     # fresh iteration. Produces cited research notes injected into the tester (fresh) + the coder.
     research_md, research_incidents, _research_calls, research_upd = _maybe_research(ctx, state, i, it, fresh)
 
-    if not fresh:
+    reauthor = state.reauthor_pending          # M6: the critic flagged the staged test as possibly flawed
+    if not fresh and not reauthor:
         # FIX-RETRY of this iteration (the critic granted another go): REUSE the same staged test —
         # don't re-author it. Saves a tester call and keeps the coder's target STABLE so it converges
         # instead of chasing a freshly-generated (possibly different) test each round. The workspace was
@@ -479,7 +483,10 @@ def p4_iterate(state, ctx: Ctx) -> dict:
         test_src = test_path.read_text()
         ctx.say(f"P4 iter{i}: reusing the staged test (fix-retry — no re-author)")
     else:
-        test_src = _tester_write(ctx, it.acceptance, it.goal, it.interface, research=research_md)
+        if reauthor:   # buggy-test recovery: re-author with the coder's diagnosis of why it was stuck
+            ctx.say(f"P4 iter{i}: re-authoring the staged test (prior test may be flawed — stuck after research)")
+        test_src = _tester_write(ctx, it.acceptance, it.goal, it.interface, research=research_md,
+                                 diagnosis=(state.reauthor_reason if reauthor else ""))
         test_path.write_text(test_src)
     chown_to_builder(staging_tests)
 
@@ -618,6 +625,7 @@ def p4_iterate(state, ctx: Ctx) -> dict:
            "caveats": state.caveats + ([note] if note else []),
            # research-rung bookkeeping: stuck signal for p_critic (b) + clear any pending request
            "last_coder_stuck": coder_stuck, "last_coder_error": coder_error,
+           "reauthor_pending": False,   # consumed if it was set (the test was just re-authored)
            "log": state.log + [f"P4 iter{i}: {it_status} (attempts={attempts})"]}
     out.update(research_upd)   # last_research_iteration / research_pending=False / research_calls
     return out
@@ -698,12 +706,23 @@ def p_critic(state, ctx: Ctx) -> dict:
         # iteration → grant a fix BUT request targeted research first (p4 runs it on re-entry). The
         # rung fires at most once per iteration (last_research_iteration guard) before the normal
         # fix → replan → descope budget ladder resumes.
-        can_research = (state.last_coder_stuck and not state.research_pending
-                        and state.last_research_iteration != state.iteration)
+        researched = state.last_research_iteration == state.iteration   # research rung consumed this iter
+        can_research = state.last_coder_stuck and not state.research_pending and not researched
+        # M6 buggy-test recovery: once research is consumed and the coder is STILL stuck, the staged test
+        # itself may be flawed/impossible (e.g. the str-vs-int citation bug) — the coder can't fix it (it
+        # can't edit the test). Re-author it ONCE, feeding the coder's diagnosis to the tester; red-first +
+        # the critic still gate the new test, so it can't become a gameable freebie.
+        can_reauthor = (state.last_coder_stuck and researched
+                        and state.reauthor_count < cfg.reauthor_cap)
         if can_research and state.fix_count < K:
             disposition, reason = "fix", "stuck on a repeated error — escalating to targeted research"
             upd["research_pending"] = True
             upd["research_error"] = state.last_coder_error or "coder stuck (repeated error)"
+        elif can_reauthor and state.fix_count < K:
+            disposition, reason = "fix", "stuck after research — re-authoring the staged test (it may be flawed)"
+            upd["reauthor_pending"] = True
+            upd["reauthor_reason"] = (state.last_coder_error or "")[-800:]
+            upd["reauthor_count"] = state.reauthor_count + 1
         elif state.fix_count < K:
             disposition, reason = "fix", "coder did not reach green — another iteration"
         elif state.replan_count < cfg.replan_cap:
@@ -739,6 +758,7 @@ def p_critic(state, ctx: Ctx) -> dict:
             verdict = "next"
             upd["iteration"] = i + 1
             upd["fix_count"] = 0          # each iteration gets a fresh fix budget
+            upd["reauthor_count"] = 0     # …and a fresh buggy-test re-author budget
         else:
             verdict = "proceed"
 

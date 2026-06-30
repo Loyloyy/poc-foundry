@@ -116,6 +116,13 @@ class BuildState(BaseModel):
     last_coder_error: str = ""         # last coder run's error tail (for the research query)
     research_calls: int = 0            # model calls spent in research (budget visibility)
 
+    # M6 buggy-test recovery rung — additive. When a coder is stuck AFTER research (the staged test may
+    # be flawed/impossible, e.g. asserting str ids against int ids), re-author the test ONCE, feeding the
+    # coder's diagnosis to the tester. Re-gated by red-first + the critic so it can't become gameable.
+    reauthor_pending: bool = False     # p_critic → p4: re-author this iteration's staged test on re-entry
+    reauthor_reason: str = ""          # the coder's stuck diagnosis, handed to the tester as advisory
+    reauthor_count: int = 0            # test re-authors spent (vs reauthor_cap)
+
     # bookkeeping
     log: list[str] = Field(default_factory=list)   # human-readable phase trace
     caveats: list[str] = Field(default_factory=list)

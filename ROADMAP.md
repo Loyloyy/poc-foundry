@@ -505,7 +505,7 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
 ## M6 — harness generalisation (thin-template autonomy probe) 🟡 IN PROGRESS (2026-06-30)
 Goal: prove the harness can assemble a RAG PoC with only FRAMEWORK-level help (rails + primitives as
 libraries), not pre-written solution logic — the litmus test for handling cutting-edge artifacts.
-Local green bar: `run_spine_tests.py` (182) + contract (11) + hygiene.
+Local green bar: `run_spine_tests.py` (185) + contract (11) + hygiene.
 - [x] **Thin RAG template** `gradio-rag-thin` — same rails as `gradio-rag-llm` (Gradio, pgvector sibling,
       offline embedder + model call exposed as `search`/`llm`/`_embed`/`CORPUS`), but `generate_reply` is
       a stub and the `knowledge` note is a contract, not a recipe. Thick one kept for comparison. (DEC #39)
@@ -525,9 +525,19 @@ Local green bar: `run_spine_tests.py` (182) + contract (11) + hygiene.
       domain-agnostic "use the provided helpers, don't reinvent/amputate" directive (rung 0 of a graduated
       guidance ladder); `coder._interface_problem` reverts any edit that drops the declared interface.
       Fakes `test_m6_diagnostics.py` (10). Green bar 182.
-- [ ] **Run #3 (server, pending)** — rerun `gradio-rag-thin` (kit+glue) on `dra-…fa650c-m`. The coder can no
-      longer clobber the scaffold; does it now COMPOSE `ragkit` (real RAG) or still reinvent a toy? If it
-      still games, climb to Tier-1 (a general worked example in the coder playbook) — never hardcode RAG
-      specifics. Once RAG is solid, start the **MCP** pilot as the cross-domain generalisation check.
+- [x] **Run #3 — kit+glue WORKS: the coder composes REAL RAG** (`from ragkit import …` → `search` →
+      relevance gate → `llm` grounding; no toy). Clean-room `install=test=demo=True`; one criterion met. But
+      `incomplete` because the bottleneck moved to TESTER quality: a buggy `str`-vs-`int` citation test that
+      is unsatisfiable by construction (coder diagnosed it but can't edit the test; critic doesn't catch
+      buggy/strict tests) + the coder relied on the LLM for citations instead of code-appending. DECISIONS #41.
+- [x] **Buggy-test recovery rung (general).** New §5.8 ladder rung: stuck-AFTER-research → re-author the
+      staged test ONCE (coder's diagnosis → tester), re-gated by red-first + critic, bounded by
+      `reauthor_cap` (default 1). Ladder: fix → research → **re-author** → replan → descope.
+      `prompts.tester_prompt(diagnosis=…)`, `state.reauthor_*`, `cfg.reauthor_cap`. Fakes (13). Green bar 185.
+- [ ] **Run #4 (server, pending)** — rerun `gradio-rag-thin` on `dra-…fa650c-m`: does the re-author rung
+      rescue the str-vs-int criterion (and does the coder discover code-appended citations)? If the
+      citation-determinism subtlety persists, climb to **Tier-1** (a general "make the asserted part
+      deterministic in your code, not via the model" worked example). Once RAG is solid → start the **MCP**
+      pilot as the cross-domain generalisation check.
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG
   using the real primitives) or a documented capability gap, never a toy that games a behavioural test.

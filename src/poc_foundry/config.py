@@ -78,6 +78,7 @@ class BuildConfig:
     respec_cap: int
     degraded_fix_limit_k: int
     replan_cap: int
+    reauthor_cap: int   # M6: per-iteration buggy-test re-authors (stuck-after-research rung)
 
     # research-on-gaps (M2c S4) — app-level fetch allowlist (advisory; NOT the build-VM allowlist)
     research_hosts: list
@@ -143,6 +144,7 @@ def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
         respec_cap=_int_env("PF_RESPEC_CAP", int(critic.get("respec_cap", 1))),
         degraded_fix_limit_k=_int_env("PF_DEGRADED_FIX_LIMIT_K", int(critic.get("degraded_fix_limit_k", 2))),
         replan_cap=_int_env("PF_REPLAN_CAP", int(critic.get("replan_cap", 1))),
+        reauthor_cap=_int_env("PF_REAUTHOR_CAP", int(critic.get("reauthor_cap", 1))),
         research_hosts=research_hosts,
         default_template=str(templates.get("default", "gradio-chatbot")),
         vetted_services=vetted,
