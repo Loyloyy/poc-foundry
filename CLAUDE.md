@@ -80,3 +80,21 @@ deep-link, Stop "Stopping…" UX, caveats card. DECISIONS #27–#28. **Ops gotch
   deep-link (capture `trace_id` at build time); `PF_MAX_RUN_WALL_CLOCK_S` to bound degenerate runs; the
   langgraph "unregistered msgpack type" warning on refine's checkpoint recovery (harmless; register
   `allowed_msgpack_modules`); no frontier coder endpoint yet (refine's stronger-coder met-flip deferred).
+
+**M5 🟡 IN PROGRESS (2026-06-29; pilots + real model-calling builds). Local: `run_spine_tests.py` (172) + contract (11) + hygiene.**
+- **A1 RAG pilot ✅ DONE + server-validated** — first REAL Stage-2 artifact (`dra-…fa650c-m`, "Self-hosted
+  RAG over a private document store") → `gradio-rag-pgvector` → `status=done` 4/4, clean run. Surfaced +
+  fixed SIX real weaknesses (DECISIONS #34): discrimination prompt · spec `max_tokens=8000` · corpus
+  grounding (`knowledge` field) · **critic recalibration** (the one gate change — black-box behavioral
+  adequacy, teeth retained) · citation-format pin · fence-robust extraction + compile-and-re-author.
+- **B model-calling template ✅ DONE + hand-verified** — new `gradio-rag-llm`: real semantic embeddings
+  (`fastembed`+`bge-small-en-v1.5`, 384-d, **baked into the sandbox image → fully offline, no user
+  endpoint**) + real LLM generation (calls the vLLM from the VM via `PF_SANDBOX_MODEL_BASE_URL`, B0
+  broker injection) + code-appended `[N]` citation as the deterministic anchor + **verifiable grounding**
+  (answer↔cited-doc lexical overlap — the critic certifies it). DECISIONS #35–#38. Chain of real fixes:
+  openai/httpx `proxies` (`httpx<0.28`) · reasoning-model `max_tokens` · gradio web-stack pin + the
+  clean-room demo gate now LAUNCHES the UI (#36) · construct-only model-connectivity guard. Hand-proof:
+  "how does RAG work" → `[1]` + real grounded answer (was "I don't know [2]" pre-fix).
+- **NOT done (M5 backlog):** A2 MCP pilot · A3 durable-agent pilot · key-proxy exercised in a REAL
+  model-calling build (mechanism proven by the M4 demo beat, not yet combined with a build) · the
+  replan-waste residual (a `replan` re-attacks already-met iterations from scratch). See `HANDOVER_M6.md`.

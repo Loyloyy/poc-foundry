@@ -1568,7 +1568,7 @@ re-run `docker compose up`.*
 
 **B1 follow-on — the on-prem model is a REASONING model (2026-06-29).** First `gradio-rag-llm` build
 descoped iter0; the staged test was correct (clean `[N]` parsing) but the model call returned
-`content=None`. Direct probe: the served model is `GLM-5.1` (a reasoning model); with `_answer`'s
+`content=None`. Direct probe: the served model is `<reasoning-model>` (a reasoning model); with `_answer`'s
 `max_tokens=256` the whole budget went to chain-of-thought and `content` came back empty (same class as
 the spec `LengthFinishReasonError`). At `max_tokens=2048` it returns clean content (`finish_reason=stop`).
 Fix: `_answer` default `max_tokens` 256→2048 + fall back to `reasoning_content` if `content` is ever
@@ -1581,7 +1581,7 @@ iterations. Template-only change (bind-mounted, no rebuild). Green bar 171.
 **✅ RESULT — B (model-calling template) SERVER-VALIDATED (2026-06-29).** With the reasoning-model
 `max_tokens` fix, `gradio-rag-llm` built from `dra-…fa650c-m` → `status=done`,
 `demonstrates_core_value=yes`, **all 4 criteria met**. The PoC's `generate_reply` calls the real vLLM
-(GLM-5.1) to generate the answer and code-appends `[N]` — the platform's first model-calling PoC.
+(<reasoning-model>) to generate the answer and code-appends `[N]` — the platform's first model-calling PoC.
 Integrity held: `respecs=1` (critic correctly bounced a keyword-gameable test set, then `accept→next`'d
 a stronger one), `fixes=0`, `replans=0`, 0 incidents, clean ledger (15 test ids). Clean-room
 install=test=demo=True — and `demo=True` now means the Gradio UI ACTUALLY LAUNCHED (the #36 strengthened
@@ -1672,3 +1672,15 @@ the CLIENT-CONSTRUCTION break (the openai/httpx `proxies` bug fails at `OpenAI()
 network) → made it CONSTRUCT-ONLY (offline, fast, no proxy). The actual answer round-trip is verified by
 the criterion tests in the iteration VMs (where the proxy path works). Green bar 172. *Server: re-run →
 scaffold smoke GREEN, then iterations with semantic retrieval + grounded LLM answers.*
+
+**✅ RESULT — model-calling RAG PoC, GENUINELY VERIFIED (2026-06-29).** `gradio-rag-llm` from
+`dra-…fa650c-m` → `status=done`, `demonstrates_core_value=yes`, all 4 criteria met INCLUDING grounding.
+The critic `accept→next` reason explicitly certified it: the reply "contains non-trivial content
+OVERLAPPING THE CITED DOCUMENT … evidence that the system retrieves, GROUNDS, and cites." Full real
+stack: fastembed semantic embeddings (baked, offline, right doc) + real LLM generation (~880s, 51s
+median reasoning latency) + grounding verified (answer↔cited-doc lexical overlap) + discrimination +
+clean-room install=test=demo=True (UI launches via the #36 gate). respecs=1 (thin first spec bounced),
+fixes=0, 0 incidents. The #37/#38 chain (dead LLM call → crude retriever → missing grounding → offline
+model-bake → construct-only guard) is RESOLVED: a green build now means "retrieves the right doc and
+grounds a real LLM answer in it." Minor residual: the architect sometimes emits a 1-criterion spec
+(spec-lint caveat) → a respec recovers it; harmless. **B (model-calling template) = DONE, verified.**

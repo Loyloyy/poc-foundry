@@ -1,0 +1,24 @@
+{
+  "name": "gradio-rag-thin",
+  "version": "0.1.0",
+  "description": "A start-GREEN Gradio chatbot scaffold for retrieval-augmented generation that ships ONLY primitives (a real pgvector vector store, an offline embedder, and a real model-completion call) plus a fixed corpus — the RAG logic itself (retrieval, relevance gating, grounding, citation) is written by the build, NOT pre-supplied. This is the THIN counterpart to gradio-rag-llm: same rails, no solution code, used to measure how much of a RAG PoC the harness can assemble on its own.",
+  "stamp_dir": "files",
+  "editable_files": ["core.py"],
+  "smoke_test": "tests/test_smoke.py",
+  "suite": "tests",
+  "interface": "core.generate_reply(message: str, history: list | None = None) -> str",
+  "run_cmd": "docker compose up --build",
+  "services": [
+    {"name": "pg", "vetted": "pgvector"}
+  ],
+  "stack": [
+    {"layer": "ui", "choice": "gradio", "pinned_version": "4.44.1"},
+    {"layer": "vector-db", "choice": "pgvector", "pinned_version": "pg16"},
+    {"layer": "db-driver", "choice": "psycopg", "pinned_version": "3.2.3"},
+    {"layer": "model-client", "choice": "openai", "pinned_version": "1.51.0"},
+    {"layer": "language", "choice": "python", "pinned_version": "3.12"}
+  ],
+  "template_repo": null,
+  "license": "MIT",
+  "knowledge": "This PoC answers a user's question grounded in a FIXED private corpus, and an unrelated question (outside the corpus) must get a no-match reply rather than a made-up answer. The scaffold ships PRIMITIVES to compose — it does NOT ship the retrieval/grounding/citation logic (that is what the build must write). The primitives are: `search(query, k)` → the k corpus documents nearest the query by semantic similarity, as `[{id, title, content, distance}]` (smaller distance = closer; it ALWAYS returns up to k and does NOT decide relevance — the build does); `llm(prompt, system=...)` → a real model completion (the wording VARIES run to run); and `CORPUS` (the fixed docs as `{id, title, content}` — the PoC may NOT add facts not in it). Phrase every criterion around a topic the corpus actually covers; a criterion the fixed corpus cannot satisfy is unbuildable.\nBecause the model's prose is NON-deterministic, criteria/tests must assert what the build CONTROLS and can check deterministically — NEVER an exact sentence the model must produce. Make each criterion DISCRIMINATING: contrast an in-corpus question (the behaviour should fire) against an out-of-corpus one (it should not), so a fixed canned reply cannot pass, and check that an in-corpus answer is actually grounded in / verifiable against the corpus document it used rather than invented."
+}

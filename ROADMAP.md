@@ -467,7 +467,7 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
 - [ ] **A3 Durable-Agent-Execution pilot** — kill-and-resume LangGraph demo (§7 pilot 3).
 - [x] **B model-calling template ✅ SERVER-VALIDATED (2026-06-29).** `gradio-rag-llm` built from the real
       RAG artifact → `status=done`, `demonstrates_core_value=yes`, **all 4 criteria met** — the platform's
-      FIRST PoC that actually calls the vLLM (GLM-5.1) to GENERATE grounded answers (code-appended `[N]`
+      FIRST PoC that actually calls the vLLM (<reasoning-model>) to GENERATE grounded answers (code-appended `[N]`
       anchor). One honest `respec` (critic rejected a keyword-gameable test set, then `accept→next`'d a
       stronger one), `fixes=0`, 0 incidents, clean-room install=test=demo=True (demo now LAUNCHES the UI),
       ~22 min (reasoning-model cost). Validated B0 endpoint-injection + the reasoning-model `max_tokens`
@@ -484,8 +484,12 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
       (b) retrieval QUALITY was poor (the deterministic HASH embedding sent natural queries to the wrong
       doc) → switched `gradio-rag-llm` to REAL semantic embeddings (`fastembed` + `BAAI/bge-small-en-v1.5`,
       384-d) baked into the sandbox image (fully offline, no user endpoint) with a calibrated cosine
-      threshold (0.4). Self-sufficient per the design goal. *Server: rebuild sandbox + re-run + re-verify.*
-      **B0 ✅ (DECISIONS #35):** the
+      threshold (0.4). Self-sufficient per the design goal. **✅ VERIFIED DONE (2026-06-29):** after a
+      chain of real env fixes (offline model-bake in the sandbox image; construct-only model-connectivity
+      guard so the scaffold smoke stays fast/offline; grounding asserted via answer↔cited-doc lexical
+      overlap), the build went `done`/`yes` with the non-degraded critic explicitly CERTIFYING grounding
+      — a green build now means "retrieves the right doc + grounds a real LLM answer in it." DECISIONS
+      #37/#38. **B0 ✅ (DECISIONS #35):** the
       broker now injects `PF_SANDBOX_MODEL_BASE_URL` (the egress-allowlisted endpoint) into EVERY VM, not
       just when the key-proxy is on. **B1 ✅ local (DECISIONS #35):** new `gradio-rag-llm` template —
       pgvector retrieval + a REAL `_answer()` model call, with the `[<int>]` citation CODE-appended as the
