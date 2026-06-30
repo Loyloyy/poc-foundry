@@ -3,14 +3,15 @@
 A minimal proof-of-concept: a Gradio chatbot that answers from a small private corpus using **real
 vector retrieval** in **pgvector** and a **real model** to generate the grounded answer.
 
-This is the **thin** scaffold — it ships only primitives; the retrieval-augmented-generation logic
-itself is written in `generate_reply`.
+This is the **thin** scaffold, organised as **kit + glue** — `ragkit.py` ships the primitives as a
+library; the retrieval-augmented-generation logic itself is written in `core.generate_reply`.
 
-- `core.py` — a fixed `CORPUS` plus three primitives: `search(query, k)` (nearest corpus docs by
+- `ragkit.py` — a fixed `CORPUS` plus three primitives: `search(query, k)` (nearest corpus docs by
   semantic similarity in pgvector, with a `distance`), `llm(prompt, system=...)` (a real model
-  completion against an OpenAI-compatible endpoint), and an offline `_embed`. `generate_reply` composes
-  them into RAG: find the relevant document, ground the model's answer in it, make the answer
-  verifiable against that document, and return a no-match reply for an out-of-corpus question.
+  completion against an OpenAI-compatible endpoint), and an offline `_embed`.
+- `core.py` — the editable glue: `generate_reply` composes the ragkit primitives into RAG — find the
+  relevant document, ground the model's answer in it, make the answer verifiable against that document,
+  and return a no-match reply for an out-of-corpus question.
 - `app.py` — a thin `gr.ChatInterface` over `core.generate_reply`.
 - `tests/` — a stdlib smoke test (offline) + the harness's criterion tests (retrieval + generation).
 

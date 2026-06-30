@@ -287,6 +287,17 @@ def _ledger_junit(sbx) -> set[str]:
     return passed
 
 
+def _interface_defs(interface: str, extra=None) -> list[str]:
+    """The names a coder edit MUST keep defining — the template's interface function (parsed from e.g.
+    ``core.generate_reply(...) -> str`` → ``generate_reply``) plus any template-declared exports. Fed to
+    the coder's interface-preservation gate so it can't amputate the scaffold."""
+    defs = list(extra or [])
+    name = (interface or "").split("(")[0].strip().rpartition(".")[2]
+    if name:
+        defs.append(name)
+    return sorted(set(defs))
+
+
 def _looks_like_error(text: str) -> bool:
     """Does ``text`` carry a real code-error signal worth a web lookup? Guards the research rung from
     googling a harness META-message (e.g. 'fix-attempt cap reached' → it returned login-lockout help).
@@ -529,7 +540,9 @@ def p4_iterate(state, ctx: Ctx) -> dict:
                 workspace=ctx.workspace_dir, goal=it.goal, editable_files=it.files,
                 test_sources={test_file: test_src}, verify=verify,
                 edit_format="whole", max_attempts=getattr(ctx.cfg, "max_fix_attempts", 3),
-                playbook=guidance)
+                playbook=guidance,
+                required_defs=_interface_defs(ctx.template.interface,
+                                              getattr(ctx.template, "required_exports", None)))
             attempts = res.attempts
             coder_last_output, coder_last_response = res.last_output, res.last_response
             if integrity.blocking(incidents):

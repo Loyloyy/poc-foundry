@@ -126,3 +126,63 @@ def test_persist_iter_forensics_marks_a_never_applied_edit(tmp_path):
                                      note="fix-attempt cap reached")
     incident = (tmp_path / "iterations" / "0" / "incident.txt").read_text()
     assert "no verify ran" in incident
+
+
+# ── interface-preservation gate (general: don't let the coder amputate the scaffold) ─────────
+def test_interface_problem_flags_syntax_error_missing_def_and_passes_when_kept(tmp_path):
+    from poc_foundry.coder import _interface_problem
+
+    (tmp_path / "core.py").write_text("def generate_reply(:\n  pass\n")          # syntax error
+    assert "does not parse" in _interface_problem(tmp_path, ["core.py"], ["generate_reply"])
+    (tmp_path / "core.py").write_text("def other():\n    return 1\n")             # def dropped
+    assert "generate_reply" in _interface_problem(tmp_path, ["core.py"], ["generate_reply"])
+    (tmp_path / "core.py").write_text("def generate_reply():\n    return 1\n")    # kept → OK
+    assert _interface_problem(tmp_path, ["core.py"], ["generate_reply"]) == ""
+
+
+def test_coder_gate_reverts_an_edit_that_amputates_the_required_def(tmp_path):
+    """The toy-rewrite failure mode: the model rewrites the editable file and drops the interface. The
+    gate must REVERT it (scaffold preserved) and feed the reason back — not proceed on a broken file."""
+    from poc_foundry.coder import BespokeCoder
+
+    original = "from ragkit import search\n\ndef generate_reply(m, h=None):\n    return 'stub'\n"
+    (tmp_path / "core.py").write_text(original)
+
+    def llm(role, prompt, system=None):
+        return "*** FILE: core.py\n```python\ndef helper():\n    return 1\n```\n"   # drops generate_reply
+
+    res = BespokeCoder(llm=llm).run(
+        workspace=tmp_path, goal="g", editable_files=["core.py"],
+        test_sources={"t.py": "assert"}, verify=lambda: (True, "1 passed"),
+        max_attempts=2, required_defs=["generate_reply"])
+    assert not res.passed                                      # gate blocked it (verify never ran)
+    assert (tmp_path / "core.py").read_text() == original      # reverted — scaffold intact
+    assert "generate_reply" in res.last_output                 # feedback names the removed def
+
+
+def test_coder_gate_allows_an_edit_that_keeps_the_required_def(tmp_path):
+    from poc_foundry.coder import BespokeCoder
+
+    (tmp_path / "core.py").write_text("def generate_reply(m, h=None):\n    return ''\n")
+
+    def llm(role, prompt, system=None):
+        return ("*** FILE: core.py\n```python\n"
+                "def generate_reply(m, h=None):\n    return 'ECHO: ' + m\n```\n")
+
+    def verify():
+        ok = "ECHO:" in (tmp_path / "core.py").read_text()
+        return ok, ("1 passed" if ok else "E")
+
+    res = BespokeCoder(llm=llm).run(
+        workspace=tmp_path, goal="g", editable_files=["core.py"],
+        test_sources={"t.py": "assert"}, verify=verify, max_attempts=2,
+        required_defs=["generate_reply"])
+    assert res.passed
+
+
+def test_interface_defs_parses_the_function_name():
+    from poc_foundry.phases.pipeline import _interface_defs
+
+    assert _interface_defs("core.generate_reply(m: str, h: list | None = None) -> str") == ["generate_reply"]
+    both = _interface_defs("core.generate_reply(m)", ["CORPUS"])
+    assert "generate_reply" in both and "CORPUS" in both

@@ -1,10 +1,14 @@
 """Scaffold smoke test — GREEN the moment the template is stamped, BEFORE any RAG logic and WITHOUT a
-database. It exercises ONLY the provided primitives that work offline: ``_embed`` (the baked embedding
-model, loaded from the image cache) and the ``CORPUS`` shape, plus a cheap offline guard that the model
-client can be constructed. The DB-backed ``search`` and the real ``llm`` round-trip are covered by the
-harness's red-first criterion tests, which run with the pgvector sibling + the model endpoint up.
+database. It exercises the provided PRIMITIVES that work offline (`ragkit._embed`, the `CORPUS` shape)
+plus a cheap offline model-client construct guard, and confirms the editable `core.generate_reply`
+interface exists. The DB-backed `search` and the real `llm` round-trip are covered by the harness's
+red-first criterion tests, which run with the pgvector sibling + the model endpoint up.
+
+`ragkit` is the non-editable primitives library, so these imports stay valid no matter what the build
+writes in `core.py` — the clean-room cannot break by the editable file dropping an export.
 """
-from core import EMBED_DIM, CORPUS, _embed
+from ragkit import EMBED_DIM, CORPUS, _embed
+from core import generate_reply
 
 
 def test_embed_is_deterministic_and_has_the_model_dim():
@@ -15,6 +19,10 @@ def test_embed_is_deterministic_and_has_the_model_dim():
 
 def test_corpus_is_nonempty_documents():
     assert CORPUS and all({"id", "title", "content"} <= set(d) for d in CORPUS)
+
+
+def test_generate_reply_interface_exists():
+    assert callable(generate_reply)               # the editable glue keeps the interface
 
 
 def test_model_client_constructs_when_configured():

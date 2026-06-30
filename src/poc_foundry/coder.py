@@ -28,7 +28,13 @@ SYSTEM = (
     "failing test(s) (which you MUST NOT edit), and the current source of the editable files. Make "
     "the smallest correct change so the tests pass. Keep the code stdlib-only unless the goal needs a "
     "dependency. Think briefly, then output ONLY the edit in the exact format requested — no prose "
-    "outside the code blocks."
+    "outside the code blocks.\n"
+    # Tier-0 general directive (domain-agnostic): use the scaffold, don't reinvent or amputate it.
+    "The editable file may already import HELPER MODULES and define scaffolding. USE what is provided: "
+    "import and CALL the helper functions/data the scaffold gives you — do NOT reimplement functionality "
+    "that already exists, invent your own parallel data/corpus, or remove existing imports, helpers, or "
+    "exports. Implement ONLY the function(s) the tests exercise, composing the provided helpers; keep "
+    "everything else in the editable file intact."
 )
 
 
@@ -54,7 +60,8 @@ class CoderEngine(Protocol):
 
     def run(self, *, workspace: Path, goal: str, editable_files: list[str],
             test_sources: dict[str, str], verify: VerifyFn,
-            edit_format: str = "whole", max_attempts: int = 3, playbook: str = "") -> CoderResult: ...
+            edit_format: str = "whole", max_attempts: int = 3, playbook: str = "",
+            required_defs: list[str] | None = None) -> CoderResult: ...
 
 
 # ── edit parsing / application (host-side, no shell) ─────────────────────────
@@ -120,6 +127,49 @@ def _apply_diff(workspace: Path, resp: str, forbidden: set[str]) -> tuple[bool, 
     return False, "patch did not apply (-p1/-p0)", []
 
 
+def _interface_problem(workspace: Path, editable: list[str], required_defs: list[str]) -> str:
+    """General interface-preservation gate: after an edit, the editable file(s) must still PARSE and
+    define every required name (the template's interface function + any declared exports). Returns ''
+    when OK, else a short reason the coder can act on. Domain-agnostic — it just stops the coder
+    amputating the scaffold (the toy-rewrite / `cannot import name` failures)."""
+    import ast
+
+    if not required_defs:
+        return ""
+    defined: set[str] = set()
+    for f in editable:
+        p = workspace / f
+        if not p.exists():
+            continue
+        try:
+            tree = ast.parse(p.read_text())
+        except SyntaxError as e:
+            return f"the edited {f} does not parse ({e.msg} at line {e.lineno}) — fix the syntax"
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                defined.add(node.name)
+            elif isinstance(node, ast.Assign):
+                defined.update(t.id for t in node.targets if isinstance(t, ast.Name))
+            elif isinstance(node, ast.ImportFrom):
+                defined.update(a.asname or a.name for a in node.names)
+            elif isinstance(node, ast.Import):
+                defined.update((a.asname or a.name).split(".")[0] for a in node.names)
+    missing = [d for d in required_defs if d not in defined]
+    if missing:
+        return (f"your edit removed required definition(s) {missing} from the editable file — keep the "
+                f"scaffold's existing exports and only add/modify the function(s) under test")
+    return ""
+
+
+def _restore(workspace: Path, rel: str, content: str | None) -> None:
+    """Revert one editable file to its pre-edit content (or delete it if it did not exist before)."""
+    dest = workspace / rel
+    if content is None:
+        dest.unlink(missing_ok=True)
+    else:
+        dest.write_text(content)
+
+
 def _read_sources(workspace: Path, editable: list[str]) -> str:
     parts = []
     for f in editable:
@@ -171,7 +221,8 @@ class BespokeCoder:
 
     def run(self, *, workspace: Path, goal: str, editable_files: list[str],
             test_sources: dict[str, str], verify: VerifyFn,
-            edit_format: str = "whole", max_attempts: int = 3, playbook: str = "") -> CoderResult:
+            edit_format: str = "whole", max_attempts: int = 3, playbook: str = "",
+            required_defs: list[str] | None = None) -> CoderResult:
         t0 = time.time()
         editable = list(editable_files)
         editable_set = set(editable)
@@ -193,10 +244,19 @@ class BespokeCoder:
                                    last_response=last_response)
             last_response = resp
 
+            pre_edit = {f: (workspace / f).read_text() if (workspace / f).exists() else None
+                        for f in editable}        # snapshot for the interface-gate revert
             if edit_format == "whole":
                 applied, why, written = _apply_whole(workspace, resp, editable_set, forbidden)
             else:
                 applied, why, written = _apply_diff(workspace, resp, forbidden)
+            if applied and (problem := _interface_problem(workspace, editable, required_defs or [])):
+                # the edit applied but broke the scaffold's interface (amputated an export, or doesn't
+                # parse) — REVERT it and feed the reason back, so the coder doesn't proceed on a file
+                # that would fail the clean-room / later imports.
+                for f in written:
+                    _restore(workspace, f, pre_edit.get(f))
+                applied, why = False, problem
             if not applied:
                 if failure:
                     sigs.append(_signature(failure))

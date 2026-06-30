@@ -505,7 +505,7 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
 ## M6 — harness generalisation (thin-template autonomy probe) 🟡 IN PROGRESS (2026-06-30)
 Goal: prove the harness can assemble a RAG PoC with only FRAMEWORK-level help (rails + primitives as
 libraries), not pre-written solution logic — the litmus test for handling cutting-edge artifacts.
-Local green bar: `run_spine_tests.py` (178) + contract (11) + hygiene.
+Local green bar: `run_spine_tests.py` (182) + contract (11) + hygiene.
 - [x] **Thin RAG template** `gradio-rag-thin` — same rails as `gradio-rag-llm` (Gradio, pgvector sibling,
       offline embedder + model call exposed as `search`/`llm`/`_embed`/`CORPUS`), but `generate_reply` is
       a stub and the `knowledge` note is a contract, not a recipe. Thick one kept for comparison. (DEC #39)
@@ -516,8 +516,18 @@ Local green bar: `run_spine_tests.py` (178) + contract (11) + hygiene.
 - [x] **Diagnostics fixes (general harness):** multi-block edit-extraction (largest fence) · `last_response`
       + non-blank `last_output` · reflection grounded in the real failure · research skips meta-messages
       (`_looks_like_error`) · forensic trail on descope (`_persist_iter_forensics`). Fakes `test_m6_diagnostics.py` (6).
-- [ ] **Run #2 (server, pending)** — rerun `gradio-rag-thin` on `dra-…fa650c-m` with the hardened harness;
-      now edits apply → read the REAL RAG attempt + REAL error from `iterations/<i>/incident.txt`, then judge
-      the capability question (can the loop assemble retrieve→ground→cite, or is a stronger coder needed?).
-- **Acceptance:** a clear, evidence-backed verdict on thin-template autonomy — either a verified green (the
-  loop genuinely composed RAG) or a documented capability gap with the real error in hand, never a blind descope.
+- [x] **Run #2 — verdict: coder writes passing RAG glue unaided BUT games toward a toy** (reinvents a fake
+      keyword retriever, never calls `search`/`llm`, whole-file-rewrites `core.py` and deletes scaffold
+      exports → clean-room break → `incomplete`). Gates held: grounding criteria correctly descoped the toy.
+      Forensics fixes validated on the server. DECISIONS #40.
+- [x] **General fixes (kit+glue + Tier-0 directive + interface gate).** `gradio-rag-thin` restructured to
+      kit+glue (`ragkit.py` non-editable primitives + editable `core.py` glue); coder `SYSTEM` gains a
+      domain-agnostic "use the provided helpers, don't reinvent/amputate" directive (rung 0 of a graduated
+      guidance ladder); `coder._interface_problem` reverts any edit that drops the declared interface.
+      Fakes `test_m6_diagnostics.py` (10). Green bar 182.
+- [ ] **Run #3 (server, pending)** — rerun `gradio-rag-thin` (kit+glue) on `dra-…fa650c-m`. The coder can no
+      longer clobber the scaffold; does it now COMPOSE `ragkit` (real RAG) or still reinvent a toy? If it
+      still games, climb to Tier-1 (a general worked example in the coder playbook) — never hardcode RAG
+      specifics. Once RAG is solid, start the **MCP** pilot as the cross-domain generalisation check.
+- **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG
+  using the real primitives) or a documented capability gap, never a toy that games a behavioural test.

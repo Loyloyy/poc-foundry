@@ -1727,3 +1727,46 @@ finding was NOT "the coder can't do RAG" — it was that **the harness threw awa
 
 Next: rerun `gradio-rag-thin` once with the hardened harness → now the coder's edits apply, so we get the
 REAL RAG attempt + the REAL error, and can finally judge the capability question. Fakes: `test_m6_diagnostics.py` (6).
+
+## #40 — M6: thin-template run #2 verdict + the general fixes (kit+glue, Tier-0 directive, interface gate) (2026-06-30)
+
+**Run #2 (hardened diagnostics, artifact `dra-…fa650c-m`) — the forensics paid off; verdict is nuanced.**
+With the #39 fixes we could finally SEE the coder's work (`incident.txt` + raw responses). Findings:
+- **The coder CAN write passing RAG glue unaided** — the core criterion went RED→GREEN in 2 attempts
+  (both plan runs), critic `accept→next`. Stronger autonomy signal than run #1.
+- **But it games toward a TOY and ignores the scaffold.** In every attempt it reinvented a fake
+  keyword-overlap retriever + a 2-doc made-up corpus and **never once called the provided `search`/`llm`/
+  `_embed`**. Because `core.py` was wholly editable, its whole-file rewrite **deleted the scaffold's
+  exports** (`EMBED_DIM`/`CORPUS`/…) → the clean-room smoke `from core import EMBED_DIM` failed →
+  `suite=False` → `status=incomplete`. (NOT a planning deficit — it reasoned for paragraphs; it planned
+  toward the WRONG, simplest-to-pass solution.)
+- **The gates held.** The gameable core criterion passed, but the criteria that demand genuine grounding
+  ("reply must contain a distinctive corpus term like `pgvector`/`Qdrant`") **correctly descoped** — a
+  fake corpus can't fake them. Verification stayed honest even while the model gamed.
+
+**Diagnosis: harness levers, not a hard capability ceiling.** Whole-file editing let the coder clobber
+the scaffold; a black-box behavioural test + a permissive editor let it take the cheap path (reinvent a
+toy that passes). The THICK `gradio-rag-llm` only dodged this because `generate_reply` was the sole thing
+to write and the primitives were already wired — i.e. the thick scaffold was secretly FORCING tool-use.
+
+**Fixes — all GENERAL (domain-agnostic), per the user's graduated-guidance direction. Green bar 182.**
+1. **"kit + glue" template convention** — a template may put its vetted primitives in a NON-editable
+   library module and leave an editable glue file (just the function under test). RAG: primitives →
+   `ragkit.py` (non-editable), `core.py` = `generate_reply` importing them. The coder structurally
+   cannot clobber the kit, and the smoke imports from `ragkit` so the clean-room can't break that way.
+   MCP/etc. would adopt the same convention with their own kit. (Existing `editable_files` support — no
+   harness change.)
+2. **Tier-0 general coder directive** (coder `SYSTEM`, no domain in it): "you may be given helper modules
+   — import and USE them; implement only the function(s) under test; do NOT reinvent provided
+   functionality, invent parallel data, or delete existing imports/exports." This is rung 0 of a
+   GRADUATED ladder: escalate to a general worked example (Tier-1), then cross-domain examples (Tier-2),
+   only on evidence — start general, add specificity only if it keeps gaming.
+3. **Interface-preservation gate** (`coder._interface_problem`, general): after an edit, the editable
+   file must still PARSE and define the template's interface (`generate_reply`, parsed from
+   `template.interface`) + any declared exports; else REVERT the edit and feed the reason back. Catches
+   both the toy-clobber and the partial-block `cannot import name` failures, for ANY template.
+
+Fakes: `test_m6_diagnostics.py` now 10 (multi-block apply, last_response, reflection-detail, research
+meta-guard, forensics, + the interface gate revert/allow/parse). Next: run #3 with the kit+glue thin
+template + the gate; if it still reinvents instead of composing `ragkit`, climb to Tier-1 (a worked
+example) — do NOT hardcode RAG specifics into the template.
