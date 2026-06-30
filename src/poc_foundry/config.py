@@ -72,6 +72,7 @@ class BuildConfig:
     max_iter_wall_clock_s: int
     max_run_wall_clock_s: int
     max_research_results: int     # M2c S4: research-on-gaps fetch breadth per run
+    recursion_limit: int          # M6: LangGraph node-visit ceiling — salvaged (not crashed) when hit
 
     # critic gate (pipeline.yaml `critic:`, env-overridable) — design §5.4/§5.8
     fix_limit_k: int
@@ -140,6 +141,7 @@ def load_config(builds_dir: Path | str | None = None) -> BuildConfig:
         max_iter_wall_clock_s=_int_env("PF_MAX_ITER_WALL_CLOCK_S", int(budgets.get("max_iter_wall_clock_s", 1800))),
         max_run_wall_clock_s=_int_env("PF_MAX_RUN_WALL_CLOCK_S", int(budgets.get("max_run_wall_clock_s", 14400))),
         max_research_results=_int_env("PF_MAX_RESEARCH_RESULTS", int(budgets.get("max_research_results", 4))),
+        recursion_limit=_int_env("PF_RECURSION_LIMIT", int(budgets.get("recursion_limit", 150))),
         fix_limit_k=_int_env("PF_FIX_LIMIT_K", int(critic.get("fix_limit_k", 3))),
         respec_cap=_int_env("PF_RESPEC_CAP", int(critic.get("respec_cap", 1))),
         degraded_fix_limit_k=_int_env("PF_DEGRADED_FIX_LIMIT_K", int(critic.get("degraded_fix_limit_k", 2))),

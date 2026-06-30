@@ -561,9 +561,18 @@ Local green bar: `run_spine_tests.py` (189) + contract (11) + hygiene.
       (`toolserver/`: stdlib HTTP, pinned `poc-foundry-toolserver:0.1.0`) with OPAQUE prices the model can't
       know + a `/calls` audit. Shortcut-proof discriminator = the tool's exact opaque value. DEVIATION FLAGGED:
       HTTP tool sibling, not MCP wire protocol (first slice). Preflight resolves; allowlisted; green bar 189. DEC #43.
-- [ ] **Run #7 (server, pending) — FIRST tool-pilot build (untuned, NEW domain).** `$DC --profile images build
-      toolserver`, then build `--template gradio-tool` (with a tool-shaped `--brief`). Does the loop compose a
-      real `call_tool` (a price the toy can't fake) — proving the general machinery holds outside RAG — or
-      game/descope? First-attempt outcome is the honest cross-domain signal.
+- [x] **Run #7 — machinery TRANSFERRED; coder didn't; a crash fixed.** Tool image built + provisioned;
+      architect autonomously wrote a CORRECT shortcut-proof tool spec (paraphrased query + exact opaque
+      `price_usd`); re-author/research/replan all fired in the new domain — the general machinery generalises.
+      But the coder never greened any criterion (same composition limit as RAG). The richer ladder × 5
+      criteria × replan-waste blew past `recursion_limit=60` and CRASHED (no artifact). DECISIONS #43 follow-on.
+- [x] **Recursion-limit salvage (general robustness).** `_invoke_with_salvage` now catches `GraphRecursionError`
+      → honest `incomplete` + forensics (was: hard crash); ceiling is config/env-driven (`PF_RECURSION_LIMIT`,
+      default 150). Green bar 190.
+- [ ] **Run #8 (server, pending)** — re-run `gradio-tool` with the salvage fix: it should now finish as
+      `incomplete` (not crash), so we can pull `workspace/core.py` + `iterations/*/incident.txt` to see the
+      coder's REAL `call_tool` attempt + the specific failure (product extraction vs exact-price formatting).
+- [ ] **replan-waste fix (next structural lever)** — on replan, keep MET iterations + re-attack only the unmet
+      tail (handover §2.D). Speeds builds AND removes the churn that hit the recursion ceiling.
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG
   using the real primitives, proven by a generalisation test a toy can't fake) or a documented capability gap.

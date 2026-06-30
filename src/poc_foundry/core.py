@@ -19,6 +19,20 @@ from poc_foundry.config import load_config
 from poc_foundry.phases import Ctx, load_template
 
 
+class _NeverRaised(Exception):
+    """Sentinel exception type that is never raised — used when langgraph isn't importable (local dev)."""
+
+
+def _graph_recursion_error():
+    """The LangGraph recursion-limit exception class (lazy — keeps this module import-light + 3.10-safe);
+    falls back to a never-matched sentinel when langgraph isn't importable."""
+    try:
+        from langgraph.errors import GraphRecursionError
+        return GraphRecursionError
+    except Exception:  # noqa: BLE001
+        return _NeverRaised
+
+
 def resolve_source(source: str | Path, cfg) -> Path:
     """Resolve ``source`` to a Stage-2 run folder. Accepts a path to the folder, or an artifact id
     looked up under ``PF_ARTIFACTS_ROOT`` (``<root>/<id>/``)."""
@@ -130,13 +144,16 @@ def _invoke_with_salvage(graph, first_input, ctx, cfg, build_dir: Path, build_id
     from poc_foundry.models import METER, BudgetExceeded
 
     METER.begin_run(cfg)
-    gcfg = {"configurable": {"thread_id": thread_id or build_id}, "recursion_limit": 60}
+    gcfg = {"configurable": {"thread_id": thread_id or build_id},
+            "recursion_limit": getattr(cfg, "recursion_limit", 150)}
     try:
         graph.invoke(first_input, config=gcfg)
     except BudgetExceeded as be:
         _salvage_run(graph, ctx, build_dir, build_id, gcfg, be.cap)
     except BuildStopped:
         _emit_stopped(graph, ctx, build_dir, build_id, gcfg)
+    except _graph_recursion_error() as re:  # a degenerate loop hit the node ceiling → SALVAGE, don't crash
+        _salvage_run(graph, ctx, build_dir, build_id, gcfg, f"recursion-limit ({re})"[:120])
 
 
 def _salvage_run(graph, ctx, build_dir: Path, build_id: str, gcfg: dict, cap: str) -> None:

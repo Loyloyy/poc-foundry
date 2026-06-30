@@ -1899,3 +1899,22 @@ harness-fixed in pipeline.yaml, never templated). Local: preflight resolves + se
 (`run_spine_tests.py` + contract + hygiene); zero leaks (opaque catalogue values are invented, not real).
 Next (server): `$DC --profile images build toolserver`, then a build with `--template gradio-tool` — does the
 loop compose a real tool call (price the toy can't fake), or game/descope? First-attempt outcome either way.
+
+**#43 follow-on — run #7 (first tool-pilot build): machinery TRANSFERRED; a recursion-limit CRASH fixed (2026-07-01).**
+The cross-domain signal is strong on the harness side: the `poc-foundry-toolserver:0.1.0` image built + the
+broker provisioned it (`P3 services: toolserver ready`), and the architect autonomously wrote a CORRECT
+shortcut-proof tool-calling spec — core criterion: "for a PARAPHRASED in-catalogue query the reply contains
+the EXACT `price_usd` returned by `call_tool`". The #1 anti-shortcut + generalisation guidance propagated into
+a domain the harness was never tuned on; re-author + research + replan rungs all fired. **The general
+machinery generalises.** What did NOT: the coder never greened ANY criterion (iter0/1/2 all descoped) — the
+same composition-reliability limit as RAG, now reproduced cross-domain.
+- **BUG → FIXED (general robustness):** the richer re-author ladder × 5 struggling criteria × replan-waste
+  (each replan re-attacks ALL criteria from scratch) blew past the LangGraph `recursion_limit` of 60 and
+  **CRASHED** with `GraphRecursionError` — no artifact, no descope report. `_invoke_with_salvage` caught only
+  `BudgetExceeded`/`BuildStopped`. Now it ALSO catches the recursion error → routes to `_salvage_run` (honest
+  `incomplete` + forensics), and the ceiling is config/env-driven (`cfg.recursion_limit`, `PF_RECURSION_LIMIT`,
+  default 150). A degenerate loop must FAIL GRACEFULLY, never crash. Green bar 190 (`test_m6_diagnostics`).
+- **Residual sharpened — replan-waste (now high-value):** a `replan` re-runs the WHOLE plan (all criteria from
+  scratch), multiplying node-visits and driving the recursion pressure. The handover's replan-waste fix (keep
+  MET iterations on replan, re-attack only the unmet tail) is now the next structural lever — it both speeds
+  builds and removes the churn that hit the ceiling.

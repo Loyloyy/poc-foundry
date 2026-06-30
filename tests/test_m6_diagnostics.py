@@ -251,6 +251,30 @@ def test_tester_and_critic_prompts_demand_a_shortcut_proof_test():
     assert "shortcut" in critic.lower() and "echo" in critic.lower() # inadequate if an echo stub passes
 
 
+# ── degenerate-loop robustness: a recursion-limit hit SALVAGES (incomplete), never crashes ────
+def test_invoke_with_salvage_salvages_a_recursion_error(monkeypatch, tmp_path):
+    from poc_foundry import core
+    import poc_foundry.models as M
+
+    class _Recur(Exception):
+        pass
+
+    captured = {}
+    monkeypatch.setattr(core, "_graph_recursion_error", lambda: _Recur)
+    monkeypatch.setattr(M.METER, "begin_run", lambda cfg: None)
+    monkeypatch.setattr(core, "_salvage_run",
+                        lambda graph, ctx, build_dir, build_id, gcfg, cap: captured.update(cap=cap))
+
+    class _Graph:
+        def invoke(self, first, config=None):
+            assert config["recursion_limit"] == 150          # config-driven ceiling, not the old 60
+            raise _Recur("Recursion limit of 150 reached")
+
+    core._invoke_with_salvage(_Graph(), None, ctx=None, cfg=SimpleNamespace(recursion_limit=150),
+                              build_dir=tmp_path, build_id="poc-x")
+    assert "recursion-limit" in captured["cap"]              # routed to salvage → honest incomplete
+
+
 # ── tool-calling pilot (gradio-tool): kit+glue + a shortcut-proof tool contract ──────────────
 def test_gradio_tool_template_declares_tool_sibling_and_shortcut_proof_knowledge():
     from poc_foundry.phases.context import load_template
