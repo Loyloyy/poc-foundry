@@ -530,14 +530,18 @@ Local green bar: `run_spine_tests.py` (185) + contract (11) + hygiene.
       `incomplete` because the bottleneck moved to TESTER quality: a buggy `str`-vs-`int` citation test that
       is unsatisfiable by construction (coder diagnosed it but can't edit the test; critic doesn't catch
       buggy/strict tests) + the coder relied on the LLM for citations instead of code-appending. DECISIONS #41.
-- [x] **Buggy-test recovery rung (general).** New §5.8 ladder rung: stuck-AFTER-research → re-author the
-      staged test ONCE (coder's diagnosis → tester), re-gated by red-first + critic, bounded by
-      `reauthor_cap` (default 1). Ladder: fix → research → **re-author** → replan → descope.
-      `prompts.tester_prompt(diagnosis=…)`, `state.reauthor_*`, `cfg.reauthor_cap`. Fakes (13). Green bar 185.
-- [ ] **Run #4 (server, pending)** — rerun `gradio-rag-thin` on `dra-…fa650c-m`: does the re-author rung
-      rescue the str-vs-int criterion (and does the coder discover code-appended citations)? If the
-      citation-determinism subtlety persists, climb to **Tier-1** (a general "make the asserted part
-      deterministic in your code, not via the model" worked example). Once RAG is solid → start the **MCP**
-      pilot as the cross-domain generalisation check.
+- [x] **Buggy-test recovery rung (general).** New §5.8 ladder rung: when the coder spends its WHOLE fix
+      budget without green, re-author the staged test ONCE (coder's diagnosis → tester) with a FRESH fix
+      budget, before replan; re-gated by red-first + critic, bounded by `reauthor_cap` (default 1). Ladder:
+      fix → **re-author** → replan → descope. `prompts.tester_prompt(diagnosis=…)`, `state.reauthor_*`,
+      `cfg.reauthor_cap`. Fakes (13). Green bar 185.
+- [x] **Run #4 — rung didn't fire (trigger too narrow), corrected.** It was gated on "stuck" (repeated
+      error signature); the coder's errors VARIED, so it descoped via fix→replan without re-authoring. Also
+      saw the critic correctly `respec`/`descope` several too-WEAK/gameable tests + grounding pass twice.
+      Fixed: fire on fix-budget-exhausted (not "stuck"). DECISIONS #41 follow-on.
+- [ ] **Run #5 (server, pending)** — rerun `gradio-rag-thin` on `dra-…fa650c-m` with the corrected trigger.
+      Watch for `re-authoring the staged test` to fire on a descoping criterion; does it rescue the build /
+      does the coder code-append citations? If citation-determinism persists → climb to **Tier-1** (general
+      "make the asserted part deterministic in your code, not via the model" example). Then start **MCP**.
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG
   using the real primitives) or a documented capability gap, never a toy that games a behavioural test.

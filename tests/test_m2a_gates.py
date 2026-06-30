@@ -323,13 +323,16 @@ def test_critic_descopes_inadequate_after_respec_cap(tmp_path, monkeypatch):
     assert any(c.status == "descoped" for c in upd["spec"].success_criteria)
 
 
-def test_critic_fixes_then_replans_then_descopes_a_failing_coder(tmp_path, monkeypatch):
+def test_critic_fixes_then_reauthors_then_replans_then_descopes_a_failing_coder(tmp_path, monkeypatch):
     from poc_foundry.phases.pipeline import p_critic
-    ctx = _critic_ctx(monkeypatch, tmp_path)                   # fix_limit_k=3 default
+    ctx = _critic_ctx(monkeypatch, tmp_path)                   # fix_limit_k=3, reauthor_cap=1 defaults
     assert p_critic(_critic_state("abandoned", fix_count=0), ctx)["verdict"] == "fix"
-    assert p_critic(_critic_state("abandoned", fix_count=3), ctx)["verdict"] == "replan"   # K spent
-    desc = p_critic(_critic_state("abandoned", fix_count=3, replan_count=1), ctx)          # replan spent
-    assert desc["verdict"] == "proceed" and desc["descope_report"]                         # honest descope
+    reauth = p_critic(_critic_state("abandoned", fix_count=3), ctx)                         # K spent → re-author
+    assert reauth["verdict"] == "fix" and reauth["reauthor_pending"] is True
+    assert p_critic(_critic_state("abandoned", fix_count=3, reauthor_count=1),
+                    ctx)["verdict"] == "replan"                                             # re-author spent
+    desc = p_critic(_critic_state("abandoned", fix_count=3, reauthor_count=1, replan_count=1), ctx)
+    assert desc["verdict"] == "proceed" and desc["descope_report"]                          # honest descope
 
 
 def test_critic_descopes_an_integrity_incident_never_rewards_gaming(tmp_path, monkeypatch):
@@ -366,7 +369,9 @@ def test_degraded_critic_lowers_the_fix_budget(tmp_path, monkeypatch):
     ctx = _critic_ctx(monkeypatch, tmp_path, degraded=True)   # degraded_fix_limit_k=2 default
     assert p_critic(_critic_state("abandoned", fix_count=0), ctx)["degraded_critic"] is True
     assert p_critic(_critic_state("abandoned", fix_count=1), ctx)["verdict"] == "fix"
-    assert p_critic(_critic_state("abandoned", fix_count=2), ctx)["verdict"] == "replan"  # K=2 spent earlier
+    assert p_critic(_critic_state("abandoned", fix_count=2), ctx)["verdict"] == "fix"      # K=2 spent → re-author
+    assert p_critic(_critic_state("abandoned", fix_count=2, reauthor_count=1),
+                    ctx)["verdict"] == "replan"                                            # re-author spent
 
 
 def test_after_critic_routing_maps_every_verdict():

@@ -1808,3 +1808,15 @@ fix → research → **re-author-test** → replan → descope. `prompts.tester_
 Next: run #4 — does the re-author rung rescue the str-vs-int criterion (and does the coder discover
 code-appended citations)? If the citation-determinism subtlety persists, climb to Tier-1 (a general
 "make the asserted part deterministic in your code, not via the model" worked example in the playbook).
+
+**#41 follow-on — run #4: the re-author rung DIDN'T fire (trigger too narrow) → corrected (2026-07-01).**
+Run #4 never logged a `re-authoring the staged test` line: the rung was gated on "stuck" (a repeated
+error signature, shared with the research trigger), but the coder's failures VARIED across attempts, so
+it never registered as stuck → research never fired → the `researched` precondition was never met → the
+criterion went `fix→fix→fix→replan→descope` without ever re-authoring. (Also notable: the critic worked
+hard and correctly — it `respec`/`descope`'d several tests for being too WEAK/gameable, and grounding
+passed cleanly twice.) Fix: the rung now fires on **fix-budget-exhausted** (the real signal that the
+coder couldn't pass THIS test), independent of "stuck" — inserted BETWEEN the fix budget and replan, and
+it resets `fix_count` so the coder gets a FRESH budget vs the corrected test. Ladder is now
+fix(×K) → **re-author once (fresh budget)** → replan → descope. Updated the two M2a ladder tests for the
+new rung. Green bar 185. Next: re-run → the rung should now fire on any descoping criterion.

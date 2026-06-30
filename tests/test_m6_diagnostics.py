@@ -199,15 +199,15 @@ def _critic_state(tmp_path, **kw):
     spec = Spec(goal="g", success_criteria=[SuccessCriterion(text="c", core=True)], buildable=True)
     base = dict(build_id="poc-x", spec=spec,
                 plan=Plan(iterations=[IterationPlan(goal="g", acceptance=["c"], interface="x")]),
-                iteration=0, fix_count=1,
+                iteration=0, fix_count=3,   # fix budget (K=3 non-degraded) EXHAUSTED → re-author rung
                 iteration_records=[IterationRecord(goal="g", status="abandoned", attempts=3)],
-                last_coder_stuck=True, last_coder_error="'1' in {1,2,3,4} is always False (str vs int)",
-                last_research_iteration=0)   # research rung already consumed this iteration
+                last_coder_stuck=False,     # errors VARIED (not "stuck") — re-author must still fire
+                last_coder_error="'1' in {1,2,3,4} is always False (str vs int)")
     base.update(kw)
     return BuildState(**base), ctx
 
 
-def test_critic_grants_one_reauthor_when_stuck_after_research(monkeypatch, tmp_path):
+def test_critic_grants_one_reauthor_when_fix_budget_exhausted(monkeypatch, tmp_path):
     import poc_foundry.models as M
     from poc_foundry.phases import pipeline
 
@@ -216,18 +216,18 @@ def test_critic_grants_one_reauthor_when_stuck_after_research(monkeypatch, tmp_p
     upd = pipeline.p_critic(st, ctx)
     assert upd["verdict"] == "fix"
     assert upd["reauthor_pending"] is True and upd["reauthor_count"] == 1
+    assert upd["fix_count"] == 0                     # fresh fix budget vs the re-authored test
     assert "str vs int" in upd["reauthor_reason"]
-    assert not upd.get("research_pending")          # research consumed → re-author rung fires instead
 
 
-def test_critic_stops_reauthoring_once_budget_is_spent(monkeypatch, tmp_path):
+def test_critic_replans_once_reauthor_budget_is_spent(monkeypatch, tmp_path):
     import poc_foundry.models as M
     from poc_foundry.phases import pipeline
 
     monkeypatch.setattr(M, "same_family", lambda a, b: False)
-    st, ctx = _critic_state(tmp_path, reauthor_count=1)   # cap is 1 → no more re-authors
+    st, ctx = _critic_state(tmp_path, reauthor_count=1)   # cap is 1 → re-author spent → replan
     upd = pipeline.p_critic(st, ctx)
-    assert upd["verdict"] == "fix" and not upd.get("reauthor_pending")   # falls through to a plain fix
+    assert upd["verdict"] == "replan" and not upd.get("reauthor_pending")
 
 
 def test_tester_prompt_includes_the_diagnosis_only_when_reauthoring():

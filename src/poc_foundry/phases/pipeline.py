@@ -708,23 +708,22 @@ def p_critic(state, ctx: Ctx) -> dict:
         # fix → replan → descope budget ladder resumes.
         researched = state.last_research_iteration == state.iteration   # research rung consumed this iter
         can_research = state.last_coder_stuck and not state.research_pending and not researched
-        # M6 buggy-test recovery: once research is consumed and the coder is STILL stuck, the staged test
-        # itself may be flawed/impossible (e.g. the str-vs-int citation bug) — the coder can't fix it (it
-        # can't edit the test). Re-author it ONCE, feeding the coder's diagnosis to the tester; red-first +
-        # the critic still gate the new test, so it can't become a gameable freebie.
-        can_reauthor = (state.last_coder_stuck and researched
-                        and state.reauthor_count < cfg.reauthor_cap)
         if can_research and state.fix_count < K:
             disposition, reason = "fix", "stuck on a repeated error — escalating to targeted research"
             upd["research_pending"] = True
             upd["research_error"] = state.last_coder_error or "coder stuck (repeated error)"
-        elif can_reauthor and state.fix_count < K:
-            disposition, reason = "fix", "stuck after research — re-authoring the staged test (it may be flawed)"
+        elif state.fix_count < K:
+            disposition, reason = "fix", "coder did not reach green — another iteration"
+        elif state.reauthor_count < cfg.reauthor_cap:
+            # M6 buggy-test recovery: the coder spent its WHOLE fix budget and never went green — the
+            # staged test itself may be flawed/impossible (e.g. the str-vs-int citation bug), and the
+            # coder can't fix it (it can't edit the test). Re-author it ONCE with the coder's diagnosis +
+            # a FRESH fix budget, BEFORE the heavier replan. Fires whether the errors repeated or varied
+            # (not gated on "stuck"). Red-first + the critic still gate the re-authored test.
+            disposition, reason = "fix", "fix budget exhausted — re-authoring the staged test (it may be flawed)"
             upd["reauthor_pending"] = True
             upd["reauthor_reason"] = (state.last_coder_error or "")[-800:]
             upd["reauthor_count"] = state.reauthor_count + 1
-        elif state.fix_count < K:
-            disposition, reason = "fix", "coder did not reach green — another iteration"
         elif state.replan_count < cfg.replan_cap:
             disposition, reason = "replan", "fix budget exhausted — replan remaining"
         else:
@@ -736,7 +735,8 @@ def p_critic(state, ctx: Ctx) -> dict:
 
     if disposition == "fix":
         verdict = "fix"
-        upd["fix_count"] = state.fix_count + 1
+        # a re-author grants a FRESH fix budget vs the corrected test; a plain fix consumes one.
+        upd["fix_count"] = 0 if upd.get("reauthor_pending") else state.fix_count + 1
     elif disposition == "respec":
         verdict = "respec"
         upd["respec_count"] = state.respec_count + 1
