@@ -217,7 +217,10 @@ class BespokeCoder:
         if self._llm is not None:
             return self._llm(self.role, prompt, system=SYSTEM)
         from poc_foundry.models import chat_text  # lazy: keep import light
-        return chat_text(self.role, prompt, system=SYSTEM)
+        # Generous budget: a reasoning model spends tokens on chain-of-thought BEFORE the whole-file
+        # edit, so the default 4000 can truncate a complex composition mid-file (same class as the
+        # tester-truncation in run #8). 8000 gives headroom for the `*** FILE:` block to complete.
+        return chat_text(self.role, prompt, system=SYSTEM, max_tokens=8000)
 
     def run(self, *, workspace: Path, goal: str, editable_files: list[str],
             test_sources: dict[str, str], verify: VerifyFn,

@@ -248,19 +248,20 @@ def _tester_write(ctx: Ctx, criteria, goal: str, interface: str, research: str =
     prompt = prompts.tester_prompt(criteria, goal, interface, research=research,
                                    knowledge=getattr(ctx.template, "knowledge", ""),
                                    diagnosis=diagnosis)
-    # Defense-in-depth: a staged test that does not even PARSE (e.g. a stray markdown fence the
-    # extractor missed) can never go red→green, silently dooming the iteration (pilot DECISIONS #34).
-    # Validate it compiles; if not, RE-AUTHOR once (the tester is non-deterministic). Only the failure
-    # path costs the extra call.
+    # Defense-in-depth: a staged test that does not even PARSE (a stray fence, OR — the run-#8 cause —
+    # the tester's output TRUNCATED by max_tokens: a reasoning model spends its budget on chain-of-thought
+    # before the test, so a long shortcut-proof test gets cut mid-line → "'(' was never closed" → the test
+    # is uncollectable and the (often CORRECT) coder is blamed). Fix: a GENEROUS token budget (reasoning
+    # headroom, like the critic's 8000) + up to 3 parse-retries (the tester is non-deterministic).
     code = ""
-    for attempt in range(2):
-        code = _extract_code(chat_text("tester", prompt, system=prompts.TESTER_SYSTEM))
+    for attempt in range(3):
+        code = _extract_code(chat_text("tester", prompt, system=prompts.TESTER_SYSTEM, max_tokens=8000))
         try:
             compile(code, "<staged-test>", "exec")
             return code
         except SyntaxError:
-            if attempt == 0:
-                ctx.say("P4: authored test did not parse — re-authoring once")
+            if attempt < 2:
+                ctx.say(f"P4: authored test did not parse — re-authoring ({attempt + 1}/2)")
     return code   # best-effort; red-first / collect-only will still surface a persistently broken test
 
 

@@ -251,6 +251,31 @@ def test_tester_and_critic_prompts_demand_a_shortcut_proof_test():
     assert "shortcut" in critic.lower() and "echo" in critic.lower() # inadequate if an echo stub passes
 
 
+# ── reasoning-model token headroom: the tester (run #8) truncated mid-test → uncollectable ────
+def test_tester_write_uses_generous_budget_and_retries_past_a_truncated_test(monkeypatch, tmp_path):
+    from poc_foundry.phases import pipeline
+    import poc_foundry.models as M
+
+    seen = {"tokens": [], "n": 0}
+    outputs = [
+        "```python\ndef test_x(arg\n```",                  # TRUNCATED (unclosed paren) — the run-#8 bug
+        "```python\ndef test_x():\n    assert True\n```",   # complete on retry
+    ]
+
+    def fake_chat_text(role, prompt, system=None, max_tokens=4000, **kw):
+        seen["tokens"].append(max_tokens)
+        out = outputs[min(seen["n"], len(outputs) - 1)]
+        seen["n"] += 1
+        return out
+
+    monkeypatch.setattr(M, "chat_text", fake_chat_text)
+    ctx = SimpleNamespace(template=SimpleNamespace(knowledge=""), say=lambda *a, **k: None)
+    src = pipeline._tester_write(ctx, ["c"], "goal", "core.generate_reply(m)")
+    assert "assert True" in src and "test_x(arg" not in src   # recovered past the truncated attempt
+    assert seen["tokens"][0] == 8000                          # reasoning headroom (was the default 4000)
+    assert seen["n"] == 2                                     # retried instead of staging the broken test
+
+
 # ── degenerate-loop robustness: a recursion-limit hit SALVAGES (incomplete), never crashes ────
 def test_invoke_with_salvage_salvages_a_recursion_error(monkeypatch, tmp_path):
     from poc_foundry import core

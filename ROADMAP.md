@@ -505,7 +505,7 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
 ## M6 — harness generalisation (thin-template autonomy probe) 🟡 IN PROGRESS (2026-06-30)
 Goal: prove the harness can assemble a RAG PoC with only FRAMEWORK-level help (rails + primitives as
 libraries), not pre-written solution logic — the litmus test for handling cutting-edge artifacts.
-Local green bar: `run_spine_tests.py` (189) + contract (11) + hygiene.
+Local green bar: `run_spine_tests.py` (191) + contract (11) + hygiene.
 - [x] **Thin RAG template** `gradio-rag-thin` — same rails as `gradio-rag-llm` (Gradio, pgvector sibling,
       offline embedder + model call exposed as `search`/`llm`/`_embed`/`CORPUS`), but `generate_reply` is
       a stub and the `knowledge` note is a contract, not a recipe. Thick one kept for comparison. (DEC #39)
@@ -569,9 +569,17 @@ Local green bar: `run_spine_tests.py` (189) + contract (11) + hygiene.
 - [x] **Recursion-limit salvage (general robustness).** `_invoke_with_salvage` now catches `GraphRecursionError`
       → honest `incomplete` + forensics (was: hard crash); ceiling is config/env-driven (`PF_RECURSION_LIMIT`,
       default 150). Green bar 190.
-- [ ] **Run #8 (server, pending)** — re-run `gradio-tool` with the salvage fix: it should now finish as
-      `incomplete` (not crash), so we can pull `workspace/core.py` + `iterations/*/incident.txt` to see the
-      coder's REAL `call_tool` attempt + the specific failure (product extraction vs exact-price formatting).
+- [x] **Run #8 — THE CODER WAS RIGHT; the TESTER was truncating.** Forensics: the coder's `core.py` is
+      CORRECT tool-calling (real `call_tool` + `llm` + a deterministic price anchor) — it was blamed because
+      the staged test was TRUNCATED mid-line (`'(' was never closed`): the tester ran on the default
+      `max_tokens=4000`, and a reasoning model spent it on chain-of-thought before the longer shortcut-proof
+      test. Reframes #5–#8: the coder is capable (real RAG in #3, real tool-calling in #8); the bottleneck was
+      TESTER quality. DECISIONS #44.
+- [x] **Reasoning-model token-headroom fix.** Tester `max_tokens` 4000→8000 + 3 parse-retries; coder `_chat`
+      4000→8000 (a whole-file composition truncates the same way). Green bar 191. DECISIONS #44.
+- [ ] **Run #9 (server, pending) — expect the first REAL cross-domain green.** Re-run `gradio-tool`: the
+      tester's test should now parse and the coder's already-correct composition should go GREEN (a tool-calling
+      PoC whose price the toy can't fake). If green → cross-domain autonomy proven under a toy-proof bar.
 - [ ] **replan-waste fix (next structural lever)** — on replan, keep MET iterations + re-attack only the unmet
       tail (handover §2.D). Speeds builds AND removes the churn that hit the recursion ceiling.
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG

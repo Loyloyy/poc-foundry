@@ -1918,3 +1918,36 @@ same composition-reliability limit as RAG, now reproduced cross-domain.
   scratch), multiplying node-visits and driving the recursion pressure. The handover's replan-waste fix (keep
   MET iterations on replan, re-attack only the unmet tail) is now the next structural lever — it both speeds
   builds and removes the churn that hit the ceiling.
+
+## #44 — M6 run #8: the coder was RIGHT all along — the tester was TRUNCATING (reasoning-model max_tokens) (2026-07-01)
+
+**The big reframe.** Run #8's forensics (`iterations/0/incident.txt`) show the coder's `core.py` is CORRECT
+tool-calling composition: `from toolkit import CATALOG_PRODUCTS, call_tool, llm` → matches the product →
+`call_tool(matched_product)` → `llm(...)` to phrase it → **a deterministic price anchor**
+(`if price_str not in reply: reply += f" The price is ${price_str}."`). Real `call_tool`, real `llm`, the
+exact-value guarantee. The coder even DIAGNOSED the blocker itself: *"the test file has a syntax error
+(unclosed parenthesis on line 24)… not something I can fix by editing core.py."*
+
+The staged test was TRUNCATED mid-line:
+`def test_out_of_catalogue_query_returns_no_catalog_price(catalog_prices` → `SyntaxError: '(' was never
+closed` → pytest can't COLLECT it → the (correct) coder is blamed `fix-attempt cap reached`, forever.
+Root cause: the **tester** runs on the default `chat_text` budget (`max_tokens=4000`); a REASONING model
+spends that on chain-of-thought before emitting the now-longer shortcut-proof test → the test is cut off
+mid-signature. Exactly the M5 class (#34/#37 spec/answer `max_tokens`), now hitting the tester.
+
+**This reframes runs #5–#8.** The coder is genuinely capable — run #3 (real RAG), run #8 (correct
+tool-calling). The dominant recent bottleneck was TESTER quality (gameable in #5, red-first in #6,
+**truncated/uncollectable in #8**) — not coder incapability. The harness kept blaming the coder for the
+tester's broken tests.
+
+**Fix (root cause, general).** `_tester_write` now calls the tester with `max_tokens=8000` (reasoning
+headroom, matching the critic) + up to 3 parse-retries (was 1). The coder's `_chat` likewise bumped to
+8000 (a complex whole-file composition can truncate the same way). Fakes: `test_m6_diagnostics`
+(tester budget + retry-past-truncation; green bar 191). *Server: re-run `gradio-tool` → the tester's test
+should now parse, the coder's already-correct composition should go GREEN — the first real cross-domain
+(tool-calling) build.*
+
+**Honest verdict forming:** with the toy-proof verification (#1) AND the tester un-truncated, the on-prem
+coder DOES compose real, primitive-using PoCs across domains (RAG + tool-calling). The defensible asset —
+a general harness that refuses toys and generalises — holds, and the autonomy is realer than runs #5–#7
+suggested. Residual: replan-waste (churn) + tester reliability under the stronger bar.
