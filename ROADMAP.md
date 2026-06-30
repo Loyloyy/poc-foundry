@@ -539,9 +539,19 @@ Local green bar: `run_spine_tests.py` (185) + contract (11) + hygiene.
       error signature); the coder's errors VARIED, so it descoped via fix→replan without re-authoring. Also
       saw the critic correctly `respec`/`descope` several too-WEAK/gameable tests + grounding pass twice.
       Fixed: fire on fix-budget-exhausted (not "stuck"). DECISIONS #41 follow-on.
-- [ ] **Run #5 (server, pending)** — rerun `gradio-rag-thin` on `dra-…fa650c-m` with the corrected trigger.
-      Watch for `re-authoring the staged test` to fire on a descoping criterion; does it rescue the build /
-      does the coder code-append citations? If citation-determinism persists → climb to **Tier-1** (general
-      "make the asserted part deterministic in your code, not via the model" example). Then start **MCP**.
+- [x] **Run #5 — re-author rung fired & worked, but exposed the deep problem.** `core.py` did
+      `from ragkit import CORPUS` only — reinvented a keyword `_search`, ECHOED the doc, never called
+      `search`/`llm`. The echo-TOY again; passed 3/4 criteria because a black-box test can't tell echo from
+      real RAG. Critic caught the core one but hit the respec cap → `incomplete/no`. DECISIONS #42.
+- [x] **#1 anti-toy discrimination (general, verification-led).** Generalised the bar from "a constant stub
+      must fail" → "a SHORTCUT (echo/keyword/lookup/constant) must fail; passing must require GENERALISATION
+      (e.g. a paraphrased input the data's own words don't cover)". GATE CHANGE: critic now rejects
+      echo/lookup-passable tests (keeps mechanism-agnosticism; dropped the hard "default to adequate"). Tester
+      told to write the generalisation case. Symmetric **weak-test re-author rung** (dual of #41): green-but-
+      gameable → strengthen that test before respec. Fixed stale re-author log wording. Green bar 187. DEC #42.
+- [ ] **Run #6 (server, pending)** — rerun `gradio-rag-thin` on `dra-…fa650c-m`. Does the stronger bar force
+      real `search`/`llm` use (a paraphrase case the echo-toy can't fake)? Does the symmetric rung lift past
+      the gameable-test wall? If the coder STILL won't use the primitives when the test demands generalisation
+      → genuine capability frontier (→ Tier-1 worked example, or the stronger-coder gap). Then start **MCP**.
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG
-  using the real primitives) or a documented capability gap, never a toy that games a behavioural test.
+  using the real primitives, proven by a generalisation test a toy can't fake) or a documented capability gap.

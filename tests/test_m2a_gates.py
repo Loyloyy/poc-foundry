@@ -306,18 +306,27 @@ def test_critic_advances_to_next_iteration_with_fresh_fix_budget(tmp_path, monke
     assert upd["fix_count"] == 0             # each iteration gets a fresh fix budget
 
 
-def test_critic_respecs_an_inadequate_green(tmp_path, monkeypatch):
+def test_critic_reauthors_a_gameable_green_before_respec(tmp_path, monkeypatch):
+    from poc_foundry.phases.pipeline import p_critic
+    ctx = _critic_ctx(monkeypatch, tmp_path, adequate=False)   # critic judges the green test gameable
+    upd = p_critic(_critic_state("green", respec_count=0, reauthor_count=0), ctx)
+    assert upd["verdict"] == "fix"                             # strengthen THIS test, not a coarse respec
+    assert upd["reauthor_pending"] is True and upd["reauthor_count"] == 1
+    assert upd["fix_count"] == 0                               # fresh budget to re-pass the stronger test
+
+
+def test_critic_respecs_an_inadequate_green_once_reauthor_spent(tmp_path, monkeypatch):
     from poc_foundry.phases.pipeline import p_critic
     ctx = _critic_ctx(monkeypatch, tmp_path, adequate=False)
-    upd = p_critic(_critic_state("green", respec_count=0), ctx)
+    upd = p_critic(_critic_state("green", respec_count=0, reauthor_count=1), ctx)   # re-author spent
     assert upd["verdict"] == "respec"
     assert upd["respec_count"] == 1
 
 
-def test_critic_descopes_inadequate_after_respec_cap(tmp_path, monkeypatch):
+def test_critic_descopes_inadequate_after_respec_and_reauthor_caps(tmp_path, monkeypatch):
     from poc_foundry.phases.pipeline import p_critic
-    ctx = _critic_ctx(monkeypatch, tmp_path, adequate=False)   # respec_cap defaults to 1
-    upd = p_critic(_critic_state("green", respec_count=1), ctx)
+    ctx = _critic_ctx(monkeypatch, tmp_path, adequate=False)   # respec_cap + reauthor_cap default to 1
+    upd = p_critic(_critic_state("green", respec_count=1, reauthor_count=1), ctx)
     assert upd["verdict"] == "proceed"                         # last iteration → proceed, criterion descoped
     assert upd["descope_report"] and upd["descope_report"][0]["criterion"] == "reply starts with 'ECHO:'"
     assert any(c.status == "descoped" for c in upd["spec"].success_criteria)

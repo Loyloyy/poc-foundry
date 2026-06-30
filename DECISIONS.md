@@ -1820,3 +1820,47 @@ coder couldn't pass THIS test), independent of "stuck" — inserted BETWEEN the 
 it resets `fix_count` so the coder gets a FRESH budget vs the corrected test. Ladder is now
 fix(×K) → **re-author once (fresh budget)** → replan → descope. Updated the two M2a ladder tests for the
 new rung. Green bar 185. Next: re-run → the rung should now fire on any descoping criterion.
+
+## #42 — M6 run #5 verdict + #1 "a shortcut/echo stub must fail" (anti-toy discrimination) + symmetric weak-test re-author (2026-07-01)
+
+**Run #5 — the re-author rung fired and worked, but the headline was a hard truth.** `workspace/core.py`
+showed the coder did `from ragkit import CORPUS` ONLY — it reinvented a keyword-overlap `_search`,
+echoed the whole document (`f"Based on '{title}': {content}"`), and never called `search`/`llm`/`_embed`.
+**The echo TOY again, not real RAG.** Yet it passed 3/4 criteria (citation-via-title, no-fabrication,
+relevance-gating) because a **black-box behavioural test cannot distinguish an echo-toy from real RAG** —
+echoing the doc trivially satisfies "reply contains a distinctive corpus word / the title". The critic
+caught only the core criterion (correctly: "a rule-based stub keyword-matching the title could pass
+without real RAG") but ran out of respec budget → descope → `incomplete`/`no`. (Run #3 used the real
+primitives; run #5 didn't — same harness, model non-determinism. The Tier-0 directive doesn't reliably
+force tool use.)
+
+**Root cause (the user's original thesis):** black-box tests + a model that games toward the simplest
+passing implementation = you cannot force the real primitives. The fix must live in VERIFICATION, and
+must be GENERAL (the goal is "a PoC of ANY kind on its own", not RAG). Chose **#1 (verification-led)**
+over #2 (pre-wire the primitives — per-domain hand-scaffolding that doesn't generalise).
+
+**#1 — generalise the discrimination bar from "a constant stub must fail" to "a SHORTCUT must fail".**
+A shortcut = anything that mimics the output's surface without doing the real work: a constant, echoing
+the matched data verbatim, a keyword/title lookup, a hard-coded table. Passing must require
+GENERALISATION a shortcut cannot fake — most reliably a positive input phrased DIFFERENTLY from the data
+(synonyms/paraphrase) that still yields the correct result (for retrieval: a query sharing NO distinctive
+words with the target doc must still retrieve it → only real embeddings pass, an echo/keyword stub fails).
+Domain-agnostic principle; the per-domain discriminator (paraphrase for RAG, "tool actually called" for
+MCP, "killed+resumed" for durable-agent) is the tester's judgment — exactly the autonomy we want, not
+hardcoded.
+- **GATE CHANGE (deliberate, user-directed; counterpart to #34's loosening):** the critic
+  (`critic_adequacy_prompt`) now marks a test INADEQUATE if a cheap echo/keyword/lookup/constant shortcut
+  would pass it — while KEEPING mechanism-agnosticism (still need not prove pgvector/embeddings ran).
+  Dropped the hard "DEFAULT TO ADEQUATE" lean that let the echo-toy through; retained "lenient on form,
+  strict on substance". Updated the M5 critic-prompt test to the new bar.
+- **Tester** (`tester_prompt`) now instructs the shortcut-must-fail + generalisation/paraphrase case.
+- **Symmetric weak-test re-author rung** (dual of #41's buggy-test rung): when a test is GREEN but the
+  critic judges it gameable, re-author JUST that test stronger (critic critique → tester) before the
+  coarse `respec`, bounded by `reauthor_cap`, red-first + critic re-gated. Green-path ladder is now
+  accept / **re-author (strengthen)** / respec / descope. Also fixed the stale "stuck after research"
+  re-author log wording.
+
+Green bar 187. Next: run #6 — does the stronger bar force real `search`/`llm` use (paraphrase case the
+echo-toy can't fake), and does the symmetric rung lift the build past the gameable-test wall? If the
+coder still won't use the primitives even when the test demands generalisation → that's the genuine
+capability frontier (→ Tier-1 example, or the stronger-coder gap).

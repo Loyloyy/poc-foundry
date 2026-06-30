@@ -85,14 +85,15 @@ def test_rag_template_declares_corpus_knowledge():
 # ── critic recalibration (DECISIONS #34 follow-on 3): the non-degraded critic was applying an
 #    IMPOSSIBLE bar to a black-box test ("a lookup stub could satisfy it without pgvector"), making the
 #    RAG template unbuildable. Re-anchor it to OBSERVABLE behavioral adequacy — without losing teeth. ──
-def test_critic_prompt_is_blackbox_behavioral_and_defaults_adequate():
+def test_critic_prompt_is_blackbox_but_rejects_cheap_shortcuts():
+    # #1 (DEC #42) tightened the bar: still BLACK-BOX + mechanism-agnostic (you needn't prove pgvector
+    # ran), but a cheap echo/keyword/lookup SHORTCUT passing is now grounds for inadequacy — that is
+    # what let the echo-toy through under the old lenient "default to adequate" stance.
     p = prompts.critic_adequacy_prompt("the criterion", "def test_x(): assert True", "iface")
     low = p.lower()
     assert "black-box" in low
-    assert "default to adequate" in low
-    # explicitly out-of-scope: requiring proof of internal mechanism / rejecting on a lookup table
-    assert "lookup table" in low
-    assert "out of scope" in low
+    assert "mechanism" in low and "out of scope" in low          # still not required to prove the mechanism
+    assert "shortcut" in low and "echo" in low and "generalis" in low
 
 
 def test_critic_prompt_keeps_teeth_against_constant_stub():

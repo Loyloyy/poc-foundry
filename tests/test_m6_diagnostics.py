@@ -235,5 +235,17 @@ def test_tester_prompt_includes_the_diagnosis_only_when_reauthoring():
 
     with_diag = prompts.tester_prompt("crit", "goal", "core.generate_reply(m)",
                                       diagnosis="citation '1' (str) never in {1,2,3,4} (int)")
-    assert "UNSATISFIABLE" in with_diag and "str) never in" in with_diag
-    assert "UNSATISFIABLE" not in prompts.tester_prompt("crit", "goal", "core.generate_reply(m)")
+    assert "INADEQUATE" in with_diag and "str) never in" in with_diag
+    assert "INADEQUATE" not in prompts.tester_prompt("crit", "goal", "core.generate_reply(m)")
+
+
+# ── anti-shortcut discrimination (tests must fail an echo/keyword/constant stub) ──────────────
+def test_tester_and_critic_prompts_demand_a_shortcut_proof_test():
+    from poc_foundry import prompts
+
+    tester = prompts.tester_prompt("crit", "goal", "core.generate_reply(m)")
+    assert "SHORTCUT" in tester and "GENERALISATION" in tester       # echo/keyword stub must fail
+    assert "paraphrase" in tester.lower() or "phrased DIFFERENTLY" in tester
+
+    critic = prompts.critic_adequacy_prompt("crit", "def test_x():\n    assert True\n", "iface")
+    assert "shortcut" in critic.lower() and "echo" in critic.lower() # inadequate if an echo stub passes

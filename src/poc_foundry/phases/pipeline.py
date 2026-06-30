@@ -483,8 +483,8 @@ def p4_iterate(state, ctx: Ctx) -> dict:
         test_src = test_path.read_text()
         ctx.say(f"P4 iter{i}: reusing the staged test (fix-retry — no re-author)")
     else:
-        if reauthor:   # buggy-test recovery: re-author with the coder's diagnosis of why it was stuck
-            ctx.say(f"P4 iter{i}: re-authoring the staged test (prior test may be flawed — stuck after research)")
+        if reauthor:   # re-author rung: the prior test was inadequate (too strict/buggy OR too weak/gameable)
+            ctx.say(f"P4 iter{i}: re-authoring the staged test (prior test judged inadequate)")
         test_src = _tester_write(ctx, it.acceptance, it.goal, it.interface, research=research_md,
                                  diagnosis=(state.reauthor_reason if reauthor else ""))
         test_path.write_text(test_src)
@@ -691,10 +691,20 @@ def p_critic(state, ctx: Ctx) -> dict:
                 # distinct frontier critic.
                 disposition, reason = "accept", "adequacy concern recorded (degraded critic, non-blocking)"
                 advisory = review.reason
+            elif state.reauthor_count < cfg.reauthor_cap:
+                # M6 weak-test recovery (dual of the buggy-test rung): the test is GREEN but the critic
+                # judged it GAMEABLE (a shortcut/echo stub could pass). Strengthen JUST this test —
+                # critic's critique → tester — rather than a coarse full respec. The coder must then
+                # re-pass the stronger test; red-first + the critic re-gate it.
+                disposition, reason = "fix", "test green but gameable — strengthening it (re-author)"
+                upd["reauthor_pending"] = True
+                upd["reauthor_reason"] = ("the test is GAMEABLE — " + (review.reason or "")
+                                          + " Make it stronger so a shortcut/echo/keyword stub FAILS.")
+                upd["reauthor_count"] = state.reauthor_count + 1
             elif state.respec_count < cfg.respec_cap:
                 disposition, reason = "respec", review.reason or "test inadequate / gameable"
             else:
-                disposition, reason = "descope", review.reason or "test inadequate; respec cap reached"
+                disposition, reason = "descope", review.reason or "test inadequate; respec/re-author caps reached"
     elif status == "incident":
         disposition, reason = "descope", "integrity incident — gamed iteration not rewarded"
     elif status == "red-first-failed":
