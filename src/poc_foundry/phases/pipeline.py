@@ -149,6 +149,7 @@ def p1_spec(state, ctx: Ctx) -> dict:
     core = next((c.text for c in spec.success_criteria if c.core), "(none)")
     ctx.say(f"P1 spec: goal={spec.goal!r}; {len(spec.success_criteria)} criteria; core={core!r}")
     return {"phase": "spec", "spec": spec, "caveats": state.caveats + lint,
+            "replan_mode": False,   # a new/respec'd spec = fresh criteria → re-scaffold + strict red-first
             "log": state.log + [f"P1 spec: {len(spec.success_criteria)} criteria"]}
 
 
@@ -218,6 +219,18 @@ def _spin_services(ctx: Ctx) -> None:
 
 
 def p3_scaffold(state, ctx: Ctx) -> dict:
+    # M6 replan-waste fix: a `replan` re-enters P3 on the SAME spec. PRESERVE the workspace (the last-green
+    # commit already holds the met iterations' code) instead of re-stamping the stub — so met criteria
+    # fast-path via met-existing (skip the coder) and only the unmet tail is re-attacked. Services are
+    # already up (idempotent); the smoke already passed this build. A respec resets replan_mode → re-stamp.
+    if state.replan_mode and state.scaffold_sha:
+        _spin_services(ctx)
+        ctx.say(f"P3 scaffold: REPLAN — preserving workspace, no re-stamp (met criteria fast-path via "
+                f"met-existing) @ {state.commit_sha or state.scaffold_sha}")
+        return {"phase": "scaffold", "scaffold_sha": state.scaffold_sha,
+                "commit_sha": state.commit_sha or state.scaffold_sha,
+                "log": state.log + ["P3 scaffold: replan — workspace preserved"]}
+
     written = stamp_template(ctx.template, ctx.workspace_dir)
     git_init(ctx.workspace_dir)
     sha = git_commit(ctx.workspace_dir, f"scaffold: stamp {ctx.template.name} template (start-green)")
@@ -461,7 +474,10 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     # iteration 0 runs against the scaffold echo-stub — a real test MUST be red. In refine the workspace
     # already holds real code (we're past scaffold), so a green probe means "met by existing code", not
     # tester inadequacy → the strict-red-first wall does not apply.
-    strict_red_first = (i == 0) and not state.refine_mode
+    # iter0's strict red-first assumes a PRISTINE scaffold stub. On a replan (workspace preserved) OR a
+    # refine, the workspace already holds real code, so a green iter0 test means "met by existing code"
+    # (met-existing), NOT tester inadequacy — don't flag it as a red-first violation.
+    strict_red_first = (i == 0) and not state.refine_mode and not state.replan_mode
 
     staging_tests = ctx.staging_dir / "tests"
     staging_tests.mkdir(parents=True, exist_ok=True)     # ACCUMULATE: prior iterations' tests stay (cumulative suite)
@@ -766,6 +782,7 @@ def p_critic(state, ctx: Ctx) -> dict:
     elif disposition == "replan":
         verdict = "replan"
         upd["replan_count"] = state.replan_count + 1
+        upd["replan_mode"] = True     # SAME spec → P3 preserves the workspace; met criteria fast-path
     else:  # accept | descope → criterion resolved; advance the loop
         if disposition == "descope":
             spec = state.spec

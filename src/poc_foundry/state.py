@@ -123,6 +123,11 @@ class BuildState(BaseModel):
     reauthor_reason: str = ""          # the coder's stuck diagnosis, handed to the tester as advisory
     reauthor_count: int = 0            # test re-authors spent (vs reauthor_cap)
 
+    # M6 replan-waste fix — additive. A `replan` (SAME spec) preserves the workspace instead of re-stamping,
+    # so already-met criteria fast-path via met-existing (skip the coder) and only the unmet tail is
+    # re-attacked. Set by p_critic on replan; cleared by p1_spec (a respec = new criteria → fresh scaffold).
+    replan_mode: bool = False
+
     # bookkeeping
     log: list[str] = Field(default_factory=list)   # human-readable phase trace
     caveats: list[str] = Field(default_factory=list)

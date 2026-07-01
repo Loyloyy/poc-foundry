@@ -230,6 +230,35 @@ def test_critic_replans_once_reauthor_budget_is_spent(monkeypatch, tmp_path):
     assert upd["verdict"] == "replan" and not upd.get("reauthor_pending")
 
 
+def test_critic_replan_sets_replan_mode(monkeypatch, tmp_path):
+    import poc_foundry.models as M
+    from poc_foundry.phases import pipeline
+
+    monkeypatch.setattr(M, "same_family", lambda a, b: False)
+    st, ctx = _critic_state(tmp_path, reauthor_count=2, replan_count=0)   # fix+reauthor spent → replan
+    upd = pipeline.p_critic(st, ctx)
+    assert upd["verdict"] == "replan"
+    assert upd["replan_mode"] is True                # SAME spec → P3 will preserve the workspace
+
+
+def test_p3_scaffold_preserves_workspace_on_replan(monkeypatch, tmp_path):
+    from poc_foundry.phases import pipeline
+    from poc_foundry.state import BuildState, Spec
+    from poc_foundry.artifact import SuccessCriterion
+
+    calls = {"stamp": 0}
+    monkeypatch.setattr(pipeline, "stamp_template",
+                        lambda *a, **k: calls.__setitem__("stamp", calls["stamp"] + 1) or [])
+    ctx = SimpleNamespace(template=SimpleNamespace(services=[], name="t"), workspace_dir=tmp_path,
+                          service_env={"x": "1"}, say=lambda *a, **k: None, broker=None)
+    st = BuildState(build_id="poc-x", replan_mode=True, scaffold_sha="sha0", commit_sha="sha9",
+                    spec=Spec(goal="g", success_criteria=[SuccessCriterion(text="c", core=True)]))
+    upd = pipeline.p3_scaffold(st, ctx)
+    assert calls["stamp"] == 0                        # workspace PRESERVED — the stub was NOT re-stamped
+    assert upd["scaffold_sha"] == "sha0" and upd.get("status") != "failed"
+    assert upd["commit_sha"] == "sha9"                # HEAD (met iterations' code) kept
+
+
 def test_tester_prompt_includes_the_diagnosis_only_when_reauthoring():
     from poc_foundry import prompts
 

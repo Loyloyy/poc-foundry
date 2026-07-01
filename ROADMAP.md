@@ -505,7 +505,7 @@ The shift from "works on fixtures" to "produces real, useful PoCs from real Stag
 ## M6 — harness generalisation (thin-template autonomy probe) 🟡 IN PROGRESS (2026-06-30)
 Goal: prove the harness can assemble a RAG PoC with only FRAMEWORK-level help (rails + primitives as
 libraries), not pre-written solution logic — the litmus test for handling cutting-edge artifacts.
-Local green bar: `run_spine_tests.py` (191) + contract (11) + hygiene.
+Local green bar: `run_spine_tests.py` (194) + contract (11) + hygiene.
 - [x] **Thin RAG template** `gradio-rag-thin` — same rails as `gradio-rag-llm` (Gradio, pgvector sibling,
       offline embedder + model call exposed as `search`/`llm`/`_embed`/`CORPUS`), but `generate_reply` is
       a stub and the `knowledge` note is a contract, not a recipe. Thick one kept for comparison. (DEC #39)
@@ -604,12 +604,16 @@ Local green bar: `run_spine_tests.py` (191) + contract (11) + hygiene.
       (global cumulative log) → knowledge note drops the log audit (opaque values ARE the proof); (b) core
       red-first descope — the 'strengthen' rung spent the only reauthor budget so the red-first-violating
       strengthened test couldn't be re-authored → `reauthor_cap` 1→2. Green bar 192. DECISIONS #45 follow-on.
-- [ ] **Run #13 (server, pending) — expect `done`.** Re-run `gradio-tool`: clean-room deterministic (no `/calls`
-      test) + the core red-first test re-authorable → `status=done` / `demonstrates_core_value=yes`, the first
-      fully-verified cross-domain PoC.
+- [x] **Run #13 — DONE. FIRST fully-verified CROSS-DOMAIN green.** `gradio-tool` → `status=done`,
+      `demonstrates_core_value=yes`, **5/5 criteria met** (opaque price+SKU, out-of-catalogue no-hallucination,
+      no-match, LLM-formatted prose), red-first OK, ledger OK, 0 incidents, clean-room green. CLEAN + fast
+      (respecs/replans/fixes=0; 578s; 12 calls; iter0 RED→GREEN in 1). The general machinery generalises beyond
+      RAG to external tool-calling. DECISIONS #46.
 - [ ] **Residual (deferred, gate-sensitive):** the inventory ledger treats a SKIPPED staged test as a gap →
       integrity incident (mis-attributed to the coder); better to re-author the skipping test (tester-owned).
-- [ ] **replan-waste fix (next structural lever)** — on replan, keep MET iterations + re-attack only the unmet
-      tail (handover §2.D). Speeds builds AND removes the churn that hit the recursion ceiling.
+- [x] **replan-waste fix (DECISIONS #47).** A `replan` (same spec) now sets `replan_mode` → P3 PRESERVES the
+      workspace (no re-stamp) + iter0 strict-red-first disabled → met criteria fast-path via met-existing (skip
+      the coder), only the unmet tail is re-worked. Happy path unchanged (flag defaults off). Fakes (2); green
+      bar 194. **NEEDS SERVER VALIDATION** on a replanning build (e.g. gradio-rag-thin).
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG
   using the real primitives, proven by a generalisation test a toy can't fake) or a documented capability gap.

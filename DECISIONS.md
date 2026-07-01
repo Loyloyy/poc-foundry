@@ -2029,3 +2029,59 @@ had spent the only `reauthor` budget (cap=1). Fix: `reauthor_cap` 1→2 (the per
 buggy-test / weak-test-strengthen / red-first; 2 lets a strengthened-then-red-first-violating test be
 re-authored). Updated the 5 ladder tests that assumed cap=1. Green bar 192. *Server: re-run → clean-room
 deterministic + the core red-first test re-authorable → expect `status=done`.*
+
+## #46 — M6: FIRST fully-verified CROSS-DOMAIN green — tool-calling PoC `status=done` (2026-07-01)
+
+Run #13: `gradio-tool` → **`status=done`, `demonstrates_core_value=yes`, 5/5 criteria met**, red-first OK,
+ledger OK (21 test ids), 0 incidents, clean-room install=test=demo=True — a CLEAN, fast run
+(respecs=0/replans=0/fixes=0; 578s; 12 LLM calls; iter0 RED→GREEN in 1, critic `accept→next` immediately).
+The criteria: exact opaque `price_usd` (core) + exact `sku` (2nd opaque field) + out-of-catalogue no
+hallucinated price + no-match indicator + reply is natural-language prose (LLM used, not bare JSON). The
+harness autonomously wrote the spec (shortcut-proof, opaque-value criteria), the red-first tests, the
+tool-calling glue, and an INDEPENDENT critic certified the opaque value is unfakeable without a real
+`call_tool`.
+
+**What this proves (honest framing, per §3b):** the general machinery — kit+glue, the anti-shortcut
+verification bar, the re-author ladder, the salvage/robustness fixes — GENERALISES beyond RAG to a NEW
+domain (external tool invocation) it was never tuned against, producing a real, verified PoC that uses both
+a tool and the LLM. The autonomous surface is the spec/tests/glue + the independent critic + executed tests;
+the human-authored part is the kit+glue scaffold (the `toolkit` primitives + the tool sibling), per the
+design's "harness engineering". Caveat: reaching this took 13 runs — but those iterated the HARNESS (general
+fixes: forensics #39, edit-extraction, the re-author family #41–43, token headroom #44, NO_PROXY #44, critic
+calibration #42/#45), NOT this template's solution; template-specific tuning was minimal (dropping a flaky
+`/calls` audit I'd over-suggested). The defensible claim: poc-foundry now autonomously builds + VERIFIES a
+real tool-calling PoC under a toy-proof bar, cross-domain. NOT "the AI invented a novel app unaided."
+
+**#46 correction — hand-check of the emitted `core.py` (2026-07-01).** The emitted PoC is GENUINE on the
+core: real `from toolkit import call_tool`, a real `call_tool(product)` call, and the opaque `price_usd`/`sku`
+taken FROM the tool result (no hard-coded literals) → the tool-calling and the core value are real, verified,
+not gamed. HONEST CORRECTION to the "uses both a tool and the LLM" line above: it does NOT call `llm` — it
+imports it but formats the reply with a deterministic f-string. So the 5th criterion ("reply is prose →
+proving the LLM was used") passed WITHOUT the LLM (a fixed template is prose too) — a gameable test the
+critic accepted (same class as the RAG citation-determinism gap: prose ≠ proof of LLM). Scoped claim: a
+genuine, verified TOOL-CALLING PoC (real tool + opaque values); NOT a demonstration of LLM use. Residual: to
+force real LLM use, a criterion an f-string can't satisfy is needed (hard to assert deterministically on
+non-deterministic prose) — deferred; not core to a tool-calling demo.
+
+## #47 — M6: replan-waste fix — a replan PRESERVES the workspace (only the unmet tail is re-attacked) (2026-07-01)
+
+**The waste (handover §2.D):** a `replan` routed `plan → scaffold` (unconditional graph edge), and BOTH
+`p2_plan` (resets every criterion to pending + clears staged tests) AND `p3_scaffold` (re-stamps the stub)
+wiped all progress — so every replan re-attacked ALL criteria from scratch, discarding the met iterations'
+code (we watched it redo iter0/iter1 across runs #5–#12; it also drove the recursion-limit blow-up #43).
+
+**Fix (behind a `replan_mode` flag → happy path byte-for-byte unchanged):** on a replan (SAME spec),
+`p_critic` sets `state.replan_mode=True`; `p3_scaffold` then PRESERVES the workspace (skip re-stamp — the
+last-green commit already holds the met code; services are idempotent, smoke already passed) instead of
+resetting to the stub; and iter0's strict red-first is disabled (the workspace has real code, so a green
+iter0 test = met-existing, not tester inadequacy). Result: already-met criteria fast-path via met-existing
+(skip the expensive CODER loop) and only the unmet tail is re-worked on the preserved code. A respec
+(`p1_spec`, new criteria) clears `replan_mode` → fresh scaffold + strict red-first, as before. `plan→scaffold`
+graph edge unchanged (P3 just no-ops the stamp). Fakes: `test_critic_replan_sets_replan_mode`,
+`test_p3_scaffold_preserves_workspace_on_replan`. Green bar 194.
+
+**NEEDS SERVER VALIDATION** (local fakes can't exercise a full replanning build): run a template that
+actually replans (e.g. `gradio-rag-thin`, which replans often) and confirm the log shows
+`P3 scaffold: REPLAN — preserving workspace` + met criteria going `met-existing` (not re-coded) after a
+replan, and the build still reaches the same verdict, faster. The DONE tool build (#13, no replan) is
+unaffected.
