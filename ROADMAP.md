@@ -615,5 +615,10 @@ Local green bar: `run_spine_tests.py` (194) + contract (11) + hygiene.
       workspace (no re-stamp) + iter0 strict-red-first disabled → met criteria fast-path via met-existing (skip
       the coder), only the unmet tail is re-worked. Happy path unchanged (flag defaults off). Fakes (2); green
       bar 194. **NEEDS SERVER VALIDATION** on a replanning build (e.g. gradio-rag-thin).
+- [x] **Regression check (post-session).** `gradio-tool` STILL `done` (no regression). `gradio-rag-llm`
+      REGRESSED (single-file coder clobbered scaffold exports → clean-room ImportError; stricter critic
+      over-strengthened the gameable grounding test). Fixed: `Template.required_exports` (gate protects
+      single-file scaffold exports) + a paraphrase-generalisation discriminator in `gradio-rag-llm`'s
+      knowledge note. Green bar 195. DECISIONS #48. **Re-run `gradio-rag-llm` to confirm green restored.**
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG
   using the real primitives, proven by a generalisation test a toy can't fake) or a documented capability gap.

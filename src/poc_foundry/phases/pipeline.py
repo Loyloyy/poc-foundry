@@ -474,10 +474,13 @@ def p4_iterate(state, ctx: Ctx) -> dict:
     # iteration 0 runs against the scaffold echo-stub — a real test MUST be red. In refine the workspace
     # already holds real code (we're past scaffold), so a green probe means "met by existing code", not
     # tester inadequacy → the strict-red-first wall does not apply.
-    # iter0's strict red-first assumes a PRISTINE scaffold stub. On a replan (workspace preserved) OR a
-    # refine, the workspace already holds real code, so a green iter0 test means "met by existing code"
-    # (met-existing), NOT tester inadequacy — don't flag it as a red-first violation.
-    strict_red_first = (i == 0) and not state.refine_mode and not state.replan_mode
+    # iter0's strict red-first assumes a PRISTINE scaffold stub → a green test = tester inadequacy. Disable
+    # it ONLY when the workspace already holds REAL committed code (a replan that preserved a prior plan's
+    # met code, or a refine): there a green iter0 test = "met by existing code" (met-existing), not a
+    # violation. Key off actual committed code (commit != scaffold), NOT merely replan_mode — a replan whose
+    # workspace is still the bare stub (core failed first) must KEEP the gate to catch a weak test.
+    workspace_has_code = bool(state.commit_sha) and state.commit_sha != state.scaffold_sha
+    strict_red_first = (i == 0) and not state.refine_mode and not workspace_has_code
 
     staging_tests = ctx.staging_dir / "tests"
     staging_tests.mkdir(parents=True, exist_ok=True)     # ACCUMULATE: prior iterations' tests stay (cumulative suite)

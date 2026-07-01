@@ -36,6 +36,10 @@ class Template:
     license: str | None = None
     services: list[dict] = field(default_factory=list)   # [{name, vetted}] — sibling services this PoC needs
     knowledge: str = ""   # optional grounding note: what FIXED data the scaffold ships (e.g. core.CORPUS)
+    # names the editable file MUST keep defining (a SINGLE-FILE template's scaffold primitives the smoke/
+    # tests import) — the interface-preservation gate rejects an edit that drops any. The interface fn is
+    # always required implicitly; this is for the EXTRA exports kit+glue would put in a non-editable module.
+    required_exports: list[str] = field(default_factory=list)
                           # + how a test can prove real behaviour over it — injected into spec+tester prompts
 
 
@@ -56,6 +60,7 @@ def load_template(name: str, templates_root: Path | None = None) -> Template:
         license=manifest.get("license"),
         services=list(manifest.get("services", [])),
         knowledge=str(manifest.get("knowledge", "")).strip(),
+        required_exports=list(manifest.get("required_exports", [])),
     )
 
 

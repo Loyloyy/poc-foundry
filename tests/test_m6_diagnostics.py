@@ -188,6 +188,18 @@ def test_interface_defs_parses_the_function_name():
     assert "generate_reply" in both and "CORPUS" in both
 
 
+def test_single_file_rag_templates_declare_required_exports_for_the_gate():
+    # regression #13 fix: a single-file template's coder clobbered EMBED_DIM/cite/snippet → clean-room
+    # ImportError. The template now declares required_exports so the interface gate protects them.
+    from poc_foundry.phases.context import load_template
+    from poc_foundry.phases.pipeline import _interface_defs
+
+    t = load_template("gradio-rag-llm")
+    assert {"EMBED_DIM", "CORPUS", "_embed", "cite", "snippet"} <= set(t.required_exports)
+    defs = _interface_defs(t.interface, t.required_exports)
+    assert "generate_reply" in defs and "EMBED_DIM" in defs and "snippet" in defs   # gate will enforce all
+
+
 # ── buggy-test recovery rung (stuck-after-research → re-author the staged test once) ──────────
 def _critic_state(tmp_path, **kw):
     from poc_foundry.config import load_config

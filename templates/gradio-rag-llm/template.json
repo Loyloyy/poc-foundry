@@ -3,22 +3,58 @@
   "version": "0.1.0",
   "description": "A start-GREEN Gradio chatbot that does retrieval-augmented generation over a REAL pgvector sibling AND calls a REAL model (OpenAI-compatible endpoint) to generate the grounded answer, appending a code-produced [id] citation. Deterministic stdlib-embedding retrieval keeps the verifiable contract reproducible; the LLM supplies the prose. Exercises the model endpoint (and the opt-in key-proxy) from inside the sandbox.",
   "stamp_dir": "files",
-  "editable_files": ["core.py"],
+  "editable_files": [
+    "core.py"
+  ],
   "smoke_test": "tests/test_smoke.py",
   "suite": "tests",
   "interface": "core.generate_reply(message: str, history: list | None = None) -> str",
   "run_cmd": "docker compose up --build",
   "services": [
-    {"name": "pg", "vetted": "pgvector"}
+    {
+      "name": "pg",
+      "vetted": "pgvector"
+    }
   ],
   "stack": [
-    {"layer": "ui", "choice": "gradio", "pinned_version": "4.44.1"},
-    {"layer": "vector-db", "choice": "pgvector", "pinned_version": "pg16"},
-    {"layer": "db-driver", "choice": "psycopg", "pinned_version": "3.2.3"},
-    {"layer": "model-client", "choice": "openai", "pinned_version": "1.51.0"},
-    {"layer": "language", "choice": "python", "pinned_version": "3.12"}
+    {
+      "layer": "ui",
+      "choice": "gradio",
+      "pinned_version": "4.44.1"
+    },
+    {
+      "layer": "vector-db",
+      "choice": "pgvector",
+      "pinned_version": "pg16"
+    },
+    {
+      "layer": "db-driver",
+      "choice": "psycopg",
+      "pinned_version": "3.2.3"
+    },
+    {
+      "layer": "model-client",
+      "choice": "openai",
+      "pinned_version": "1.51.0"
+    },
+    {
+      "layer": "language",
+      "choice": "python",
+      "pinned_version": "3.12"
+    }
   ],
   "template_repo": null,
   "license": "MIT",
-  "knowledge": "This PoC GENERATES its answer with a REAL LLM call but appends the citation in CODE, so the DETERMINISTIC, verifiable part of a reply is the `[id]` citation marker — NOT the model's free-form prose (which varies run to run). The scaffold ships `core.CORPUS` (a FIXED list of docs, each {id, title, content}; you CANNOT add facts), deterministic `retrieve`/`snippet`/`cite` (`cite` → `[<int id>]`, e.g. `[1]`, ids are INTEGERS), AND `_answer(question, context)` (the real model call). `generate_reply` should: retrieve the doc, call the LLM to answer from that doc's content, then append `cite(doc)`. The corpus covers retrieval-augmented generation, pgvector similarity search, grounded citations, and the Gradio chat interface; an unrelated query (e.g. 'weather on Mars') matches nothing and yields the no-match reply.\nTO TEST DETERMINISTICALLY (the LLM's wording is NON-deterministic — NEVER assert exact sentences or a fixed phrase the model must produce): `from core import CORPUS`; for an in-corpus query (words from a doc's title) assert the reply contains a `[N]` marker whose integer N matches a CORPUS doc id (read the integer between the brackets, match `next(d for d in CORPUS if d['id'] == int(N))`), AND that the reply is NON-TRIVIAL (longer than the bare marker — i.e. the model actually generated an answer). For an unrelated query, assert the reply contains NO `[N]` marker (the no-match path). For discrimination, assert two different in-corpus topics cite DIFFERENT ids. Do NOT assume a `[doc-N]`/`[source:title]` format, and do NOT assert the model's exact text — only structure (citation presence/absence, the integer id match, non-trivial length).\nGROUNDING (REQUIRED — this is the heart of RAG; a citation alone does NOT prove the answer used the document): for an in-corpus query, ALSO assert the answer is GROUNDED in the cited document. Since the LLM paraphrases (never assert exact wording), check LEXICAL OVERLAP: strip the `[N]` marker, lowercase, and assert the answer shares at least 2 distinctive content words (length >= 4, excluding common stopwords like 'with'/'that'/'from'/'this') with the CITED document's `content` (read from CORPUS at test time). A genuinely grounded answer reuses the document's vocabulary; a stub, a generic reply, or an 'I don't know' does not — so this proves the LLM actually used the retrieved document without asserting non-deterministic prose."
+  "knowledge": "This PoC GENERATES its answer with a REAL LLM call but appends the citation in CODE, so the DETERMINISTIC, verifiable part of a reply is the `[id]` citation marker — NOT the model's free-form prose (which varies run to run). The scaffold ships `core.CORPUS` (a FIXED list of docs, each {id, title, content}; you CANNOT add facts), deterministic `retrieve`/`snippet`/`cite` (`cite` → `[<int id>]`, e.g. `[1]`, ids are INTEGERS), AND `_answer(question, context)` (the real model call). `generate_reply` should: retrieve the doc, call the LLM to answer from that doc's content, then append `cite(doc)`. The corpus covers retrieval-augmented generation, pgvector similarity search, grounded citations, and the Gradio chat interface; an unrelated query (e.g. 'weather on Mars') matches nothing and yields the no-match reply.\nTO TEST DETERMINISTICALLY (the LLM's wording is NON-deterministic — NEVER assert exact sentences or a fixed phrase the model must produce): `from core import CORPUS`; for an in-corpus query (words from a doc's title) assert the reply contains a `[N]` marker whose integer N matches a CORPUS doc id (read the integer between the brackets, match `next(d for d in CORPUS if d['id'] == int(N))`), AND that the reply is NON-TRIVIAL (longer than the bare marker — i.e. the model actually generated an answer). For an unrelated query, assert the reply contains NO `[N]` marker (the no-match path). For discrimination, assert two different in-corpus topics cite DIFFERENT ids. Do NOT assume a `[doc-N]`/`[source:title]` format, and do NOT assert the model's exact text — only structure (citation presence/absence, the integer id match, non-trivial length).\nGROUNDING (REQUIRED — this is the heart of RAG; a citation alone does NOT prove the answer used the document): for an in-corpus query, ALSO assert the answer is GROUNDED in the cited document. Since the LLM paraphrases (never assert exact wording), check LEXICAL OVERLAP: strip the `[N]` marker, lowercase, and assert the answer shares at least 2 distinctive content words (length >= 4, excluding common stopwords like 'with'/'that'/'from'/'this') with the CITED document's `content` (read from CORPUS at test time). A genuinely grounded answer reuses the document's vocabulary; a stub, a generic reply, or an 'I don't know' does not — so this proves the LLM actually used the retrieved document without asserting non-deterministic prose.\nSHORTCUT-PROOF GROUNDING (so a title-keyword lookup + echo stub — not real retrieval — FAILS): retrieval uses REAL semantic embeddings, so phrase the in-corpus positive case as a question whose words do NOT overlap the target document's title/content (a paraphrase / synonyms) yet must still retrieve and ground in that document (assert the [N] cites THAT doc's id AND the reply shares distinctive words with THAT doc's content). A lexical title-match stub cannot retrieve the right doc from a paraphrase — only genuine embedding search can — so this makes the grounding test adequate.",
+  "required_exports": [
+    "EMBED_DIM",
+    "RELEVANCE_THRESHOLD",
+    "CORPUS",
+    "_embed",
+    "search",
+    "retrieve",
+    "snippet",
+    "cite",
+    "_answer"
+  ]
 }

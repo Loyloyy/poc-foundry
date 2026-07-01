@@ -2085,3 +2085,35 @@ actually replans (e.g. `gradio-rag-thin`, which replans often) and confirm the l
 `P3 scaffold: REPLAN — preserving workspace` + met criteria going `met-existing` (not re-coded) after a
 replan, and the build still reaches the same verdict, faster. The DONE tool build (#13, no replan) is
 unaffected.
+
+**#47 refinement — strict-red-first keys off committed code, not `replan_mode` (2026-07-01).**
+Watching the gradio-rag-thin validation run (core fails FIRST → replan with the workspace still the bare
+stub) surfaced a hole: disabling iter0 strict-red-first on `replan_mode` alone would let a WEAK re-authored
+core test pass against the stub and be mis-accepted as met-existing. Corrected: disable strict-red-first
+only when `commit_sha != scaffold_sha` (real code was actually committed by a prior plan / refine). A replan
+whose workspace is still the stub KEEPS the gate. `replan_mode` still governs P3's workspace-preserve (a
+no-op stamp on a stub is harmless). Green bar 194.
+
+## #48 — M6 regression check: gradio-tool CLEAN, gradio-rag-llm REGRESSED → fixed (2026-07-01)
+
+After the session's heavy harness surgery, re-ran the two known-good builds on the FINAL code:
+- **`gradio-tool` → `status=done` (still green, faster: 383s / 9 calls, iter0 RED→GREEN in 1, `accept→next`).** No regression.
+- **`gradio-rag-llm` → `status=incomplete` — REGRESSED.** Two independent causes, both from this session:
+  1. **Clean-room ImportError** (`cannot import name 'EMBED_DIM'`): `gradio-rag-llm` is SINGLE-FILE (all
+     primitives in the editable `core.py`); the coder rewrote it keeping `generate_reply` but dropping
+     `EMBED_DIM`/`cite`/`snippet` → smoke break. The interface-preservation gate only protected the
+     interface fn, not the other scaffold exports (kit+glue templates are immune — primitives are non-editable).
+  2. **Core descoped**: the stricter critic (#1/#42/#45) kept `respec`/re-authoring the RAG grounding test
+     as "gameable" (a title-lookup+echo stub CAN pass "cite doc N + share words with doc N") until it became
+     red-first-violating → descope. Honest read: the test WAS gameable; the M5 green partly relied on the
+     LENIENT pre-#1 critic.
+
+**Fixes (general + template).** (a) `Template.required_exports` (new field, wired in `load_template`): a
+single-file template declares the scaffold exports the gate must preserve; `gradio-rag-llm` +
+`gradio-rag-pgvector` now declare theirs → the interface gate rejects a clobbering edit. (b)
+`gradio-rag-llm` knowledge note gains a PARAPHRASE-GENERALISATION discriminator (it has REAL semantic
+embeddings → a lexically-disjoint query still retrieves the doc, which a title-lookup stub can't fake) so
+the tester writes a grounding test the strict critic ACCEPTS. NOT added to `gradio-rag-pgvector` (its
+deterministic HASH embedding can't do semantic paraphrase — flagged: that template may be un-greenable
+under the strict critic, a known tension with its "offline deterministic demo" purpose, DECISIONS #38).
+Green bar 195. *Server: re-run `gradio-rag-llm` → expect the clobber gone + the grounding test accepted.*

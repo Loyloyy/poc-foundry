@@ -3,21 +3,51 @@
   "version": "0.1.0",
   "description": "A start-GREEN Gradio chatbot that does retrieval-augmented generation over a REAL pgvector sibling service (Postgres + the vector extension). Deterministic stdlib embeddings (no model/network) so retrieval is reproducible + unit-testable; similarity search runs in pgvector. Proves the sibling-service path (design §5.6).",
   "stamp_dir": "files",
-  "editable_files": ["core.py"],
+  "editable_files": [
+    "core.py"
+  ],
   "smoke_test": "tests/test_smoke.py",
   "suite": "tests",
   "interface": "core.generate_reply(message: str, history: list | None = None) -> str",
   "run_cmd": "docker compose up --build",
   "services": [
-    {"name": "pg", "vetted": "pgvector"}
+    {
+      "name": "pg",
+      "vetted": "pgvector"
+    }
   ],
   "stack": [
-    {"layer": "ui", "choice": "gradio", "pinned_version": "4.44.1"},
-    {"layer": "vector-db", "choice": "pgvector", "pinned_version": "pg16"},
-    {"layer": "db-driver", "choice": "psycopg", "pinned_version": "3.2.3"},
-    {"layer": "language", "choice": "python", "pinned_version": "3.12"}
+    {
+      "layer": "ui",
+      "choice": "gradio",
+      "pinned_version": "4.44.1"
+    },
+    {
+      "layer": "vector-db",
+      "choice": "pgvector",
+      "pinned_version": "pg16"
+    },
+    {
+      "layer": "db-driver",
+      "choice": "psycopg",
+      "pinned_version": "3.2.3"
+    },
+    {
+      "layer": "language",
+      "choice": "python",
+      "pinned_version": "3.12"
+    }
   ],
   "template_repo": null,
   "license": "MIT",
-  "knowledge": "The PoC answers ONLY from a FIXED, read-only corpus the scaffold ships as `core.CORPUS` — a Python list of documents, each a dict with `id`, `title`, and `content`. You CANNOT add facts to it; `generate_reply` retrieves from these documents via pgvector. The corpus covers four topics: (1) retrieval-augmented generation, (2) pgvector similarity search in Postgres, (3) grounded citations, (4) the Gradio chat interface. So a query about any of those topics has a matching document; a query about anything else (e.g. 'the weather on Mars', a made-up budget figure) matches nothing and yields the no-match reply.\nCITATION FORMAT (do not guess it): the scaffold's `cite(doc)` returns the marker `[<id>]` where `<id>` is the document's INTEGER id, e.g. `[1]` or `[2]`. CORPUS ids are INTEGERS, not strings, and `generate_reply` emits that marker unchanged — the format is NOT `[doc-1]` or `[source:Title]`, so do not write a parser that assumes those.\nTO PROVE REAL RETRIEVAL in a test (so it is not satisfiable by a constant stub): `from core import CORPUS`, build a query from words in a document's `title`, and call `generate_reply`. Assert the reply contains a `[N]` citation marker; then find WHICH document it cites by reading the integer between the square brackets (the digits inside `[...]`) and matching `next(d for d in CORPUS if d['id'] == int(N))` — compare the parsed id to `d['id']` as an INT (a string-vs-int mismatch is the classic unsatisfiable-test bug). Then assert a VERBATIM multi-word substring of THAT cited document's `content` appears in the reply — read the substring out of `CORPUS` at test time, never a literal you invent. Verifying the snippet against the cited doc (rather than a doc you pre-pick) makes the test robust to which document ranks first. For the negative/discrimination case, query an obviously unrelated string and assert the reply contains NO `[N]` citation marker (it is the no-match reply). Do NOT assert specific facts/values that are not present in `CORPUS`."
+  "knowledge": "The PoC answers ONLY from a FIXED, read-only corpus the scaffold ships as `core.CORPUS` — a Python list of documents, each a dict with `id`, `title`, and `content`. You CANNOT add facts to it; `generate_reply` retrieves from these documents via pgvector. The corpus covers four topics: (1) retrieval-augmented generation, (2) pgvector similarity search in Postgres, (3) grounded citations, (4) the Gradio chat interface. So a query about any of those topics has a matching document; a query about anything else (e.g. 'the weather on Mars', a made-up budget figure) matches nothing and yields the no-match reply.\nCITATION FORMAT (do not guess it): the scaffold's `cite(doc)` returns the marker `[<id>]` where `<id>` is the document's INTEGER id, e.g. `[1]` or `[2]`. CORPUS ids are INTEGERS, not strings, and `generate_reply` emits that marker unchanged — the format is NOT `[doc-1]` or `[source:Title]`, so do not write a parser that assumes those.\nTO PROVE REAL RETRIEVAL in a test (so it is not satisfiable by a constant stub): `from core import CORPUS`, build a query from words in a document's `title`, and call `generate_reply`. Assert the reply contains a `[N]` citation marker; then find WHICH document it cites by reading the integer between the square brackets (the digits inside `[...]`) and matching `next(d for d in CORPUS if d['id'] == int(N))` — compare the parsed id to `d['id']` as an INT (a string-vs-int mismatch is the classic unsatisfiable-test bug). Then assert a VERBATIM multi-word substring of THAT cited document's `content` appears in the reply — read the substring out of `CORPUS` at test time, never a literal you invent. Verifying the snippet against the cited doc (rather than a doc you pre-pick) makes the test robust to which document ranks first. For the negative/discrimination case, query an obviously unrelated string and assert the reply contains NO `[N]` citation marker (it is the no-match reply). Do NOT assert specific facts/values that are not present in `CORPUS`.",
+  "required_exports": [
+    "EMBED_DIM",
+    "CORPUS",
+    "_embed",
+    "search",
+    "retrieve",
+    "snippet",
+    "cite"
+  ]
 }
