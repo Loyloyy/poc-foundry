@@ -33,13 +33,21 @@ def _tool_base() -> str:
     return f"http://{host}:8000"
 
 
+# Reach the internal sibling DIRECTLY, bypassing any egress proxy set in the VM env (``http_proxy``).
+# The tool server is on the per-build INTERNAL network by IP — NOT an external egress host — so routing
+# its HTTP request through the egress proxy returns 403 (the proxy correctly denies a non-allowlisted
+# host). An empty ``ProxyHandler`` disables proxy use for these calls (mirrors psycopg's direct TCP to
+# pgvector). Any HTTP-based sibling needs this; a TCP driver like psycopg does not.
+_DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def call_tool(product: str) -> dict:
     """Look up ``product`` in the PRIVATE catalogue via the real tool sibling. Returns the structured
     record ``{"product","sku","price_usd","found"}`` (``found=False`` for an unknown product). The
     ``sku``/``price_usd`` are OPAQUE — only this call yields them, so a model-only or echo stub cannot
     produce them. Raises on a transport failure (the sibling is injected by the build harness)."""
     url = _tool_base() + "/price?" + urllib.parse.urlencode({"product": product})
-    with urllib.request.urlopen(url, timeout=10) as r:   # noqa: S310 — fixed internal sibling URL
+    with _DIRECT.open(url, timeout=10) as r:   # noqa: S310 — fixed internal sibling URL (proxy bypassed)
         return json.loads(r.read().decode())
 
 

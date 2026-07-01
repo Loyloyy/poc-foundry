@@ -577,9 +577,13 @@ Local green bar: `run_spine_tests.py` (191) + contract (11) + hygiene.
       TESTER quality. DECISIONS #44.
 - [x] **Reasoning-model token-headroom fix.** Tester `max_tokens` 4000→8000 + 3 parse-retries; coder `_chat`
       4000→8000 (a whole-file composition truncates the same way). Green bar 191. DECISIONS #44.
-- [ ] **Run #9 (server, pending) — expect the first REAL cross-domain green.** Re-run `gradio-tool`: the
-      tester's test should now parse and the coder's already-correct composition should go GREEN (a tool-calling
-      PoC whose price the toy can't fake). If green → cross-domain autonomy proven under a toy-proof bar.
+- [x] **Run #9 — tester+coder both CORRECT; last blocker = egress-proxy 403 on the HTTP sibling.** The tester
+      wrote a clean shortcut-proof test + the coder wrote correct tool-calling, but `call_tool` hit `HTTP 403`:
+      `urllib` respected the VM's `http_proxy` and routed the INTERNAL sibling call through the egress proxy,
+      which denied it. Fixed `toolkit.py` to bypass the proxy (empty `ProxyHandler`) for the internal sibling
+      (M4 `NO_PROXY` analog). DECISIONS #44 follow-on. Green bar 191.
+- [ ] **Run #10 (server, pending) — expect the first REAL cross-domain green.** Re-run `gradio-tool`: tester +
+      coder are proven correct and the sibling is now reachable → the exact-opaque-price test should go GREEN.
 - [ ] **replan-waste fix (next structural lever)** — on replan, keep MET iterations + re-attack only the unmet
       tail (handover §2.D). Speeds builds AND removes the churn that hit the recursion ceiling.
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG

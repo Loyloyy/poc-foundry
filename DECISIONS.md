@@ -1951,3 +1951,15 @@ should now parse, the coder's already-correct composition should go GREEN — th
 coder DOES compose real, primitive-using PoCs across domains (RAG + tool-calling). The defensible asset —
 a general harness that refuses toys and generalises — holds, and the autonomy is realer than runs #5–#7
 suggested. Residual: replan-waste (churn) + tester reliability under the stronger bar.
+
+**#44 follow-on — run #9: tester+coder both CORRECT; the last blocker was an egress-proxy 403 on the HTTP sibling (2026-07-01).**
+With the token-headroom fix the tester wrote a clean, parseable, shortcut-proof test (paraphrased query +
+exact opaque `price_usd`) and the coder's code was correct — but `call_tool` failed with `HTTP 403
+Forbidden`. NOT the tool server (it never 403s): the iteration VM has `http_proxy` set (for allowlisted
+egress), and `urllib.urlopen` RESPECTS it, so the HTTP call to the INTERNAL tool sibling was routed through
+the egress proxy → correctly DENIED (the sibling IP isn't an allowlisted egress host). The RAG templates
+dodged this because psycopg uses raw TCP (proxy-agnostic). Fix (`toolkit.py`): reach the sibling via an
+empty-`ProxyHandler` opener (`_DIRECT`) so the internal HTTP call BYPASSES the proxy — the tool-pilot analog
+of the M4 `NO_PROXY` bypass (#31/#33). General lesson for any HTTP-based sibling: bypass the egress proxy for
+internal siblings. Green bar 191. *Server: re-run `gradio-tool` → the tester+coder are proven correct, so
+with the sibling reachable this should be the first REAL cross-domain (tool-calling) green.*
