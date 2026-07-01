@@ -1986,3 +1986,30 @@ passes → no false ledger gap. Fakes: `test_vm_env_bypasses_proxy_for_internal_
 Residual noted (do NOT rush — it's a gate): the inventory ledger treats a SKIPPED staged test as a gap →
 integrity incident; a legitimate skip is mis-attributed to the coder. Better owner = the tester (a skipping
 test is inadequate → re-author). Deferred; the NO_PROXY fix removes the recurring trigger.
+
+## #45 — M6 run #11: cross-domain PoC essentially WORKS; critic re-calibrated (opaque-value exception) (2026-07-01)
+
+**Run #11 = a real tool-calling PoC in substance, denied only by an over-strict critic.** With the
+NO_PROXY fix every gate cleared: clean-room `install=test=demo=True`, `ledger OK`, 0 incidents, and **3/4
+criteria MET — including the decisive one**: "the queried product appears in `toolkit.tool_calls()`,
+confirming the tool was GENUINELY invoked" (direct proof of real tool use) + out-of-catalogue omits the
+SKU + history handling. The coder reached GREEN on the core opaque-price test too. The ONLY reason for
+`incomplete/no`: the critic `descope`'d the core criterion — "all assertions can be satisfied by a
+hard-coded/import-time table … without genuine RAG."
+
+**That objection is WRONG — #1/#42 over-corrected.** The `price_usd` is OPAQUE: it is NOT in the coder's
+editable file or inputs; the only way to produce `1347.88` is to actually call the tool. A "hard-coded
+table" would have to embed the tool's real values, which the coder can't know without calling it — and
+whether a correct opaque value came from a live call or a memorised copy is a MECHANISM question that #34
+explicitly ruled OUT OF SCOPE. #1 removed that protection ("do not reject on a hard-coded lookup table")
+and the critic swung from too-lenient (echo-toy passed, #5) to too-strict (real tool-calling rejected).
+
+**Fix — the OPAQUE-VALUE exception (3rd critic calibration; user-context-directed gate change).**
+`critic_adequacy_prompt` now: a shortcut is what the implementation can build from what it ALREADY has
+(inputs + editable source + common knowledge) → echo/keyword/known-value tests stay INADEQUATE; BUT a test
+that requires an OPAQUE value obtainable ONLY from the real primitive (a private tool/service/store) IS
+adequate — do NOT reject it because a hypothetical hard-coded table could memorise it (mechanism, out of
+scope). Either a paraphrase-generalisation case OR an opaque-value assertion suffices. This restores #34's
+balance while keeping #1's teeth against the echo-toy (whose value is echo-able from the data). Green bar
+192 (critic-prompt fakes still pass). *Server: re-run `gradio-tool` → the opaque-price core test should now
+be ACCEPTED → `status=done`, the first fully-verified cross-domain PoC.*

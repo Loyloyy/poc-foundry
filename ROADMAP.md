@@ -591,9 +591,17 @@ Local green bar: `run_spine_tests.py` (191) + contract (11) + hygiene.
       `pytest.skip`s on the proxy 403; the ledger counts a skip as a gap → false 'gamed' descope (5 real tests
       PASSED). Robust fix: broker adds every sibling IP to `NO_PROXY` (any HTTP sibling bypasses squid) +
       `toolkit.tool_calls()` helper. DECISIONS #44 follow-on #3. Green bar 192.
-- [ ] **Run #11 (server, pending) — expect `done`.** Re-run `gradio-tool`: iter0 greens on the exact-opaque-price
-      test, the invocation-audit test now REACHES the sibling (no skip) → should reach `status=done`, the first
-      fully-verified cross-domain PoC.
+- [x] **Run #11 — cross-domain PoC WORKS in substance; critic over-strict.** NO_PROXY fix cleared every gate:
+      clean-room green, ledger OK, 0 incidents, **3/4 criteria MET incl. genuine-invocation via `tool_calls()`**.
+      Coder greened the core opaque-price test — but the critic `descope`d it ('a hard-coded table could pass'),
+      #1 over-correcting. DECISIONS #45.
+- [x] **Critic re-calibration (OPAQUE-VALUE exception, 3rd tuning).** A test requiring a value obtainable ONLY
+      from the real primitive (opaque tool/service value) is ADEQUATE — don't reject on a hypothetical hard-coded
+      table (mechanism, out of scope); echo-able-value tests stay inadequate. Restores #34's balance, keeps #1's
+      teeth. Green bar 192. DECISIONS #45.
+- [ ] **Run #12 (server, pending) — expect `done`.** Re-run `gradio-tool`: the opaque-price core test should now
+      be ACCEPTED (not descoped) → `status=done` / `demonstrates_core_value=yes` — the first fully-verified
+      cross-domain (tool-calling) PoC.
 - [ ] **Residual (deferred, gate-sensitive):** the inventory ledger treats a SKIPPED staged test as a gap →
       integrity incident (mis-attributed to the coder); better to re-author the skipping test (tester-owned).
 - [ ] **replan-waste fix (next structural lever)** — on replan, keep MET iterations + re-attack only the unmet
