@@ -359,19 +359,23 @@ class Broker:
         key). When the key-proxy is provisioned (M4 S2b) the VM ALSO gets the proxy's base_url so a
         key-requiring PoC calls the model THROUGH the proxy with the sacrificial token (the proxy swaps in
         the real key, which the VM never sees). Pure dict-building → unit-testable without Docker."""
+        env_extra = env_extra or {}
         env = {
             "HTTPS_PROXY": self.proxy_url, "HTTP_PROXY": self.proxy_url,
             "https_proxy": self.proxy_url, "http_proxy": self.proxy_url,
-            "NO_PROXY": "localhost,127.0.0.1", "no_proxy": "localhost,127.0.0.1",
             "PF_SANDBOX_VLLM_KEY": self.vllm_key,
         }
+        # NO_PROXY: internal hosts that must BYPASS the egress proxy. Every SIBLING-SERVICE IP goes here —
+        # an HTTP sibling (e.g. the tool server) reached via http_proxy would otherwise route through squid,
+        # which denies the internal IP → 403 (a TCP driver like psycopg is unaffected, but listing it is
+        # harmless). The vllm_allow_host is NOT bypassed — the model call SHOULD go via the allowlisted
+        # proxy route. The key-proxy IP is added below.
+        no_proxy = ["localhost", "127.0.0.1"]
+        no_proxy += [v for k, v in env_extra.items()
+                     if k.startswith("PF_SERVICE_") and k.endswith("_HOST") and v]
         if self.keyproxy_url:                       # opt-in: a key-requiring PoC calls the model via here
             env["PF_SANDBOX_MODEL_BASE_URL"] = self.keyproxy_url
-            # The key-proxy is HTTP on an internal IP — it must BYPASS the squid proxy (else the VM's
-            # http_proxy routes the call to squid, which denies the internal IP). Add it to NO_PROXY.
-            host = self.keyproxy_url.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0]
-            no = f"localhost,127.0.0.1,{host}"
-            env["NO_PROXY"], env["no_proxy"] = no, no
+            no_proxy.append(self.keyproxy_url.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0])
         elif getattr(self.cfg, "vllm_allow_host", ""):
             # NORMAL (keyless) path (M5 B0): a model-calling PoC reaches the egress-ALLOWLISTED model
             # endpoint directly THROUGH the egress proxy (vllm_allow_host is squid's private-host
@@ -379,7 +383,9 @@ class Broker:
             # PF_SANDBOX_VLLM_KEY (the keyless vLLM ignores it). No NO_PROXY change — the call SHOULD go
             # via the proxy (that is the allowlisted route). Scrubbed out of emitted output at P7.
             env["PF_SANDBOX_MODEL_BASE_URL"] = f"http://{self.cfg.vllm_allow_host}/v1"
-        env.update(env_extra or {})
+        env.update(env_extra)
+        no = ",".join(dict.fromkeys(no_proxy))   # dedup, order-preserving; set LAST so it always wins
+        env["NO_PROXY"], env["no_proxy"] = no, no
         return env
 
     def create_service(self, *, image: str, name: str, env: dict | None = None,

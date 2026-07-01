@@ -7,6 +7,10 @@ build; ``core.py`` is). Treat these like any imported library: call them, don't 
   • ``llm(prompt, system=...)`` — a real model completion (the wording VARIES run to run).
   • ``CATALOG_PRODUCTS`` — the product NAMES the tool knows. You may NOT invent prices/SKUs; only
     ``call_tool`` yields those.
+  • ``tool_calls()`` — the tool server's recorded call log, for verifying genuine invocation in a test.
+
+Use these helpers for ALL tool access — they bypass the VM's egress proxy (the sibling is internal; a
+raw HTTP request to it gets a 403).
 
 Importing this module is light — ``openai`` is imported lazily inside ``llm``; ``call_tool`` uses only
 the stdlib (``urllib``).
@@ -49,6 +53,15 @@ def call_tool(product: str) -> dict:
     url = _tool_base() + "/price?" + urllib.parse.urlencode({"product": product})
     with _DIRECT.open(url, timeout=10) as r:   # noqa: S310 — fixed internal sibling URL (proxy bypassed)
         return json.loads(r.read().decode())
+
+
+def tool_calls() -> list[dict]:
+    """The tool server's recorded call log — ``[{"product": ...}, ...]`` — for VERIFYING genuine
+    invocation (e.g. a test calls ``generate_reply`` then asserts the queried product was recorded here).
+    Proxy-bypassed like ``call_tool`` — use THIS helper, never a raw HTTP request to the sibling, or the
+    egress proxy denies it (403)."""
+    with _DIRECT.open(_tool_base() + "/calls", timeout=10) as r:   # noqa: S310 — internal sibling (proxy bypassed)
+        return json.loads(r.read().decode()).get("calls", [])
 
 
 _MODEL_ID: str | None = None

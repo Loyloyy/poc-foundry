@@ -582,8 +582,20 @@ Local green bar: `run_spine_tests.py` (191) + contract (11) + hygiene.
       `urllib` respected the VM's `http_proxy` and routed the INTERNAL sibling call through the egress proxy,
       which denied it. Fixed `toolkit.py` to bypass the proxy (empty `ProxyHandler`) for the internal sibling
       (M4 `NO_PROXY` analog). DECISIONS #44 follow-on. Green bar 191.
-- [ ] **Run #10 (server, pending) — expect the first REAL cross-domain green.** Re-run `gradio-tool`: tester +
-      coder are proven correct and the sibling is now reachable → the exact-opaque-price test should go GREEN.
+- [x] **Run #10 — FIRST real cross-domain green (partial).** Plan-1 iter0 **RED→GREEN in 1 attempt** on the
+      exact-opaque-price test — coder composed real tool-calling + passed a shortcut-proof test. Symmetric rung
+      then strengthened it, but the critic-requested `/calls` invocation test hit the SAME proxy 403 (raw HTTP)
+      → mis-flagged as gaming. Fixed: proxy-safe `toolkit.tool_calls()` helper + knowledge note mandates the
+      helpers for ALL tool access. DECISIONS #44 follow-on #2. Green bar 191.
+- [x] **Run #10 diagnosis (before rerun): skipped `/calls` test → false ledger gap.** The invocation-audit test
+      `pytest.skip`s on the proxy 403; the ledger counts a skip as a gap → false 'gamed' descope (5 real tests
+      PASSED). Robust fix: broker adds every sibling IP to `NO_PROXY` (any HTTP sibling bypasses squid) +
+      `toolkit.tool_calls()` helper. DECISIONS #44 follow-on #3. Green bar 192.
+- [ ] **Run #11 (server, pending) — expect `done`.** Re-run `gradio-tool`: iter0 greens on the exact-opaque-price
+      test, the invocation-audit test now REACHES the sibling (no skip) → should reach `status=done`, the first
+      fully-verified cross-domain PoC.
+- [ ] **Residual (deferred, gate-sensitive):** the inventory ledger treats a SKIPPED staged test as a gap →
+      integrity incident (mis-attributed to the coder); better to re-author the skipping test (tester-owned).
 - [ ] **replan-waste fix (next structural lever)** — on replan, keep MET iterations + re-attack only the unmet
       tail (handover §2.D). Speeds builds AND removes the churn that hit the recursion ceiling.
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG

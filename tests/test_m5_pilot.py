@@ -166,6 +166,21 @@ def test_vm_env_injects_allowlisted_model_endpoint_without_keyproxy():
     assert "10.0.0.9" in env2["NO_PROXY"]
 
 
+def test_vm_env_bypasses_proxy_for_internal_sibling_ips():
+    # M6: an HTTP sibling (e.g. the tool server) reached via http_proxy would route through squid, which
+    # DENIES the internal IP → 403. Every PF_SERVICE_*_HOST IP must be in NO_PROXY so sibling HTTP works,
+    # whether the PoC/test uses a helper or a raw urllib request. (psycopg/pgvector is TCP → unaffected.)
+    from poc_foundry.sandbox.broker import Broker
+    cfg = SimpleNamespace(sandbox_image="poc-foundry-sandbox", proxy_image="poc-foundry-proxy",
+                          kata_runtime="kata", uv_cache_shared=False, vllm_allow_host="")
+    b = Broker("poc-tool", cfg, allowed_images={"poc-foundry-sandbox", "poc-foundry-proxy"})
+    b.proxy_url = "http://10.0.0.2:3128"
+    env = b._build_vm_env({"PF_SERVICE_TOOLSERVER_HOST": "10.0.0.7", "PF_SERVICE_PG_HOST": "10.0.0.5"})
+    assert "10.0.0.7" in env["NO_PROXY"] and "10.0.0.7" in env["no_proxy"]   # HTTP sibling bypasses squid
+    assert "10.0.0.5" in env["NO_PROXY"]                                     # every sibling IP
+    assert env["HTTP_PROXY"] == "http://10.0.0.2:3128"                       # egress still goes via proxy
+
+
 # ── B1: the model-calling template ───────────────────────────────────────────
 def test_rag_llm_template_resolves_pins_and_anchors_on_citation():
     from poc_foundry.phases.context import load_template

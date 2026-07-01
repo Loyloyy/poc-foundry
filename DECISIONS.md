@@ -1963,3 +1963,26 @@ empty-`ProxyHandler` opener (`_DIRECT`) so the internal HTTP call BYPASSES the p
 of the M4 `NO_PROXY` bypass (#31/#33). General lesson for any HTTP-based sibling: bypass the egress proxy for
 internal siblings. Green bar 191. *Server: re-run `gradio-tool` → the tester+coder are proven correct, so
 with the sibling reachable this should be the first REAL cross-domain (tool-calling) green.*
+
+**#44 follow-on #2 — run #10: FIRST real cross-domain green (plan1 iter0 RED→GREEN in 1), then the /calls audit hit the same proxy (2026-07-01).**
+The proxy fix landed: plan-1 iter0 went **RED→GREEN in 1 attempt** on the exact-opaque-price test — the coder
+composed real tool-calling AND passed a shortcut-proof test. The symmetric weak-test rung then fired
+(`test green but gameable — strengthening it`), and the critic pushed for explicit invocation proof — but the
+tester wrote that as a RAW HTTP GET to the sibling's `/calls`, hitting the SAME egress-proxy 403 → `LEDGER FAIL
+… recorded but not passed` → mis-flagged as gaming → descope. Fix: added a proxy-safe `toolkit.tool_calls()`
+helper (recorded call log, `_DIRECT` opener) + updated the knowledge note to mandate `call_tool`/`tool_calls`
+for ALL tool access (never raw HTTP). Now the invocation-audit test the critic wants can actually pass. Green
+bar 191. *Server: re-run → plan-1 iter0 already greened; with the audit proxy-safe this should reach `done`.*
+
+**#44 follow-on #3 — the ROBUST proxy fix: broker NO_PROXY for ALL sibling IPs (2026-07-01).**
+Confirmed from run #10's forensics: the critic-requested `/calls` invocation test did `try: urlopen() except:
+pytest.skip()`, so the egress-proxy 403 made it SKIP — and the inventory ledger counts a skipped-but-recorded
+test as a gap → false "gamed iteration" → descope (the coder's 5 real tests PASSED: `5 passed, 1 skipped`).
+The `toolkit.tool_calls()` helper only fixes tests that USE it; a raw-`urllib` `/calls` request still 403s.
+Robust fix in the BROKER (`_build_vm_env`): every `PF_SERVICE_*_HOST` IP is now added to `NO_PROXY`, so ANY
+internal HTTP sibling call bypasses squid (the exact pattern the key-proxy #33 already used; psycopg/pgvector
+is TCP → unaffected). Now sibling HTTP works whether via a helper or raw request → the `/calls` test runs +
+passes → no false ledger gap. Fakes: `test_vm_env_bypasses_proxy_for_internal_sibling_ips`. Green bar 192.
+Residual noted (do NOT rush — it's a gate): the inventory ledger treats a SKIPPED staged test as a gap →
+integrity incident; a legitimate skip is mis-attributed to the coder. Better owner = the tester (a skipping
+test is inadequate → re-author). Deferred; the NO_PROXY fix removes the recurring trigger.
