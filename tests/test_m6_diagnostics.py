@@ -225,7 +225,7 @@ def test_critic_replans_once_reauthor_budget_is_spent(monkeypatch, tmp_path):
     from poc_foundry.phases import pipeline
 
     monkeypatch.setattr(M, "same_family", lambda a, b: False)
-    st, ctx = _critic_state(tmp_path, reauthor_count=1)   # cap is 1 → re-author spent → replan
+    st, ctx = _critic_state(tmp_path, reauthor_count=2)   # cap is 2 → re-author spent → replan
     upd = pipeline.p_critic(st, ctx)
     assert upd["verdict"] == "replan" and not upd.get("reauthor_pending")
 

@@ -318,7 +318,7 @@ def test_critic_reauthors_a_gameable_green_before_respec(tmp_path, monkeypatch):
 def test_critic_respecs_an_inadequate_green_once_reauthor_spent(tmp_path, monkeypatch):
     from poc_foundry.phases.pipeline import p_critic
     ctx = _critic_ctx(monkeypatch, tmp_path, adequate=False)
-    upd = p_critic(_critic_state("green", respec_count=0, reauthor_count=1), ctx)   # re-author spent
+    upd = p_critic(_critic_state("green", respec_count=0, reauthor_count=2), ctx)   # re-author spent
     assert upd["verdict"] == "respec"
     assert upd["respec_count"] == 1
 
@@ -326,7 +326,7 @@ def test_critic_respecs_an_inadequate_green_once_reauthor_spent(tmp_path, monkey
 def test_critic_descopes_inadequate_after_respec_and_reauthor_caps(tmp_path, monkeypatch):
     from poc_foundry.phases.pipeline import p_critic
     ctx = _critic_ctx(monkeypatch, tmp_path, adequate=False)   # respec_cap + reauthor_cap default to 1
-    upd = p_critic(_critic_state("green", respec_count=1, reauthor_count=1), ctx)
+    upd = p_critic(_critic_state("green", respec_count=1, reauthor_count=2), ctx)
     assert upd["verdict"] == "proceed"                         # last iteration → proceed, criterion descoped
     assert upd["descope_report"] and upd["descope_report"][0]["criterion"] == "reply starts with 'ECHO:'"
     assert any(c.status == "descoped" for c in upd["spec"].success_criteria)
@@ -338,9 +338,9 @@ def test_critic_fixes_then_reauthors_then_replans_then_descopes_a_failing_coder(
     assert p_critic(_critic_state("abandoned", fix_count=0), ctx)["verdict"] == "fix"
     reauth = p_critic(_critic_state("abandoned", fix_count=3), ctx)                         # K spent → re-author
     assert reauth["verdict"] == "fix" and reauth["reauthor_pending"] is True
-    assert p_critic(_critic_state("abandoned", fix_count=3, reauthor_count=1),
+    assert p_critic(_critic_state("abandoned", fix_count=3, reauthor_count=2),
                     ctx)["verdict"] == "replan"                                             # re-author spent
-    desc = p_critic(_critic_state("abandoned", fix_count=3, reauthor_count=1, replan_count=1), ctx)
+    desc = p_critic(_critic_state("abandoned", fix_count=3, reauthor_count=2, replan_count=1), ctx)
     assert desc["verdict"] == "proceed" and desc["descope_report"]                          # honest descope
 
 
@@ -387,7 +387,7 @@ def test_degraded_critic_lowers_the_fix_budget(tmp_path, monkeypatch):
     assert p_critic(_critic_state("abandoned", fix_count=0), ctx)["degraded_critic"] is True
     assert p_critic(_critic_state("abandoned", fix_count=1), ctx)["verdict"] == "fix"
     assert p_critic(_critic_state("abandoned", fix_count=2), ctx)["verdict"] == "fix"      # K=2 spent → re-author
-    assert p_critic(_critic_state("abandoned", fix_count=2, reauthor_count=1),
+    assert p_critic(_critic_state("abandoned", fix_count=2, reauthor_count=2),
                     ctx)["verdict"] == "replan"                                            # re-author spent
 
 

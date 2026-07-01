@@ -599,9 +599,14 @@ Local green bar: `run_spine_tests.py` (191) + contract (11) + hygiene.
       from the real primitive (opaque tool/service value) is ADEQUATE — don't reject on a hypothetical hard-coded
       table (mechanism, out of scope); echo-able-value tests stay inadequate. Restores #34's balance, keeps #1's
       teeth. Green bar 192. DECISIONS #45.
-- [ ] **Run #12 (server, pending) — expect `done`.** Re-run `gradio-tool`: the opaque-price core test should now
-      be ACCEPTED (not descoped) → `status=done` / `demonstrates_core_value=yes` — the first fully-verified
-      cross-domain (tool-calling) PoC.
+- [x] **Run #12 — calibration WORKED; two narrow blockers fixed.** Opaque-value criteria (price, SKU, invocation)
+      all MET/critic-accepted. Remaining: (a) clean-room `suite=False` from a FLAKY `/calls`-log membership test
+      (global cumulative log) → knowledge note drops the log audit (opaque values ARE the proof); (b) core
+      red-first descope — the 'strengthen' rung spent the only reauthor budget so the red-first-violating
+      strengthened test couldn't be re-authored → `reauthor_cap` 1→2. Green bar 192. DECISIONS #45 follow-on.
+- [ ] **Run #13 (server, pending) — expect `done`.** Re-run `gradio-tool`: clean-room deterministic (no `/calls`
+      test) + the core red-first test re-authorable → `status=done` / `demonstrates_core_value=yes`, the first
+      fully-verified cross-domain PoC.
 - [ ] **Residual (deferred, gate-sensitive):** the inventory ledger treats a SKIPPED staged test as a gap →
       integrity incident (mis-attributed to the coder); better to re-author the skipping test (tester-owned).
 - [ ] **replan-waste fix (next structural lever)** — on replan, keep MET iterations + re-attack only the unmet

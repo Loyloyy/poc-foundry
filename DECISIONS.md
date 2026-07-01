@@ -2013,3 +2013,19 @@ scope). Either a paraphrase-generalisation case OR an opaque-value assertion suf
 balance while keeping #1's teeth against the echo-toy (whose value is echo-able from the data). Green bar
 192 (critic-prompt fakes still pass). *Server: re-run `gradio-tool` → the opaque-price core test should now
 be ACCEPTED → `status=done`, the first fully-verified cross-domain PoC.*
+
+**#45 follow-on — run #12: calibration worked; two narrow blockers fixed (2026-07-01).**
+The opaque-value critic exception LANDED — the core criterion is no longer descoped for "gameability"; all
+three opaque-value criteria (price, SKU, genuine-invocation) are MET/critic-accepted. Two narrower blockers
+remained, both from the `/calls` invocation-audit feature I'd added:
+(1) **Cleanroom `suite=False`** — `test_out_of_catalogue_not_in_tool_calls` failed: the tool server's `/calls`
+log is GLOBAL + accumulates across the whole test session, so a "product NOT in the log" assertion is
+order-dependent (a fake product got recorded by another test's call) → flaky in the cumulative clean-room.
+The opaque `price_usd`/`sku` ALREADY prove genuine invocation; the log audit is redundant AND fragile. Fix:
+the knowledge note now says the opaque values ARE the invocation proof and to NOT assert on the call log.
+(2) **Core red-first descope** — the symmetric "strengthen" rung re-authored the core test into one that was
+green-against-the-stub (red-first violation), but the red-first re-author couldn't fire because the strengthen
+had spent the only `reauthor` budget (cap=1). Fix: `reauthor_cap` 1→2 (the per-iteration budget is shared by
+buggy-test / weak-test-strengthen / red-first; 2 lets a strengthened-then-red-first-violating test be
+re-authored). Updated the 5 ladder tests that assumed cap=1. Green bar 192. *Server: re-run → clean-room
+deterministic + the core red-first test re-authorable → expect `status=done`.*
