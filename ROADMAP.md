@@ -647,8 +647,15 @@ Local green bar: `run_spine_tests.py` (194) + contract (11) + hygiene.
       end-state-only recipe) — closed by asserting the PARTIAL durable state between kill and resume
       (`read_ledger == range(K)`, varied K), in both the template knowledge recipe and the local must-fail
       pre-validation. Green bar **214** + 11 + hygiene.
-- [ ] **Re-run A3 fresh (server, next):** with #53 (coder steer) + #54 (adequacy standard) + #55 (closed recipe)
-      live, take WHATEVER verdict the harness produces as the pilot record — a green is now trustworthy, a descope
-      is a genuine capability signal (the infra confounds are removed).
+- [x] **A3 re-run #3 (server, 2026-07-02 → DEC #56):** `poc-20260702-132858-5d7eed` = `incomplete/partial`, but
+      **durability PROVEN** — core `[met]` (rehab) + varied-K `[met]` with the critic certifying real durable-state
+      reads. `done` blocked by ONE thing: an iter2 hard-exit relapse (core gates done, core is met). Root cause: the
+      #53 steer was iter0-only (coder overwrites the scaffold docstring) → **P2 fixed: prohibition moved to the coder
+      SYSTEM prompt** (persistent, all templates). Green bar **215**.
+- [ ] **Planning-chat consult (P1 + RAG-framing):** (P1) critic adequacy is per-TEST not per-SUITE → over-descoped
+      a criterion the varied-K sibling already makes shortcut-proof; (framing) critic demands "real RAG work" from a
+      durability pilot. Neither blocks `done`; both cost completeness + a ~64min/63-call thrash. Ruling → M7 close.
+- [ ] **Re-run A3 fresh (server, after the consult):** with P2 fixed + P1/framing ruled, expect `done` (core met +
+      no hard-exit relapse) or a clean, cheap descope. Take whatever the harness produces as the pilot record.
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed the
   durable agent, proven by a generalisation test a toy can't fake) or a documented capability gap.

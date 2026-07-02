@@ -2314,3 +2314,29 @@ fails") only covered toys that genuinely ran steps before restarting — not fak
   caught by the partial-state check. Template craft → this consult ratifies. Green bar **214** + 11 + hygiene.
 - **Backlog (fold into the template-authoring checklist when written):** a discriminator must assert the
   INTERMEDIATE durable state, not just the end state — end-state-only assertions are re-derivable from scratch.
+
+## #56 — M7: A3 re-run #3 — durability PROVEN, but the #53 steer was iter0-only → moved to the coder SYSTEM prompt (2026-07-02)
+
+Third A3 run (`poc-20260702-132858-5d7eed`, post #53/#54/#55) — the most informative yet. **The durable agent
+WORKS and was verified:** core criterion `[met]` (rehab-promoted, adequacy-passed) AND the varied-K criterion
+`[met]` with the critic explicitly certifying real durability ("...different crash points... cannot be satisfied
+by a constant/hard-coded stub... forces the implementation to read durable state"). So the pilot's core question
+— can the coder autonomously write correct resume/checkpoint logic? — is **YES, provably, against the #55
+strengthened discriminator**. The stronger bar confirmed the coder cleared it, it didn't fail it.
+- **Verdict = `incomplete/partial` for ONE mechanical reason.** `_final_status` gates `done` on core_met ∧
+  suite_ok ∧ trustworthy; core is met, clean-room green, so the ONLY blocker is `trustworthy=False` from an
+  **iter2 hard-exit incident** (os._exit + sys.exit → 2 patterns → Layer-2 keeps the cap). The two descoped
+  criteria do NOT gate `done` (only core does). **A3 was a single hard-exit relapse away from a legitimate done.**
+- **P2 fix (this entry):** the #53 steer lived in the `core.py` scaffold DOCSTRING — which the coder OVERWRITES on
+  its first edit — so it only protected iter0; by iter2 core.py held real code, the steer was gone, and the coder
+  relapsed. Moved the prohibition to the coder **SYSTEM prompt** (every iteration, every template — the diff-scanner
+  forbids hard exits universally): never os._exit/sys.exit/SystemExit in app code (flagged + edit discarded); if a
+  test asserts a non-zero exit, that exit is produced FOR the coder by a scaffold/harness primitive (e.g.
+  checkpoint) — call it, don't implement it. Pinned (`test_coder_system_prompt_forbids_hard_exit_persistently`).
+  Kept the #53 docstring steer too (belt-and-suspenders for iter0). Green bar **215** + 11 + hygiene.
+- **Two findings raised to the planning chat (do NOT block done; they cost completeness + ~64min/63-call thrash):**
+  (P1) the critic judges adequacy PER-TEST, not per-suite — it descoped the partial-ledger criterion as "gameable
+  (reads PF_CRASH_AFTER, writes range(K))" while the varied-K criterion in the SAME suite makes exactly that
+  shortcut fail; shortcut-proofness is often a suite property → over-descoping. (P2-domain) RAG-framing bleed: the
+  RAG-themed artifact makes P1-spec's goal say "RAG pipeline", and the critic then demanded "real RAG work" from a
+  pure DURABILITY pilot (abstract steps) → drove the respec cascade. Consult pending; ruling → M7 close.

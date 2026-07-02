@@ -34,7 +34,14 @@ SYSTEM = (
     "import and CALL the helper functions/data the scaffold gives you — do NOT reimplement functionality "
     "that already exists, invent your own parallel data/corpus, or remove existing imports, helpers, or "
     "exports. Implement ONLY the function(s) the tests exercise, composing the provided helpers; keep "
-    "everything else in the editable file intact."
+    "everything else in the editable file intact.\n"
+    # Tier-0 anti-tamper (domain-agnostic, persists across ALL iterations — the scaffold docstring alone
+    # is lost once you overwrite the file). Hard exits in app code are flagged as integrity tampering.
+    "NEVER call os._exit / sys.exit / raise SystemExit — or otherwise abort the process — in the code you "
+    "write: the integrity gate treats a hard exit as tampering and DISCARDS your whole edit. If a test "
+    "asserts that a process exited non-zero (e.g. a crash/kill scenario), that exit is produced FOR you by "
+    "a scaffold/harness primitive (such as a provided checkpoint or crash helper) when its trigger fires — "
+    "you CALL that primitive as intended; you do NOT implement the exit yourself."
 )
 
 

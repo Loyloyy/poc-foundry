@@ -324,3 +324,16 @@ def test_durable_agent_core_steers_the_coder_away_from_a_hard_exit():
     assert "never call" in head and "os._exit" in head             # explicit prohibition
     assert "injected for you" in head or "injects the crash" in head          # crash is not the coder's job
     assert "resume loop" in head
+
+
+def test_coder_system_prompt_forbids_hard_exit_persistently():
+    """P2 (A3 re-run #3): the scaffold-docstring steer (#53) is lost the moment the coder overwrites the
+    file, so it only protected iter0 — the coder relapsed into os._exit/sys.exit at iter2. The prohibition
+    must live in the coder's SYSTEM prompt (every iteration, every template) since the diff-scanner forbids
+    hard exits universally. This pins that it does, and that it names the 'exit comes from a primitive' framing."""
+    from poc_foundry.coder import SYSTEM
+
+    s = SYSTEM.lower()
+    assert "os._exit" in s and "sys.exit" in s and "systemexit" in s
+    assert "discards your whole edit" in s or "flagged as integrity" in s
+    assert "primitive" in s                                         # the exit is produced FOR the coder
