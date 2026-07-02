@@ -706,32 +706,36 @@ def p_critic(state, ctx: Ctx) -> dict:
 
     # ── disposition for THIS iteration ──
     if status in ("green", "met-existing"):
-        if status == "met-existing":
-            disposition, reason = "accept", "criterion met by existing implementation"
+        # ONE evidence standard for EVERY promotion path (planning-chat ruling 2026-07-02 → DECISIONS #54):
+        # met = passing in a fresh VM ∧ adequacy-vetted ∧ (red-first-validated OR met-existing). A
+        # met-existing test is FRESHLY authored, never adequacy-vetted, and (for i>0) never proven red — its
+        # gaming vector is the TESTER (a weak/tautological test green against existing code). So it consults
+        # adequacy too; an inadequate one routes to the weak-test re-author rung (#42), NOT straight to accept.
+        review = _critic_adequacy(ctx, state.pending_criterion, state.pending_test_src)
+        if review.adequate:
+            disposition, reason = "accept", review.reason or (
+                "criterion met by existing implementation" if status == "met-existing" else "adequate")
+        elif degraded:
+            # A same-family critic can't INDEPENDENTLY certify adequacy (design §5.4) → ADVISORY
+            # (recorded, non-blocking). The hard walls still gate; blocking adequacy returns with a
+            # distinct frontier critic.
+            disposition, reason = "accept", "adequacy concern recorded (degraded critic, non-blocking)"
+            advisory = review.reason
+        elif state.reauthor_count < cfg.reauthor_cap:
+            # M6 weak-test recovery (dual of the buggy-test rung): the test is GREEN but the critic
+            # judged it GAMEABLE (a shortcut/echo stub could pass). Strengthen JUST this test —
+            # critic's critique → tester — rather than a coarse full respec. The coder must then
+            # re-pass the stronger test; red-first + the critic re-gate it. (Applies equally to a
+            # met-existing test: an inadequate one is re-authored, not accepted — #54.)
+            disposition, reason = "fix", "test green but gameable — strengthening it (re-author)"
+            upd["reauthor_pending"] = True
+            upd["reauthor_reason"] = ("the test is GAMEABLE — " + (review.reason or "")
+                                      + " Make it stronger so a shortcut/echo/keyword stub FAILS.")
+            upd["reauthor_count"] = state.reauthor_count + 1
+        elif state.respec_count < cfg.respec_cap:
+            disposition, reason = "respec", review.reason or "test inadequate / gameable"
         else:
-            review = _critic_adequacy(ctx, state.pending_criterion, state.pending_test_src)
-            if review.adequate:
-                disposition, reason = "accept", review.reason or "adequate"
-            elif degraded:
-                # A same-family critic can't INDEPENDENTLY certify adequacy (design §5.4) → ADVISORY
-                # (recorded, non-blocking). The hard walls still gate; blocking adequacy returns with a
-                # distinct frontier critic.
-                disposition, reason = "accept", "adequacy concern recorded (degraded critic, non-blocking)"
-                advisory = review.reason
-            elif state.reauthor_count < cfg.reauthor_cap:
-                # M6 weak-test recovery (dual of the buggy-test rung): the test is GREEN but the critic
-                # judged it GAMEABLE (a shortcut/echo stub could pass). Strengthen JUST this test —
-                # critic's critique → tester — rather than a coarse full respec. The coder must then
-                # re-pass the stronger test; red-first + the critic re-gate it.
-                disposition, reason = "fix", "test green but gameable — strengthening it (re-author)"
-                upd["reauthor_pending"] = True
-                upd["reauthor_reason"] = ("the test is GAMEABLE — " + (review.reason or "")
-                                          + " Make it stronger so a shortcut/echo/keyword stub FAILS.")
-                upd["reauthor_count"] = state.reauthor_count + 1
-            elif state.respec_count < cfg.respec_cap:
-                disposition, reason = "respec", review.reason or "test inadequate / gameable"
-            else:
-                disposition, reason = "descope", review.reason or "test inadequate; respec/re-author caps reached"
+            disposition, reason = "descope", review.reason or "test inadequate; respec/re-author caps reached"
     elif status == "incident":
         disposition, reason = "descope", "integrity incident — gamed iteration not rewarded"
     elif status == "red-first-failed":

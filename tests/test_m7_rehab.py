@@ -246,3 +246,81 @@ def test_downgrade_never_overrides_a_ledger_or_red_first_failure():
     # the downgrade only touches the incident term; inventory/red-first failures still block unconditionally
     assert pipeline._trustworthy(_downgrade_state(inventory_ok=False)) is False
     assert pipeline._trustworthy(_downgrade_state(red_first_ok=False)) is False
+
+
+# ── Finding A: met-existing now consults adequacy (DEC #54) ──────────────────
+def _metexisting_state(tmp_path, **kw):
+    from poc_foundry.config import load_config
+    from poc_foundry.state import BuildState, IterationPlan, Plan, Spec
+    from poc_foundry.artifact import SuccessCriterion, IterationRecord
+
+    cfg = load_config(tmp_path / "builds")
+    ctx = SimpleNamespace(cfg=cfg, say=lambda *a, **k: None)
+    spec = Spec(goal="g", success_criteria=[SuccessCriterion(text="c", core=True)], buildable=True)
+    base = dict(build_id="poc-x", spec=spec,
+                plan=Plan(iterations=[IterationPlan(goal="g", acceptance=["c"], interface="x")]),
+                iteration=0,
+                iteration_records=[IterationRecord(goal="g", status="met-existing", attempts=0)],
+                pending_criterion="c", pending_test_src="def test_x():\n    assert True\n")
+    base.update(kw)
+    return BuildState(**base), ctx
+
+
+def test_met_existing_consults_adequacy_and_accepts_when_adequate(monkeypatch, tmp_path):
+    import poc_foundry.models as M
+    from poc_foundry.phases import pipeline
+    from poc_foundry.state import AdequacyReview
+
+    seen = {}
+
+    def _adq(ctx, crit, src):
+        seen["checked"] = True
+        return AdequacyReview(adequate=True)
+
+    monkeypatch.setattr(M, "same_family", lambda a, b: False)
+    monkeypatch.setattr(pipeline, "_critic_adequacy", _adq)
+    st, ctx = _metexisting_state(tmp_path)
+    upd = pipeline.p_critic(st, ctx)
+    assert seen.get("checked") is True                    # adequacy WAS consulted (was skipped pre-#54)
+    assert upd["verdict"] == "proceed" and not upd.get("reauthor_pending")
+
+
+def test_met_existing_inadequate_routes_to_reauthor_not_accept(monkeypatch, tmp_path):
+    import poc_foundry.models as M
+    from poc_foundry.phases import pipeline
+    from poc_foundry.state import AdequacyReview
+
+    monkeypatch.setattr(M, "same_family", lambda a, b: False)   # non-degraded → adequacy is blocking
+    monkeypatch.setattr(pipeline, "_critic_adequacy",
+                        lambda ctx, crit, src: AdequacyReview(adequate=False, reason="a tautological test"))
+    st, ctx = _metexisting_state(tmp_path, reauthor_count=0)
+    upd = pipeline.p_critic(st, ctx)
+    assert upd["verdict"] == "fix" and upd["reauthor_pending"] is True   # strengthen the test, don't accept
+    assert upd["reauthor_count"] == 1
+
+
+def test_met_existing_inadequate_under_degraded_critic_accepts_advisory(monkeypatch, tmp_path):
+    import poc_foundry.models as M
+    from poc_foundry.phases import pipeline
+    from poc_foundry.state import AdequacyReview
+
+    monkeypatch.setattr(M, "same_family", lambda a, b: True)    # degraded → advisory, non-blocking (unchanged)
+    monkeypatch.setattr(pipeline, "_critic_adequacy",
+                        lambda ctx, crit, src: AdequacyReview(adequate=False, reason="concern"))
+    st, ctx = _metexisting_state(tmp_path)
+    upd = pipeline.p_critic(st, ctx)
+    assert upd["verdict"] == "proceed" and not upd.get("reauthor_pending")   # single-endpoint not bricked
+    assert any("advisory" in c for c in upd.get("caveats", []))
+
+
+# ── durable-agent coder steer: the crash is injected, don't hard-exit in core.py ──────────────
+def test_durable_agent_core_steers_the_coder_away_from_a_hard_exit():
+    """Root cause of the A3 re-run's repeated hard-exit incidents: the coder reads the staged test's
+    'assert killed subprocess exited non-zero' and adds os._exit to core.py — not realising
+    agentkit.checkpoint injects the crash. The scaffold docstring (the one channel the coder reads
+    directly) must say so, so a well-behaved coder writes the resume loop instead of tripping the wall."""
+    core = (Path(__file__).resolve().parents[1] / "templates" / "durable-agent" / "files" / "core.py").read_text()
+    head = " ".join(core.split("def generate_reply", 1)[0].lower().split())   # docstring, whitespace-normalised
+    assert "never call" in head and "os._exit" in head             # explicit prohibition
+    assert "injected for you" in head or "injects the crash" in head          # crash is not the coder's job
+    assert "resume loop" in head

@@ -2243,3 +2243,74 @@ self-defeating. The verdict is a claim about the ARTIFACT; the incident is evide
   criterion-not-met/clean-room-red/non-construction-kind all keep the cap, and downgrade never overrides a
   ledger/red-first failure. Note A3's honest autonomy datapoint: the coder composed a correct durable loop (iter1)
   but initially misplaced the crash in `core.py` (iter0) — a genuine first-attempt result, not a failure to hide.
+
+## #53 — M7: A3 re-run VALIDATES #51/#52 (both layers fired correctly) + fixes the coder's hard-exit misunderstanding (2026-07-02)
+
+Re-ran A3 fresh with #51/#52 live (`poc-20260702-125247-a8896e`). It did NOT reach `done` — but for HONEST
+reasons, and **both new layers behaved exactly as ruled**:
+- **Layer-1 rehab sweep RAN** (two `rehab:` caveats prove it re-checked both descoped criteria against the
+  final workspace) and — via **guardrail 2** — REFUSED to promote them: the critic judged both staged tests
+  gameable ("all assertions can be satisfied by a stub that reads PF_CRASH_AFTER" / "a stub could fake by
+  writing the ledger"). The sweep did NOT hand out a false green — the exact conservative behaviour intended.
+- **Layer-2 KEPT the cap** correctly: this run had **TWO** high incidents (condition 4: multiple → keep the
+  cap — the METR signal). The new **Integrity events** report section + `had_high_incident: True` rendered.
+- This run ≠ the first A3 (P1 spec + coder non-determinism): the coder gamed on BOTH core-first criteria (vs
+  once before), so it was strictly more adversarial. `incomplete/no` is a TRUE negative here, not a false one.
+- **Asymmetry surfaced (for a future consult):** rehab's guardrail-2 adequacy check is STRICTER than refine's
+  `met-existing` accept path (`p_critic` accepts met-existing WITHOUT adequacy). The FIRST A3's `done` came via
+  that unchecked refine path — i.e. on tests the critic never adequacy-vetted. So (a) "met-existing skips
+  adequacy" is still open in the main/refine paths (rehab deliberately did not widen it), and (b) the durable-
+  agent tester may be under-powering the crash-resume test. Both are worth a planning-chat ruling before M7 close.
+- **Root-cause coder fix (implementation detail, not a gate change):** across 2 runs the coder put `os._exit(1)`
+  in `core.py` 3×. It never sees the template `knowledge` note — only the goal, the staged test, and `core.py`.
+  The staged test asserts "killed subprocess exited non-zero", so the coder wrongly implements the exit itself,
+  not realising `agentkit.checkpoint()` injects the crash (exactly the "intent-ambiguous misunderstanding" #49
+  flagged). Fixed by steering the ONE channel the coder reads: the `core.py` scaffold docstring now says the
+  crash is injected for it, NEVER to call `os._exit`/`sys.exit` (it's flagged + rolled back), and its only job
+  is the resume loop. Locked into the green bar (`test_durable_agent_core_steers_the_coder_away_from_a_hard_exit`).
+  Does NOT weaken the diff-scanner (still forbids hard exits) — it just tells the coder the truth so it stops
+  tripping the wall. Green bar **210** + 11 + hygiene.
+
+## #54 — M7 Finding A: ONE evidence standard — `met-existing` now consults adequacy on every path (2026-07-02)
+
+Planning-chat ratification (2026-07-02) of the A3 re-run consult. The A3 re-run exposed that rehab's guardrail-2
+adequacy check was STRICTER than the ordinary `met-existing` accept path (main loop + refine), which accepted a
+green re-check outright — with ZERO critic eyes. The loose path's "trust a criterion already gate-approved by a
+prior iteration" defense does NOT hold: what was gate-approved before is the PRIOR iteration's code against the
+PRIOR criterion's test; the `met-existing` test for THIS criterion is FRESHLY authored, never adequacy-vetted,
+and (for i>0) never proven red. It was the weakest evidence path in the system, and its gaming vector is the
+TESTER (a weak/tautological test green against existing code certifies "met"). **Run #1's A3 `done` was certified
+via exactly this unvetted path (through refine's met-existing) — mark it SUPERSEDED; the post-#54/#55 re-run is
+the pilot record.**
+- **Change (`p_critic`):** `met-existing` and `green` now share ONE disposition path — met = passing in a fresh VM
+  ∧ adequacy-vetted ∧ (red-first-validated OR met-existing). This closes the residual globally (main loop, refine,
+  and — already — rehab #51).
+- **Guardrails (all implemented):** (1) an inadequate `met-existing` test routes to the #42 weak-test re-author
+  rung (bounded by `reauthor_cap`), NOT straight to descope — the strengthened test may then be genuinely red →
+  coder runs → normal ladder; (2) degraded-critic keeps advisory semantics (adequacy blocking ONLY with a
+  distinct-family critic — single-endpoint setups are not bricked). Fakes pin all three
+  (`met_existing_consults_adequacy`, `…_routes_to_reauthor`, `…_degraded_accepts_advisory`). Gate change → this
+  consult is the ratification (#49 "DO flag"). Green bar **214** + 11 + hygiene.
+
+## #55 — M7 Finding B: the durable-agent discriminator recipe had a crash-FAKING gap — closed in the template (2026-07-02)
+
+Planning-chat correction (2026-07-02): the critic calling A3's crash-resume test "gameable" was RIGHT, and the gap
+was in the TEMPLATE's discriminator recipe, not just tester under-power. Walk it against the knowledge note's own
+recipe (assert killed subprocess exits non-zero → clean re-run exits 0 → assert `read_ledger == range(n)`): a stub
+that reads `PF_CRASH_AFTER` and immediately exits non-zero WITHOUT appending passes assertion 1, then the clean
+re-run executes everything from scratch and appends each step once → end-state ledger correct → assertion 3
+passes. **The crash-faker defeats an end-state-only recipe.** The prior local proof ("restart-toy duplicates →
+fails") only covered toys that genuinely ran steps before restarting — not faking the crash itself.
+- **Fix (closes it by construction):** assert the PARTIAL durable state BETWEEN kill and resume —
+  `read_ledger(task) == list(range(K))` where K = the `PF_CRASH_AFTER` value (and the resume appends exactly
+  [K..n-1], no re-runs). To pass, a stub must durably record exactly steps 0..K-1 before dying, then resume at K
+  without re-appending — which IS resume-from-checkpoint. Vary K across invocations vs hardcoding.
+- **Landed in the template** (not left to the per-run re-author rung — the rungs are the net for UNFORESEEN
+  weaknesses; foreseeable verification design belongs in the scaffold, the sanctioned §3b "teaching to the test":
+  humans author strong verification, the pipeline fills + proves it): (a) `template.json` knowledge recipe now
+  mandates the partial-state assertion + varied K + three named must-fail stubs (restart / in-memory / crash-fake);
+  (b) local pre-validation extends the discriminator test with the crash-faking stub as a MUST-FAIL
+  (`test_durable_agent_strengthened_discriminator_rejects_a_crash_faking_stub`) — a real impl passes, the faker is
+  caught by the partial-state check. Template craft → this consult ratifies. Green bar **214** + 11 + hygiene.
+- **Backlog (fold into the template-authoring checklist when written):** a discriminator must assert the
+  INTERMEDIATE durable state, not just the end state — end-state-only assertions are re-derivable from scratch.

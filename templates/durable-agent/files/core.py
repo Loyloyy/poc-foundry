@@ -2,6 +2,14 @@
 library you import, NOT edit). Your job: implement ``generate_reply`` as a DURABLE, RESUMABLE run of the
 workflow. Do not reimplement the primitives or remove these imports.
 
+THE CRASH IS INJECTED FOR YOU. A criterion test kills the process mid-run by setting ``PF_CRASH_AFTER`` —
+``agentkit.checkpoint`` reads that env var and aborts the process itself. You do NOT implement the crash.
+NEVER call ``os._exit`` / ``sys.exit`` / ``raise SystemExit`` in this file (the test asserts the KILLED
+subprocess exited non-zero, but that exit comes from ``checkpoint`` — not from you): a hard exit here is
+flagged as an integrity incident and your whole iteration is rolled back. Your ONLY job is the resume
+loop — read ``load_progress``, and for each REMAINING step do the work (``append_ledger``) THEN
+``checkpoint`` the new progress. That is what makes a fresh process resume exactly-once.
+
 Available from ``agentkit`` (see that module's docstrings):
   • ``TASK_STEPS`` — the ordered workflow (run each step exactly once).
   • ``load_progress(task_id) -> int`` — steps already done (the RESUME pointer; start from here, not 0).

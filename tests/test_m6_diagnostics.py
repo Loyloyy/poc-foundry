@@ -391,6 +391,74 @@ def test_durable_agent_discriminator_distinguishes_resume_from_restart(tmp_path,
     assert ak.read_ledger("t") == list(range(len(ak.TASK_STEPS)))    # each step EXACTLY once, in order
 
 
+def test_durable_agent_strengthened_discriminator_rejects_a_crash_faking_stub(tmp_path):
+    """Finding B (planning-chat ruling 2026-07-02 → DEC #55): the END-STATE-only recipe was gameable — a
+    stub that FAKES the kill (exits non-zero WITHOUT doing durable work) then runs cleanly from scratch on
+    resume produces the exact exactly-once ledger, so the end-state assertion passes it. The strengthened
+    recipe asserts the PARTIAL durable state BETWEEN kill and resume (`read_ledger == list(range(K))`); only a
+    real checkpoint-after-each-step impl leaves exactly K steps durable before the kill. Pre-validated locally
+    as a MUST-FAIL for the faker — a foreseeable discriminator gap belongs in the template, not the re-author rung."""
+    import importlib.util
+    import os
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[1] / "templates" / "durable-agent" / "files"
+    spec0 = importlib.util.spec_from_file_location("ak_base", root / "agentkit.py")
+    ak0 = importlib.util.module_from_spec(spec0)
+    spec0.loader.exec_module(ak0)
+    n = len(ak0.TASK_STEPS)
+
+    correct = (
+        "from agentkit import TASK_STEPS, append_ledger, checkpoint, load_progress\n"
+        "def generate_reply(m, h=None):\n"
+        "    for i in range(load_progress(m), len(TASK_STEPS)):\n"
+        "        append_ledger(m, i); checkpoint(m, i + 1)\n"
+        "    return 'done'\n")
+    crash_faking = (   # fakes the kill (non-zero exit, NO hard-exit primitive) but does ZERO durable work
+        "import os\n"
+        "from agentkit import TASK_STEPS, append_ledger, checkpoint, load_progress\n"
+        "def generate_reply(m, h=None):\n"
+        "    if os.environ.get('PF_CRASH_AFTER'):\n"
+        "        raise RuntimeError('faked crash')\n"
+        "    for i in range(load_progress(m), len(TASK_STEPS)):\n"
+        "        append_ledger(m, i); checkpoint(m, i + 1)\n"
+        "    return 'done'\n")
+
+    def passes_strengthened(label: str, core_src: str, k: int) -> bool:
+        work = tmp_path / label
+        work.mkdir()
+        (work / "agentkit.py").write_text((root / "agentkit.py").read_text())
+        (work / "core.py").write_text(core_src)
+        state = work / "state"
+
+        def run(crash=None):
+            env = dict(os.environ, PYTHONPATH=str(work), PF_AGENT_STATE_DIR=str(state))
+            env.pop("PF_CRASH_AFTER", None)
+            if crash is not None:
+                env["PF_CRASH_AFTER"] = str(crash)
+            return subprocess.run([sys.executable, "-c",
+                                   "from core import generate_reply; generate_reply('t')"], env=env)
+
+        def ledger():
+            s = importlib.util.spec_from_file_location("ak_" + label, work / "agentkit.py")
+            ak = importlib.util.module_from_spec(s)
+            os.environ["PF_AGENT_STATE_DIR"] = str(state)
+            s.loader.exec_module(ak)
+            return ak.read_ledger("t")
+
+        if run(crash=k).returncode == 0:
+            return False                                  # (1) must be killed mid-run
+        if ledger() != list(range(k)):                    # (2) PARTIAL-STATE — the new closure
+            return False
+        if run().returncode != 0:
+            return False                                  # (3) resumes cleanly
+        return ledger() == list(range(n))                 # (4) end-state: each step exactly once
+
+    assert passes_strengthened("correct", correct, 2) is True     # a real durable agent passes
+    assert passes_strengthened("faker", crash_faking, 2) is False  # the crash-faker is CAUGHT by (2)
+
+
 # ── tool-calling pilot (gradio-tool): kit+glue + a shortcut-proof tool contract ──────────────
 def test_gradio_tool_template_declares_tool_sibling_and_shortcut_proof_knowledge():
     from poc_foundry.phases.context import load_template

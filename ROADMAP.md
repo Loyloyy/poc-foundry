@@ -633,7 +633,22 @@ Local green bar: `run_spine_tests.py` (194) + contract (11) + hygiene.
       adequacy, its descope entry converted to a rehab note) + a single contained-and-superseded integrity
       incident may be downgraded blocking→informational (all four conditions; multiple/repeated keep the cap;
       `had_high_incident` emitted for eval strat). Local green bar **209** + 11 contract + hygiene.
-- [ ] **Re-run A3 fresh (server, next):** re-derive the verdict from the harness (not by hand) — with #51/#52 it
-      should reach `done` / `demonstrates_core_value=yes, with one contained integrity event`.
+- [x] **Re-run A3 fresh (server, 2026-07-02 → DEC #53):** `poc-20260702-125247-a8896e` = `incomplete/no`, but
+      **both M7 layers fired correctly** — rehab sweep ran + guardrail-2 refused to promote two GAMEABLE staged
+      tests (no false green); Layer-2 kept the cap on TWO high incidents (the METR signal). A TRUE negative: the
+      coder gamed on both core-first criteria (more adversarial than run 1). Surfaced (a) root cause — the coder
+      misplaces `os._exit` in `core.py` (fixed: a scaffold-docstring steer, green bar 210), and (b) an asymmetry —
+      rehab's adequacy check is stricter than refine's unchecked `met-existing` accept (run-1's `done` came via
+      that path), and the durable-agent tester may under-power the crash-resume test. Both → planning-chat consult.
+- [x] **A3 consult RULED + landed (2026-07-02 → DEC #54/#55):** (A, gate) `met-existing` now consults adequacy on
+      EVERY path (main loop + refine + rehab) — one evidence standard; inadequate → #42 re-author rung, degraded →
+      advisory. Run #1's `done` (via the old unvetted refine path) is SUPERSEDED. (B, template craft) the durable-
+      agent discriminator had a crash-FAKING gap (a stub that fakes the kill without durable work beat the
+      end-state-only recipe) — closed by asserting the PARTIAL durable state between kill and resume
+      (`read_ledger == range(K)`, varied K), in both the template knowledge recipe and the local must-fail
+      pre-validation. Green bar **214** + 11 + hygiene.
+- [ ] **Re-run A3 fresh (server, next):** with #53 (coder steer) + #54 (adequacy standard) + #55 (closed recipe)
+      live, take WHATEVER verdict the harness produces as the pilot record — a green is now trustworthy, a descope
+      is a genuine capability signal (the infra confounds are removed).
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed the
   durable agent, proven by a generalisation test a toy can't fake) or a documented capability gap.
