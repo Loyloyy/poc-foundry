@@ -2187,3 +2187,59 @@ autonomy probe; the LangGraph-checkpointer production variant is backlogged (#49
 Local: preflight resolves; green bar **198** + 11 contract + hygiene. *Server (next): `--template
 durable-agent` (no rebuild — no sibling/image) → does the coder write correct resume logic? First-attempt
 outcome honest; a descope is informative (§3b).*
+
+## #51 — M7 Layer-1: rehabilitation sweep (a descoped criterion later satisfied is re-checked, not lost) (2026-07-02)
+
+The A3 pilot (#50) ran `incomplete/demonstrates_core_value=no`, then a **manual `refine` proved the durable
+agent WORKED** — the core crash-resume criterion passed against the shipped workspace with ZERO coder edits.
+Root cause: a **core-first criterion descoped on an iter0 integrity incident is sticky** — iter1 then landed a
+correct durable loop (iter2's "re-invoke is idempotent" was met by it unchanged ⟹ it resumes from
+`load_progress`; the crash is injected inside the non-editable `agentkit.checkpoint()` ⟹ the core criterion is
+satisfied by construction), but the descope is never reconsidered. A working criterion was invisible until a
+hand-run refine → a **false negative that hides real value**. Planning-chat ruling (2026-07-02): a pass is a
+pass — add a **FULL rehabilitation sweep** (not integrity-only; a budget-exhaustion descope later satisfied by
+another iteration is the same false negative).
+- **Mechanism** (`pipeline._rehabilitation_sweep`, run at the TOP of `p5_docs` BEFORE publish): re-run each
+  descoped criterion's already-authored (red-first, critic-vetted) staged test ONCE against the FINAL
+  workspace in a fresh VM; promote `descoped→met` iff it PASSES **and** the critic certifies the test adequate.
+  Deterministic, no coder, no retries (guardrail 4).
+- **Guardrails:** (1) runs before publish so a promoted test joins `green_test_files` → ships in
+  `workspace/tests/` → the clean-room re-runs it in a fresh clone (a **second independent pass**, which also
+  neutralises flaky-promotion — a promotion that fails clean-room drops `suite_ok` and the build stays
+  incomplete, never a false `done`); (2) every promotion routes through `_critic_adequacy` (closes the known
+  "met-existing skips adequacy" residual rather than widening it); (3) the descope-report entry CONVERTS to a
+  rehabilitation note (`resolved: met by the final implementation`, `finish_path: none — rehabilitated`) — it
+  never vanishes; IterationRecords unchanged.
+- Fakes: `test_m7_rehab.py` pins promotes-only-on-pass, runs-adequacy (gameable→stays descoped),
+  degraded-critic-advisory, and p5 threads promoted tests into the publish set. Green bar **209** + 11 + hygiene.
+- **A3's verdict is re-derived from the harness, not by hand:** re-run A3 fresh on the server (cheap; no
+  rebuild) so the pilot-ladder evidence comes from the pipeline. See #52 for why the sweep ALONE isn't enough.
+
+## #52 — M7 Layer-2: a single contained-and-superseded integrity incident may be downgraded (not permanently cap the verdict) (2026-07-02)
+
+Even after #51 promoted all 4 A3 criteria (clean-room green), the build stayed `incomplete/partial`: `_trustworthy`
+was False because `_has_blocking_incident` flags ANY `[high]` incident ever, and iter0's **rolled-back** hard-exit
+qualifies. So one caught-and-discarded gaming attempt permanently capped a build whose shipped HEAD contains none
+of it. Planning-chat ruling (2026-07-02): keep-strict is NOT the honest-reporting stance here — a verdict that
+reads `incomplete/no` for a build meeting every §1.2 DONE condition is **miscalibrated**, and a verdict routinely
+wrong in the safe direction teaches people to ignore it (the honest-reporting asset erodes). The walls exist so a
+build can continue SAFELY after a caught attempt; if any trip permanently caps the verdict, the walls become
+self-defeating. The verdict is a claim about the ARTIFACT; the incident is evidence about the RUN.
+- **Downgrade blocking→recorded-informational iff ALL of** (`pipeline._incident_downgradeable`): (1) the single
+  high incident is a rolled-back CONSTRUCTION kind (`_DOWNGRADEABLE_KINDS` — hard-exit/skip-marker/test-edit/
+  pytest-config/assert-deleted/ledger-gap/red-first; these always roll back, never commit; EXCLUDES
+  broker-invariant-rejection / research-injection = security-load-bearing); (2) the criterion it targeted was
+  subsequently met via a clean gate-approved path (critic-accepted green, or a #51 rehabilitation); (3) clean-room
+  green on the final artifact; (4) EXACTLY ONE high incident — multiple, or the same wall tripped repeatedly, KEEP
+  the cap (the METR signal: attempts-under-difficulty → scrutiny scales up). Conservative: any doubt → cap stays.
+  Inventory-ledger / red-first failures still block unconditionally (the downgrade only touches the incident term).
+- **Non-negotiables (all kept):** `security.incidents[]` keeps the FULL record with a visible
+  `— resolved: rolled-back-and-superseded (contained; not in shipped HEAD)` annotation (never deleted); the report
+  gains an **Integrity events (contained)** section stating what fired, that it was contained, and that the shipped
+  code contains none of it; `security.had_high_incident` is emitted alongside `degraded_critic` for eval
+  stratification. When the fresh-judge final verdict lands (M7 / reconciliation Q1) the judge MUST see the incident
+  record — ideal output shape: "demonstrates core value: yes, with one contained integrity event".
+- Fakes: `test_m7_rehab.py` pins all-four-conditions→downgrade→`done`, multiple-incidents-still-cap,
+  criterion-not-met/clean-room-red/non-construction-kind all keep the cap, and downgrade never overrides a
+  ledger/red-first failure. Note A3's honest autonomy datapoint: the coder composed a correct durable loop (iter1)
+  but initially misplaced the crash in `core.py` (iter0) — a genuine first-attempt result, not a failure to hide.

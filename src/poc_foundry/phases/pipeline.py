@@ -633,6 +633,9 @@ def p4_iterate(state, ctx: Ctx) -> dict:
 
     rec = IterationRecord(goal=it.goal, status=it_status, attempts=attempts,
                           tests_added=len(authored - set(state.authored_test_ids)))
+    # M7 Layer-2: record which HIGH incidents fired this iteration and the criteria they targeted, so P7
+    # can weigh a single-contained-and-superseded incident against the trust-cap (DECISIONS #52).
+    high_this = [inc for inc in incidents if getattr(inc, "severity", "high") == "high"]
     out = {"phase": "iterate", "spec": spec, "commit_sha": sha,
            "iteration_records": state.iteration_records + [rec],
            "staged_tests": sorted(staged_names),
@@ -641,6 +644,10 @@ def p4_iterate(state, ctx: Ctx) -> dict:
            "authored_test_ids": sorted(set(state.authored_test_ids) | authored),
            "inventory_ok": state.inventory_ok and inv_ok,
            "red_first_ok": state.red_first_ok and red_first_ok,
+           "had_high_incident": state.had_high_incident or bool(high_this),
+           "high_incident_kinds": state.high_incident_kinds + [inc.kind for inc in high_this],
+           "high_incident_criteria": state.high_incident_criteria
+                                     + ([c.text for c in targets] if high_this else []),
            "incidents": state.incidents + [str(inc) for inc in incidents],
            "caveats": state.caveats + ([note] if note else []),
            # research-rung bookkeeping: stuck signal for p_critic (b) + clear any pending request
@@ -846,14 +853,101 @@ def _publish_tests(state, ctx: Ctx) -> int:
     return published
 
 
+# ── Layer-1 rehabilitation sweep (planning-chat ruling 2026-07-02 → DECISIONS #51) ───────────────
+def _test_file_for_criterion(state) -> dict:
+    """Map each success-criterion text → its already-authored staged-test filename (the plan iteration
+    that targeted it). Mirrors p4's ``it.test_file or f"test_iter_{i}.py"``."""
+    out: dict[str, str] = {}
+    for idx, it in enumerate(state.plan.iterations if state.plan else []):
+        tf = it.test_file or f"test_iter_{idx}.py"
+        for ctext in it.acceptance:
+            out.setdefault(ctext, tf)
+    return out
+
+
+def _rehabilitation_sweep(state, ctx: Ctx):
+    """A pass is a pass: a criterion honestly DESCOPED earlier (a core-first descope, or a budget
+    exhaustion) may be satisfied by a LATER iteration's code. Re-run each descoped criterion's
+    already-authored (red-first, critic-vetted) staged test ONCE against the FINAL workspace in a fresh
+    VM; promote descoped→met iff it passes AND the critic certifies the test adequate. Deterministic, no
+    coder, no retries (guardrail 4). Promoted tests then publish + re-run in the clean-room's fresh clone
+    (a second independent pass — guardrail 1). Mutates ``state.spec`` criteria statuses in place; returns
+    ``(promoted_files, new_descope_report, notes)`` — ``new_descope_report`` converts a promoted entry to
+    a rehabilitation note rather than deleting it (guardrail 3)."""
+    spec = state.spec
+    if not spec:
+        return [], list(state.descope_report), []
+    descoped = [c for c in spec.success_criteria if c.status == "descoped"]
+    if not descoped:
+        return [], list(state.descope_report), []
+
+    from poc_foundry.models import same_family
+    degraded = same_family("critic", "coder")
+    test_of = _test_file_for_criterion(state)
+    staging_tests = ctx.staging_dir / "tests"
+    promoted: list[str] = []          # criterion texts promoted
+    promoted_files: list[str] = []
+    notes: list[str] = []
+
+    sbx = ctx.broker.create(mounts=[ws_mount(ctx.workspace_dir), staged_tests_mount(staging_tests)],
+                            name="rehab", env_extra=dict(ctx.service_env))
+    try:
+        for c in descoped:
+            tf = test_of.get(c.text)
+            if not tf or not (staging_tests / tf).exists():
+                continue
+            if not _verify_file(sbx, tf):          # must be GREEN against the final workspace
+                continue
+            review = _critic_adequacy(ctx, c.text, (staging_tests / tf).read_text())   # guardrail 2
+            if not review.adequate and not degraded:
+                notes.append(f"rehab: '{c.text[:60]}' passes on the final workspace but the critic judged "
+                             f"the test inadequate ({(review.reason or '')[:80]}) — left descoped")
+                continue
+            c.status = "met"                       # promote
+            promoted.append(c.text)
+            if tf not in state.green_test_files and tf not in promoted_files:
+                promoted_files.append(tf)
+            if not review.adequate and degraded:
+                notes.append(f"rehab: '{c.text[:60]}' promoted; adequacy concern recorded "
+                             f"(degraded critic, non-blocking)")
+    finally:
+        sbx.destroy()
+
+    if not promoted:
+        return [], list(state.descope_report), notes
+    new_report = []
+    for e in state.descope_report:
+        if e.get("criterion") in promoted:
+            e = dict(e, resolved="met by the final implementation (rehabilitation sweep)",
+                     originally_descoped=e.get("why_failed", ""),
+                     finish_path="none — rehabilitated")
+        new_report.append(e)
+    for c in promoted:
+        ctx.say(f"P5 rehab: criterion promoted descoped→met (staged test green on final workspace): {c[:70]}")
+    return promoted_files, new_report, notes
+
+
 def p5_docs(state, ctx: Ctx) -> dict:
+    # Layer-1: promote descoped-but-now-passing criteria BEFORE publish, so their tests ship + the
+    # clean-room re-runs them in a fresh clone (the second independent pass).
+    promoted_files, new_report, rehab_notes = _rehabilitation_sweep(state, ctx)
+    if promoted_files:
+        state.green_test_files = state.green_test_files + [f for f in promoted_files
+                                                           if f not in state.green_test_files]
     published = _publish_tests(state, ctx)
     (ctx.workspace_dir / "DEMO.md").write_text(_scribe_demo(ctx, state.spec))
     chown_to_builder(ctx.workspace_dir)   # published tests + DEMO must be writable/readable by uid 1000
     sha = git_commit(ctx.workspace_dir, f"docs: DEMO.md + publish {published} criterion test file(s)")
     ctx.say(f"P5 docs: DEMO.md + published {published} criterion test file(s) into tests/")
+    log = state.log + ([f"P5 rehab: {len(promoted_files)} descoped criterion(s) promoted to met"]
+                       if promoted_files else [])
+    log = log + [f"P5 docs: DEMO.md + {published} test file(s) published"]
     return {"phase": "docs", "commit_sha": sha, "demo_quality": "thin",
-            "log": state.log + [f"P5 docs: DEMO.md + {published} test file(s) published"]}
+            "spec": state.spec,
+            "green_test_files": state.green_test_files,
+            "descope_report": new_report,
+            "caveats": state.caveats + rehab_notes,
+            "log": log}
 
 
 # ── P6 cleanroom (fresh VM + fresh clone) ────────────────────────────────────
@@ -909,10 +1003,43 @@ def _has_blocking_incident(state) -> bool:
     return any(s.startswith("[high]") for s in state.incidents)
 
 
+# M7 Layer-2 (planning-chat ruling 2026-07-02 → DECISIONS #52). The walls exist so a build can continue
+# SAFELY after a caught attempt; if every wall trip permanently caps the verdict, the walls become
+# self-defeating — and a verdict that reads `incomplete/no` for a build meeting every §1.2 DONE condition
+# is miscalibrated (teaches people to ignore it). A high incident is EVIDENCE ABOUT THE RUN; the verdict is
+# a CLAIM ABOUT THE ARTIFACT — and the shipped HEAD contains none of the rolled-back edit. So a SINGLE
+# contained-and-superseded incident may be downgraded blocking→informational iff ALL four hold. Repeated /
+# multiple high incidents KEEP the cap (the METR signal: attempts-under-difficulty → scrutiny scales up).
+_DOWNGRADEABLE_KINDS = frozenset({          # gate-caught CONSTRUCTION incidents → always rolled back, never
+    "hard-exit", "skip-marker", "test-edit", "pytest-config", "assert-deleted", "ledger-gap", "red-first",
+})  # committed. Excludes broker-invariant-rejection / research-injection: security-load-bearing, keep cap.
+
+
+def _incident_downgradeable(state) -> bool:
+    """True iff the build's blocking incident may be downgraded to recorded-informational (all four
+    ruling conditions). Conservative: any doubt → False (cap stays)."""
+    highs = [s for s in state.incidents if s.startswith("[high]")]
+    if len(highs) != 1:                                 # (4) exactly one high incident
+        return False
+    kinds = state.high_incident_kinds
+    if not kinds or any(k not in _DOWNGRADEABLE_KINDS for k in kinds):   # (1) rolled-back construction kind
+        return False
+    if not state.cleanroom.get("suite_ok"):             # (3) clean-room green on the final artifact
+        return False
+    by_text = {c.text: c.status for c in state.spec.success_criteria} if state.spec else {}
+    targeted = state.high_incident_criteria
+    if not targeted or any(by_text.get(t) != "met" for t in targeted):   # (2) targeted criterion now met
+        return False
+    return True
+
+
 def _trustworthy(state) -> bool:
     """The M2a integrity gate: the build's success claim is only trustworthy if the inventory ledger
-    held, every accepted iteration was red-first, and no high-severity integrity incident fired."""
-    return bool(state.inventory_ok) and bool(state.red_first_ok) and not _has_blocking_incident(state)
+    held, every accepted iteration was red-first, and no high-severity integrity incident fired — EXCEPT
+    a single contained-and-superseded incident that P7 downgrades (M7 Layer-2)."""
+    if not (bool(state.inventory_ok) and bool(state.red_first_ok)):
+        return False
+    return (not _has_blocking_incident(state)) or _incident_downgradeable(state)
 
 
 def _final_status(state) -> str:
@@ -969,6 +1096,12 @@ def p7_emit(state, ctx: Ctx) -> dict:
     # broker-side rejected-create* records (M4 S2, §5.2) → security.incidents[]: the daemon (rule-#8
     # enforcer) durably audits every blocked create*; surface them as high-severity evidence here.
     incidents = list(state.incidents)
+    # M7 Layer-2: a downgraded incident is NEVER deleted — it keeps its full record with a visible
+    # `resolved:` annotation (the walls fired, it was contained, the shipped code contains none of it).
+    downgraded = _incident_downgradeable(state)
+    if downgraded:
+        incidents = [(s + "  — resolved: rolled-back-and-superseded (contained; not in shipped HEAD)")
+                     if s.startswith("[high]") else s for s in incidents]
     try:
         for e in (ctx.broker.audit() if hasattr(ctx.broker, "audit") else []):
             if e.get("event") == "rejected":
@@ -1003,7 +1136,8 @@ def p7_emit(state, ctx: Ctx) -> dict:
         licenses=[ctx.template.license] if ctx.template.license else [],
         security=SecurityInfo(sandbox="kata", egress_allowlist=allowlist,
                               incidents=incidents,
-                              degraded_critic=bool(state.degraded_critic)),
+                              degraded_critic=bool(state.degraded_critic),
+                              had_high_incident=bool(state.had_high_incident)),
         budget=Budget(wall_s=snap["wall_s"], llm_calls=snap["llm_calls"],
                       contention_indicator=snap["contention_indicator"]),
         caps_hit=list(state.caps_hit),
@@ -1083,11 +1217,24 @@ def _report_md(state, ctx: Ctx, pa) -> str:
               f"- red-first: {'OK' if state.red_first_ok else 'VIOLATION'}",
               f"- incidents: {len(pa.security.incidents)}"]
     lines += [f"  - {i}" for i in pa.security.incidents]
+    if pa.security.had_high_incident:
+        if _incident_downgradeable(state):
+            lines += ["", "### Integrity events (contained)", "",
+                      "- A high-severity integrity event fired during construction and was **contained**: the "
+                      "coder's edit was rolled back and never committed, the criterion it targeted was "
+                      "subsequently met via a clean gate-approved path, and the clean-room is green on the "
+                      "final artifact. The shipped HEAD contains **none** of the flagged edit, so it is "
+                      "recorded as informational and does not cap the verdict (single, contained, superseded)."]
+        else:
+            lines += ["", "### Integrity events", "",
+                      "- One or more high-severity integrity events fired and **cap** the verdict (`trustworthy=False`): "
+                      "review the incidents above before trusting the success claim."]
     lines += ["", "## Critic gate (§5.4)", "",
               f"- last verdict: {state.verdict or 'pass'}",
               f"- degraded_critic: {pa.security.degraded_critic} "
               f"(fix budget K={ctx.cfg.degraded_fix_limit_k if pa.security.degraded_critic else ctx.cfg.fix_limit_k}; "
-              f"fixes={state.fix_count}, respecs={state.respec_count}, replans={state.replan_count})"]
+              f"fixes={state.fix_count}, respecs={state.respec_count}, replans={state.replan_count})",
+              f"- had_high_incident: {pa.security.had_high_incident}"]
     if pa.final_verdict.gaps:
         lines += ["", "## Gaps vs spec", ""] + [f"- {g}" for g in pa.final_verdict.gaps]
     if pa.descope_report:

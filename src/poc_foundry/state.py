@@ -91,6 +91,13 @@ class BuildState(BaseModel):
     inventory_ok: bool = True        # collected ∧ passed ⊇ recorded (False blocks `done`)
     red_first_ok: bool = True        # every accepted iteration's staged test was RED pre-coder
     incidents: list[str] = Field(default_factory=list)          # diff-scanner / ledger → security.incidents[]
+    # M7 Layer-2 (integrity trust-cap downgrade, planning-chat ruling 2026-07-02 → DECISIONS #52). A high
+    # integrity incident is caught+contained (its edits are rolled back, never committed) yet permanently
+    # capped `trustworthy`. These fields let P7 decide whether a SINGLE contained-and-superseded incident
+    # may be downgraded blocking→informational (all four ruling conditions), and stratify evals.
+    had_high_incident: bool = False                             # any [high] incident fired (survives rollback)
+    high_incident_kinds: list[str] = Field(default_factory=list)     # kinds of the high incidents (eligibility)
+    high_incident_criteria: list[str] = Field(default_factory=list)  # criterion texts a high incident targeted
 
     # M2a critic gate + verdict ladder (design §5.4, §5.8) — additive
     verdict: str = ""                # last critic verdict: pass | fix | descope | replan | respec

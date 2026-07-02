@@ -623,7 +623,17 @@ Local green bar: `run_spine_tests.py` (194) + contract (11) + hygiene.
 - [x] **A3 durable-agent pilot BUILT** (`durable-agent`, kit+glue, DEC #49/#50): durable kill-and-resume via a
       LOCAL-FILE store (no sibling/image/model — cheapest pilot); UNCATCHABLE `os._exit` kill; discriminator
       = exactly-once ledger across the kill. **Pre-validated LOCALLY** (pure stdlib) + fakes-locked. Green bar 198.
-- [ ] **Run A3 (server, pending):** `--template durable-agent` (no rebuild) → does the coder write correct
-      resume/checkpoint-ordering logic? First-attempt outcome honest; a descope is an informative autonomy signal.
-- **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG
-  using the real primitives, proven by a generalisation test a toy can't fake) or a documented capability gap.
+- [x] **Run A3 (server, 2026-07-02):** `--template durable-agent` → `incomplete/no`. iter0 (core crash-resume)
+      the coder misplaced `os._exit(1)` in `core.py` → hard-exit wall fired (correctly — the crash lives in the
+      non-editable `agentkit.checkpoint()`), rolled back, descoped; iter1 landed a CORRECT durable loop, iter2/3
+      met unchanged. A **manual `refine` then flipped core→met with ZERO coder edits** — the agent WORKED; the
+      verdict was a false negative (sticky descope + a rolled-back incident permanently capping trust).
+- [x] **M7 Layer-1 + Layer-2 (planning-chat ruling 2026-07-02 → DEC #51/#52):** rehabilitation sweep (a descoped
+      criterion later satisfied is re-checked against the final workspace before publish, routed through critic
+      adequacy, its descope entry converted to a rehab note) + a single contained-and-superseded integrity
+      incident may be downgraded blocking→informational (all four conditions; multiple/repeated keep the cap;
+      `had_high_incident` emitted for eval strat). Local green bar **209** + 11 contract + hygiene.
+- [ ] **Re-run A3 fresh (server, next):** re-derive the verdict from the harness (not by hand) — with #51/#52 it
+      should reach `done` / `demonstrates_core_value=yes, with one contained integrity event`.
+- **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed the
+  durable agent, proven by a generalisation test a toy can't fake) or a documented capability gap.

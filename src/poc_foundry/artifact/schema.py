@@ -88,6 +88,8 @@ class SecurityInfo(BaseModel):
     egress_allowlist: list[str] = Field(default_factory=list)  # READ BACK from the proxy at emit
     incidents: list[str] = Field(default_factory=list)
     degraded_critic: bool = False
+    had_high_incident: bool = False        # M7: a [high] integrity incident fired (survived rollback) —
+    #                                        eval-stratification flag (alongside degraded_critic)
 
 
 class Budget(BaseModel):
