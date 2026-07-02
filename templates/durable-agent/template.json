@@ -1,0 +1,20 @@
+{
+  "name": "durable-agent",
+  "version": "0.1.0",
+  "description": "A start-GREEN Gradio chatbot that runs a multi-step workflow per task with DURABLE EXECUTION: it checkpoints progress to a local file, so if it is KILLED mid-run (uncatchably) and re-invoked it RESUMES from the last checkpoint, executing each step EXACTLY ONCE. Durability pilot (design §7) — the coder writes the real resume + checkpoint-ordering logic (a from-scratch autonomy probe; the LangGraph-checkpointer production-idiom variant is backlogged, DEC #49). No database, no model, no sibling service — the durable store is a local file.",
+  "stamp_dir": "files",
+  "editable_files": ["core.py"],
+  "smoke_test": "tests/test_smoke.py",
+  "suite": "tests",
+  "interface": "core.generate_reply(message: str, history: list | None = None) -> str",
+  "run_cmd": "docker compose up --build",
+  "services": [],
+  "stack": [
+    {"layer": "ui", "choice": "gradio", "pinned_version": "4.44.1"},
+    {"layer": "durable-store", "choice": "stdlib-file", "pinned_version": "0.1.0"},
+    {"layer": "language", "choice": "python", "pinned_version": "3.12"}
+  ],
+  "template_repo": null,
+  "license": "MIT",
+  "knowledge": "This PoC is a DURABLE AGENT: `generate_reply(task_id)` runs a FIXED ordered workflow (`agentkit.TASK_STEPS`) for the task named in the message, and MUST be resumable — if the process is KILLED mid-run and re-invoked, it resumes from the last checkpoint and runs each step EXACTLY ONCE (never re-running a completed step, never skipping one). The resume/checkpoint LOGIC is what the build writes (in the editable `core.py`); the PRIMITIVES are a library in `agentkit` (imported, not rewritten): `TASK_STEPS` (the steps); `load_progress(task_id)` → how many steps are durably DONE (the RESUME pointer — start from here, NOT 0); `append_ledger(task_id, i)` → durably log that step i ran (NON-idempotent: a re-run leaves a DUPLICATE); `read_ledger(task_id)` → the durable execution log; `checkpoint(task_id, done)` → durably persist progress AFTER a step (the durability barrier).\nTO PROVE DURABILITY (SHORTCUT-PROOF — a stub that restarts from scratch, or keeps state in memory, MUST FAIL): a criterion test must actually KILL the agent mid-run and RESUME it in a FRESH process, then assert exactly-once execution. The crash is UNCATCHABLE (the kit aborts the process via os._exit when the env var `PF_CRASH_AFTER` equals the completed-step count) — so run `generate_reply` in a SUBPROCESS (e.g. `subprocess.run([sys.executable, '-c', 'from core import generate_reply; generate_reply(TASK)'], env={... 'PYTHONPATH': '.', 'PF_CRASH_AFTER': '2'})`) and assert that subprocess exited NON-ZERO (it was killed mid-run); THEN run it again in a fresh subprocess WITHOUT `PF_CRASH_AFTER` and assert it exits 0; FINALLY assert `read_ledger(task_id) == list(range(len(TASK_STEPS)))` — each step recorded EXACTLY ONCE, in order. A restart-from-scratch implementation re-appends the early steps → the ledger shows DUPLICATES → fail; an in-process try/except cannot survive the uncatchable abort. Use a UNIQUE task id per test (e.g. `uuid.uuid4().hex`) so tasks don't collide. Also assert the NO-CRASH path: a full run of a fresh task yields a ledger of each step exactly once. Do NOT assert wall-clock timing or internal step prose — only the durable, deterministic exactly-once ledger across a real kill."
+}

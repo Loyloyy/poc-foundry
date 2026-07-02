@@ -14,7 +14,7 @@ from poc_foundry.core import _discover_templates, preflight_templates
 
 def test_discovers_and_resolves_all_real_templates():
     names = _discover_templates()
-    assert "gradio-chatbot" in names and "gradio-rag-pgvector" in names
+    assert "gradio-chatbot" in names and "gradio-rag-llm" in names
     rows = preflight_templates()
     assert {r["template"] for r in rows} == set(names)
     for r in rows:
@@ -23,9 +23,9 @@ def test_discovers_and_resolves_all_real_templates():
         assert r["suite"]                        # a smoke suite is declared
 
 
-def test_pgvector_declares_pinned_service():
+def test_rag_llm_declares_pinned_service():
     rows = {r["template"]: r for r in preflight_templates()}
-    pg = rows["gradio-rag-pgvector"]
+    pg = rows["gradio-rag-llm"]
     assert pg["services"] == ["pg"] and pg["services_pinned"] is True
 
 

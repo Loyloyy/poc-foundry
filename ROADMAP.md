@@ -424,7 +424,7 @@ correctly blocks gameable tests → on a hard source (PageIndex) everything hone
 
 ## M5 — pilots, real model-calling builds, breadth (design §7)
 The shift from "works on fixtures" to "produces real, useful PoCs from real Stage-2 artifacts."
-- [x] **A1 RAG pilot — first real artifact end-to-end ✅ SUCCESS (2026-06-29, server-validated).** Final
+- [x] **A1 RAG pilot (template `gradio-rag-pgvector` RETIRED #49) — first real artifact end-to-end ✅ SUCCESS (2026-06-29, server-validated).** Final
       run: `status=done`, `demonstrates_core_value=yes`, **all 4 criteria met** (incl. query-dependent
       retrieval — different topics cite different doc ids), **clean run** (fixes=0/respecs=0/replans=0),
       integrity ledger OK (14 test ids) + 0 incidents, clean-room install=test=demo=True, ~10 min. The
@@ -619,6 +619,11 @@ Local green bar: `run_spine_tests.py` (194) + contract (11) + hygiene.
       REGRESSED (single-file coder clobbered scaffold exports → clean-room ImportError; stricter critic
       over-strengthened the gameable grounding test). Fixed: `Template.required_exports` (gate protects
       single-file scaffold exports) + a paraphrase-generalisation discriminator in `gradio-rag-llm`'s
-      knowledge note. Green bar 195. DECISIONS #48. **Re-run `gradio-rag-llm` to confirm green restored.**
+      knowledge note. Green bar 195. DECISIONS #48. **CONFIRMED: gradio-rag-llm re-run → `done` (4/4, shortcut-proof paraphrase core, clean-room green) — regression closed, both greens confirmed on final code.**
+- [x] **A3 durable-agent pilot BUILT** (`durable-agent`, kit+glue, DEC #49/#50): durable kill-and-resume via a
+      LOCAL-FILE store (no sibling/image/model — cheapest pilot); UNCATCHABLE `os._exit` kill; discriminator
+      = exactly-once ledger across the kill. **Pre-validated LOCALLY** (pure stdlib) + fakes-locked. Green bar 198.
+- [ ] **Run A3 (server, pending):** `--template durable-agent` (no rebuild) → does the coder write correct
+      resume/checkpoint-ordering logic? First-attempt outcome honest; a descope is an informative autonomy signal.
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed RAG
   using the real primitives, proven by a generalisation test a toy can't fake) or a documented capability gap.

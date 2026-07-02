@@ -1,0 +1,11 @@
+# Pinned start-green deps. gradio needs huggingface_hub<0.26 (HfFolder import; the M1 lesson). The
+# durable store is stdlib-only (json + os) — NO database / model / HTTP dependency.
+gradio==4.44.1
+huggingface_hub==0.24.7
+# Pin gradio's web stack: an unpinned fastapi/starlette pulls a too-new release that breaks gradio
+# 4.44.1's template rendering (the UI never launches). Versions contemporaneous with gradio 4.44.1.
+fastapi==0.112.2
+starlette==0.37.2
+# pytest baked into the sandbox image (the clean-room uses that), but pin it here too so the emitted
+# bundle's RUN.md test block works for a HUMAN running it standalone (no sandbox image).
+pytest==8.3.3

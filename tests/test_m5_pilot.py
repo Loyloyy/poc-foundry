@@ -74,10 +74,12 @@ def test_tester_prompt_injects_knowledge_before_suffix():
 
 def test_rag_template_declares_corpus_knowledge():
     from poc_foundry.phases.context import load_template
-    t = load_template("gradio-rag-pgvector")
-    assert "CORPUS" in t.knowledge and "verbatim" in t.knowledge.lower()
-    # the citation-format pin that prevents the unsatisfiable-test bug (int id, not [doc-N])
-    assert "INTEGER" in t.knowledge and "[doc-1]" in t.knowledge
+    t = load_template("gradio-rag-llm")   # gradio-rag-pgvector RETIRED (DEC #49 — hash embedding
+    #                                        un-greenable under the strict critic; real-embeddings
+    #                                        services version is backlogged)
+    assert "CORPUS" in t.knowledge and "INTEGER" in t.knowledge   # fixed corpus + int-id citation pin
+    # the shortcut-proof / paraphrase discriminator that makes the grounding test adequate (#48)
+    assert "paraphrase" in t.knowledge.lower()
     # a template without a knowledge note loads cleanly with an empty string
     assert load_template("gradio-chatbot").knowledge == ""
 
@@ -101,6 +103,16 @@ def test_critic_prompt_keeps_teeth_against_constant_stub():
     p = prompts.critic_adequacy_prompt("c", "src", "iface").lower()
     assert "constant" in p and "echo stub" in p
     assert "assert true" in p and "is not none" in p
+
+
+def test_critic_prompt_pins_both_poles():
+    # SIGN-OFF GUARD (planning chat, DEC #49): pin the bar at BOTH poles so a future tuning can't silently
+    # swing back. Pole 1 — an echo/shortcut stub must be REJECTED. Pole 2 — an OPAQUE-only value must be
+    # ACCEPTED (mechanism out of scope; do NOT reject on a hypothetical hard-coded table). Losing EITHER
+    # regresses the bar (#42 hole reopens, or #45/#34's deterministic-substrate templates become unbuildable).
+    p = prompts.critic_adequacy_prompt("c", "src", "iface").lower()
+    assert "shortcut" in p and "echo" in p                                   # pole 1: reject the echo-toy
+    assert "opaque" in p and "adequate" in p and "hard-coded" in p and "out of scope" in p   # pole 2: accept opaque
 
 
 # ── tester-output robustness (DECISIONS #34 follow-on 5): a staged test that doesn't PARSE (a stray

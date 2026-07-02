@@ -24,9 +24,9 @@ def test_config_exposes_pinned_vetted_service():
     assert cfg.vetted_services["pgvector"]["ready_cmd"].startswith("pg_isready")
 
 
-def test_pgvector_template_declares_its_service():
+def test_rag_service_template_declares_its_service():
     from poc_foundry.phases import load_template
-    t = load_template("gradio-rag-pgvector")
+    t = load_template("gradio-rag-llm")
     assert t.services == [{"name": "pg", "vetted": "pgvector"}]
     assert t.editable_files == ["core.py"]
 
@@ -105,7 +105,7 @@ def _ctx(tmp_path, broker):
     ws, st = tmp_path / "ws", tmp_path / "staging"
     ws.mkdir(); st.mkdir()
     return Ctx(cfg=cfg, build_id="poc-svc-1", run_dir=_FIXTURE,
-               template=load_template("gradio-rag-pgvector"),
+               template=load_template("gradio-rag-llm"),
                build_dir=cfg.builds_dir / "poc-svc-1", workspace_dir=ws, staging_dir=st,
                broker=broker, coder=BespokeCoder())
 

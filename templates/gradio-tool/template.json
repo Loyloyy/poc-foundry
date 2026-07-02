@@ -1,21 +1,42 @@
 {
   "name": "gradio-tool",
   "version": "0.1.0",
-  "description": "A start-GREEN Gradio chatbot that answers questions by CALLING A REAL EXTERNAL TOOL (a private product-catalogue sibling service over HTTP) and using its structured result, then phrasing the answer with a REAL model. Tool-calling pilot (MCP-in-spirit): the tool returns OPAQUE values the model cannot know, so a verifiable reply proves the tool was genuinely invoked. Ships ONLY primitives (the tool client + the model call); the build writes the glue.",
+  "description": "A start-GREEN Gradio chatbot that answers questions by CALLING A REAL EXTERNAL TOOL (a private product-catalogue sibling service over HTTP) and using its structured result, then phrasing the answer with a REAL model. Tool-calling pilot: the tool is a plain HTTP sibling (NOT the MCP wire protocol — real MCP transport is a named backlog item, DEC #49); the tool returns OPAQUE values the model cannot know, so a verifiable reply proves the tool was genuinely invoked. Ships ONLY primitives (the tool client + the model call); the build writes the glue.",
   "stamp_dir": "files",
-  "editable_files": ["core.py"],
+  "editable_files": [
+    "core.py"
+  ],
   "smoke_test": "tests/test_smoke.py",
   "suite": "tests",
   "interface": "core.generate_reply(message: str, history: list | None = None) -> str",
   "run_cmd": "docker compose up --build",
   "services": [
-    {"name": "toolserver", "vetted": "toolserver"}
+    {
+      "name": "toolserver",
+      "vetted": "toolserver"
+    }
   ],
   "stack": [
-    {"layer": "ui", "choice": "gradio", "pinned_version": "4.44.1"},
-    {"layer": "tool-server", "choice": "stdlib-http", "pinned_version": "0.1.0"},
-    {"layer": "model-client", "choice": "openai", "pinned_version": "1.51.0"},
-    {"layer": "language", "choice": "python", "pinned_version": "3.12"}
+    {
+      "layer": "ui",
+      "choice": "gradio",
+      "pinned_version": "4.44.1"
+    },
+    {
+      "layer": "tool-server",
+      "choice": "stdlib-http",
+      "pinned_version": "0.1.0"
+    },
+    {
+      "layer": "model-client",
+      "choice": "openai",
+      "pinned_version": "1.51.0"
+    },
+    {
+      "layer": "language",
+      "choice": "python",
+      "pinned_version": "3.12"
+    }
   ],
   "template_repo": null,
   "license": "MIT",

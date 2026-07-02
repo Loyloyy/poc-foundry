@@ -1,0 +1,20 @@
+# Standalone run of the emitted PoC. Durable execution needs NO sibling service — state is a local file,
+# persisted here on a named volume so it survives `docker compose restart` (the durability story: the
+# workflow resumes after the app is killed). No model / no database.
+
+services:
+  app:
+    image: python:3.12-slim
+    working_dir: /app
+    environment:
+      GRADIO_ANALYTICS_ENABLED: "False"
+      PF_AGENT_STATE_DIR: /data/agent_state     # durable store lives on the volume below
+    volumes:
+      - .:/app
+      - agent_state:/data
+    command: bash -lc "pip install -q -r requirements.txt && python app.py"
+    ports:
+      - "7860:7860"
+
+volumes:
+  agent_state:

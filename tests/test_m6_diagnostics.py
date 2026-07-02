@@ -341,6 +341,56 @@ def test_invoke_with_salvage_salvages_a_recursion_error(monkeypatch, tmp_path):
     assert "recursion-limit" in captured["cap"]              # routed to salvage → honest incomplete
 
 
+# ── durable-agent pilot (A3): the kill-and-resume discriminator (pure-stdlib → testable locally) ──
+def test_durable_agent_template_declares_kit_glue_and_uncatchable_kill_knowledge():
+    from poc_foundry.phases.context import load_template
+
+    t = load_template("durable-agent")
+    assert t.editable_files == ["core.py"] and t.services == []      # kit+glue, no sibling needed
+    k = t.knowledge.lower()
+    assert "load_progress" in k and "exactly once" in k              # resume pointer + the property
+    assert "uncatchable" in k and "pf_crash_after" in k              # the kill mechanism (planning-chat #49)
+
+
+def test_durable_agent_discriminator_distinguishes_resume_from_restart(tmp_path, monkeypatch):
+    # A3 core: a CORRECT agent (resumes from load_progress) executes each step EXACTLY ONCE across an
+    # UNCATCHABLE kill; a restart-toy DUPLICATES → the exactly-once ledger test fails it. Validated here
+    # locally because agentkit is pure stdlib (no VM/model/db) — locks the discriminator into the green bar.
+    import importlib.util
+    import os
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[1] / "templates" / "durable-agent" / "files"
+    work = tmp_path / "w"
+    work.mkdir()
+    (work / "agentkit.py").write_text((root / "agentkit.py").read_text())
+    (work / "core.py").write_text(                                    # a CORRECT durable agent (the target)
+        "from agentkit import TASK_STEPS, append_ledger, checkpoint, load_progress\n"
+        "def generate_reply(m, h=None):\n"
+        "    for i in range(load_progress(m), len(TASK_STEPS)):\n"
+        "        append_ledger(m, i); checkpoint(m, i + 1)\n"
+        "    return 'done'\n")
+    state = tmp_path / "state"
+
+    def run(task, crash=None):
+        env = dict(os.environ, PYTHONPATH=str(work), PF_AGENT_STATE_DIR=str(state))
+        env.pop("PF_CRASH_AFTER", None)
+        if crash is not None:
+            env["PF_CRASH_AFTER"] = str(crash)
+        return subprocess.run([sys.executable, "-c",
+                               f"from core import generate_reply; generate_reply('{task}')"], env=env)
+
+    assert run("t", crash=2).returncode != 0        # killed mid-run (uncatchable os._exit)
+    assert run("t").returncode == 0                 # resumes in a FRESH process
+
+    spec = importlib.util.spec_from_file_location("ak_a3", work / "agentkit.py")
+    ak = importlib.util.module_from_spec(spec)
+    monkeypatch.setenv("PF_AGENT_STATE_DIR", str(state))
+    spec.loader.exec_module(ak)
+    assert ak.read_ledger("t") == list(range(len(ak.TASK_STEPS)))    # each step EXACTLY once, in order
+
+
 # ── tool-calling pilot (gradio-tool): kit+glue + a shortcut-proof tool contract ──────────────
 def test_gradio_tool_template_declares_tool_sibling_and_shortcut_proof_knowledge():
     from poc_foundry.phases.context import load_template

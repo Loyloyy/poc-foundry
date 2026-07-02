@@ -2117,3 +2117,73 @@ the tester writes a grounding test the strict critic ACCEPTS. NOT added to `grad
 deterministic HASH embedding can't do semantic paraphrase — flagged: that template may be un-greenable
 under the strict critic, a known tension with its "offline deterministic demo" purpose, DECISIONS #38).
 Green bar 195. *Server: re-run `gradio-rag-llm` → expect the clobber gone + the grounding test accepted.*
+
+**#48 RESULT — regression CLOSED; both greens confirmed on final code (2026-07-01).**
+`gradio-rag-llm` re-run → `status=done`, `demonstrates_core_value=yes`, **4/4 criteria MET (all
+shortcut-proof)**, red-first OK, ledger OK (39 test ids), 0 incidents, clean-room install=test=demo=True,
+degraded_critic=False. NO clobber (required_exports gate held). And STRONGER than the M5 green: the core is
+now the PARAPHRASE discriminator ("query words don't overlap the doc title → must still retrieve + ground
+→ proving embedding-based retrieval, not title-keyword matching") — a title-lookup stub FAILS it. So the
+critic hardening (#1/#42/#45) net-improved the verification and gradio-rag-llm clears the higher bar. Cost:
+~100 min / 70 calls with heavy intra-iteration fix→re-author churn (the coder-capability tax on harder
+shortcut-proof RAG criteria; converges, but slow — high server latency ~78s/call didn't help). Both
+known-good builds (`gradio-tool`, `gradio-rag-llm`) now confirmed `done` on the FINAL code → the session's
+harness surgery is regression-clean. Clean base for A3.
+
+## #49 — Planning-chat RATIFICATION of the M6 session (gate changes, deviations, A3 design) (2026-07-02)
+
+The planning chat reviewed the M6 session (#39–#48) and ratified everything, with refinements:
+1. **Critic-bar #42 + #45 — APPROVED (ratified into the ledger).** The arc is one motion: #34 loosened the
+   author side + ruled MECHANISM out of scope; #42 was a necessary tightening (the echo-toy was a real hole);
+   #45's opaque-value exception is NOT a retreat but the RESTORATION of #34's principle ("mechanism out of
+   scope", restated) — the hard-coded-table objection is unfalsifiable by any finite black-box test, so a
+   critic wielding it makes the whole deterministic-substrate template class unbuildable. Net bar: echo-able
+   values INADEQUATE, opaque-only values ADEQUATE — correct/honest/defensible. GUARD: keep the critic-prompt
+   fakes pinned to BOTH poles (echo rejected AND opaque accepted) so a future tuning can't swing back →
+   `test_critic_prompt_pins_both_poles` added.
+2. **A2 = HTTP tool sibling, defer true MCP — APPROVED, with a NAMED-BACKLOG condition.** Verification
+   substance (prove a real tool was invoked + its result used) is fully captured by the opaque-value
+   discriminator; the MCP wire protocol is transport fidelity, not verification. But "real MCP transport" is
+   an EXPLICITLY NAMED backlog item (not a silent drop) — "is this actually MCP?" is a live customer/workshop
+   question. Docs must NOT imply MCP-protocol compliance → `gradio-tool` description reworded.
+3. **`gradio-rag-pgvector` — RETIRE now, BACKLOG the real-embeddings version.** The hash embedding
+   legitimately fails a paraphrase discriminator (that's the bar working). Keeping it green would require
+   weakening back to the echo-toy bar (teaching-to-a-weaker-test). Don't duplicate `gradio-rag-llm` either.
+   → RETIRED the template; tests repointed to `gradio-rag-llm`. **BACKLOG:** "pgvector + real embeddings as
+   the PRODUCTION-vector-DB-SERVICE RAG pilot" (user ruling #13: real sibling services) — belongs in the
+   services-showcase work, NOT an M6 blocker.
+4. **A3 design A (custom durable store, not LangGraph checkpointer) — APPROVED.** The checkpointer makes
+   durability free → ~2 trivial glue lines → nothing to verify (thick-template anti-pattern §3b). A custom
+   store forces real resume + checkpoint-ordering logic = a genuine autonomy signal. §7 "LangGraph demo"
+   wording deviation is fine. **BACKLOG:** the LangGraph-checkpointer version as the "production-idiom variant"
+   (same shape as the pgvector-services backlog).
+5. **A3 design B (kill mechanism) — APPROVED, with a HARD CONSTRAINT: the termination must be UNCATCHABLE.**
+   A catchable Python exception lets the coder try/except and "recover" in-process, passing WITHOUT exercising
+   the disk→fresh-process resume path — a gameable discriminator, the durable-domain echo-toy. So kill via
+   `os._exit()`-style abort (bypasses finally/except) or an outside-the-process kill — NEVER a catchable
+   exception the step code can intercept. Discriminator confirmed: each step appends a unique marker to disk;
+   after kill+resume, assert the marker sequence shows each step EXACTLY ONCE (restart-stub duplicates → fail;
+   skip-stub → incomplete → fail). A3 needs NO sibling/NO new image (durable = a local file) → cheapest pilot.
+
+Named backlog (post-M6): real MCP transport · pgvector+real-embeddings services RAG pilot · A3 LangGraph
+production-idiom variant.
+
+## #50 — M6: A3 durable-agent pilot BUILT (kit+glue, uncatchable kill, discriminator pre-validated) (2026-07-02)
+
+New template `durable-agent` (design §7 pilot 3), per the #49 sign-offs: a Gradio chatbot that runs a fixed
+workflow (`agentkit.TASK_STEPS`) per task with DURABLE EXECUTION — checkpoints progress to a LOCAL FILE, so a
+kill mid-run + re-invoke RESUMES exactly-once. **kit+glue** (`agentkit.py` non-editable primitives:
+`load_progress`/`append_ledger`/`read_ledger`/`checkpoint`; editable `core.py` glue). **No sibling service, no
+new image, no model** → the cheapest pilot (durable = a local file). The coder's autonomous job = the real
+resume + checkpoint-ordering logic (start from `load_progress`, do work THEN checkpoint) — a from-scratch
+autonomy probe; the LangGraph-checkpointer production variant is backlogged (#49).
+- **UNCATCHABLE kill (#49 hard constraint):** `checkpoint` aborts via `os._exit(137)` when `PF_CRASH_AFTER`
+  == done — bypasses try/except/finally, so an in-process "recovery" can't fake durability; only disk state
+  read by a FRESH process survives. The knowledge note steers the tester to the subprocess + `PF_CRASH_AFTER`
+  + exactly-once-`read_ledger` pattern (the mechanism is non-obvious; the coder still writes the resume).
+- **Discriminator PRE-VALIDATED LOCALLY** (rare — pure stdlib, no VM/model/db): correct agent → ledger
+  `[0,1,2,3,4]` (exactly once); restart-toy → `[0,1,0,1,2,3,4]` (duplicates → fails); the `os._exit` kill
+  exits 137. Locked into the green bar as `test_durable_agent_discriminator_distinguishes_resume_from_restart`.
+Local: preflight resolves; green bar **198** + 11 contract + hygiene. *Server (next): `--template
+durable-agent` (no rebuild — no sibling/image) → does the coder write correct resume logic? First-attempt
+outcome honest; a descope is informative (§3b).*
