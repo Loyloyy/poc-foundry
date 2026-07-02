@@ -652,10 +652,14 @@ Local green bar: `run_spine_tests.py` (194) + contract (11) + hygiene.
       reads. `done` blocked by ONE thing: an iter2 hard-exit relapse (core gates done, core is met). Root cause: the
       #53 steer was iter0-only (coder overwrites the scaffold docstring) → **P2 fixed: prohibition moved to the coder
       SYSTEM prompt** (persistent, all templates). Green bar **215**.
-- [ ] **Planning-chat consult (P1 + RAG-framing):** (P1) critic adequacy is per-TEST not per-SUITE → over-descoped
-      a criterion the varied-K sibling already makes shortcut-proof; (framing) critic demands "real RAG work" from a
-      durability pilot. Neither blocks `done`; both cost completeness + a ~64min/63-call thrash. Ruling → M7 close.
-- [ ] **Re-run A3 fresh (server, after the consult):** with P2 fixed + P1/framing ruled, expect `done` (core met +
-      no hard-exit relapse) or a clean, cheap descope. Take whatever the harness produces as the pilot record.
+- [x] **Consult RULED + landed (2026-07-02 → DEC #57):** (P1, gate) **suite-aware adequacy** — `_critic_adequacy`
+      now sees sibling MET tests + judges "shortcut-proof across the shipped suite", credits siblings, and P5
+      `_credit_recheck` re-validates/demotes if a credited sibling was later descoped (guardrails 1–3). (P2a, gate)
+      **critic scope-limit** — judge the criterion's OWN claim; the goal is background, no "real RAG work" demand.
+      (P2b, template) durable-agent `knowledge` frames the goal as DURABILITY, domain = flavour not criteria; ties
+      to `--brief`/D1. #52 verified (run #3 cap held for the right reason). Green bar **223**.
+- [ ] **Re-run A3 fresh (server, next):** with #56 (no relapse) + #57 (no over-descope / no RAG bleed) live, expect
+      `done` or a clean, cheap descope — take whatever the harness produces as the pilot record. Watch: cost should
+      collapse (the thrash drivers are gone).
 - **Acceptance:** a clear, evidence-backed verdict — either a verified green (the loop genuinely composed the
   durable agent, proven by a generalisation test a toy can't fake) or a documented capability gap.

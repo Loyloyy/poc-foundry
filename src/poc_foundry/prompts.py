@@ -158,16 +158,37 @@ CRITIC_SYSTEM = (
 )
 
 
-def critic_adequacy_prompt(criterion: str, test_src: str, interface: str) -> str:
+def critic_adequacy_prompt(criterion: str, test_src: str, interface: str,
+                           siblings: list[tuple[str, str, str]] | None = None) -> str:
+    siblings = siblings or []
+    sib_block = ""
+    if siblings:
+        parts = [f"[{label}] criterion: {ctext}\n```python\n{src}\n```"
+                 for label, ctext, src in siblings]
+        sib_block = ("# Sibling tests ALREADY GREEN in the shipped suite\n"
+                     "The coder faces the CUMULATIVE suite — a shipped implementation must pass THIS test "
+                     "AND every sibling below SIMULTANEOUSLY. If a sibling already forecloses the shortcut "
+                     "you would otherwise worry about, THIS test IS adequate; list those sibling labels in "
+                     "`credited_siblings` (e.g. [\"S1\"]).\n\n" + "\n\n".join(parts) + "\n\n")
     return (
         f"# Success criterion\n{criterion}\n\n"
         f"# Interface under test\n{interface}\n\n"
         f"# The staged test\n```python\n{test_src}\n```\n\n"
+        + sib_block +
         "# Task\n"
         "Decide whether passing this test is trustworthy evidence FOR the criterion. This is a "
         "BLACK-BOX test: it can only observe the interface's INPUT→OUTPUT behaviour. It cannot — and "
         "need not — prove WHICH internal mechanism, library, or service produced the output. Judge "
         "OBSERVABLE behaviour only.\n"
+        "SCOPE — judge THIS criterion's OWN claim, nothing more. Any broader product/domain framing in the "
+        "criterion wording (e.g. it mentions RAG, a pipeline, a tool) is BACKGROUND FLAVOUR — do NOT import it "
+        "as an extra requirement. A durability criterion is satisfied by durability evidence; do NOT demand "
+        "'real RAG/tool work' it never claimed. Whether the criteria COLLECTIVELY match the goal is a "
+        "spec-level question, OUT OF SCOPE here.\n"
+        "SUITE-AWARE — the real gate is the whole shipped suite. Ask: could a shortcut satisfy THIS "
+        "criterion's claim while ALSO staying green on every sibling test shown above? If a sibling test "
+        "already defeats that shortcut (e.g. a sibling varies a parameter the shortcut would hard-code), then "
+        "THIS test is ADEQUATE — credit the sibling; do NOT descope a criterion the suite already secures.\n"
         "Mark it INADEQUATE (adequate=false) only if it is gameable in the TRIVIAL sense: it asserts "
         "nothing meaningful (`assert True`, only `is not None`, only checks the return type), it does "
         "not call the interface with inputs relevant to the criterion, or a CONSTANT/echo stub — a "

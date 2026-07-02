@@ -2340,3 +2340,42 @@ strengthened discriminator**. The stronger bar confirmed the coder cleared it, i
   shortcut fail; shortcut-proofness is often a suite property → over-descoping. (P2-domain) RAG-framing bleed: the
   RAG-themed artifact makes P1-spec's goal say "RAG pipeline", and the critic then demanded "real RAG work" from a
   pure DURABILITY pilot (abstract steps) → drove the respec cascade. Consult pending; ruling → M7 close.
+
+## #57 — M7: suite-aware adequacy + critic scope-limit (gate) + durable-agent goal-framing (template) (2026-07-02)
+
+Planning-chat ratification (2026-07-02) of the A3 re-run #3 consult. Two gate changes + one template-craft fix
+that remove the over-descope/RAG-bleed thrash the run exposed (~64min/63 calls, both respec & replan caps hit).
+First, the **#52 verification the planner asked for**: run #3's cap (`incomplete/partial`) is consistent with
+#52 for the RIGHT reason — the iter2 relapse's own criterion (fresh-task) was NEVER met via a clean path, so
+downgrade condition 2 failed (and condition 4 too: os._exit + sys.exit = 2 patterns). The cap wasn't a
+not-consulted accident.
+
+**P1 — suite-aware adequacy (GATE).** Per-test adequacy asked the wrong question: the coder faces the CUMULATIVE
+staged suite (no shipped impl passes A's test while failing sibling B's), so the trust question is "can a
+shortcut satisfy THIS criterion's claim while staying green on the WHOLE shipped suite?" Per-test over-descopes —
+the critic proved it by descoping the partial-ledger criterion on a shortcut the varied-K sibling defeats one
+line later. `_critic_adequacy` now takes the sibling MET tests and the prompt judges suite-aware; the critic
+returns `credited_siblings`. NOT a bar-lowering — it aligns the judgment with what the gate enforces. (Bundling
+cases into monolithic tests was rejected — it pushes suite reasoning onto the tester and breaks the per-criterion
+structure the ledger/staging/refine depend on.) Guardrails: (1) credit only currently-MET/will-ship siblings (a
+descoped sibling isn't published → can't secure A) — `_sibling_met_tests` reads `green_test_files`; (2) persist
+the credit (`state.adequacy_credits`) and RE-CHECK at P5: `_credit_recheck` re-evaluates any met criterion whose
+credited sibling was later descoped, demoting it if now inadequate (extends the rehab-sweep point, no new phase;
+degraded → advisory); (3) calibration pole pinned — the varied-K "per-test-gameable-but-suite-covered=adequate"
+scenario is a fakes fixture so a future critic tuning can't regress it.
+
+**P2a — critic scope-limit (GATE).** Adequacy asked "is passing trustworthy evidence for THIS criterion's claim";
+the spec goal is BACKGROUND, not an extra requirement. A critic demanding "real RAG work" from a durability
+criterion is a scope error that reproduces on every pilot orthogonal to the artifact's domain (tool-calling on a
+RAG artifact had the same shape). One prompt line: judge the criterion's own claim; domain nouns are flavour;
+whether the criteria collectively cohere with the goal is a spec-lint/final-verdict question, not per-criterion.
+
+**P2b — durable-agent goal-framing (TEMPLATE CRAFT).** The `knowledge` note now tells the architect explicitly:
+the PoC's goal is DURABLE EXECUTION; the artifact's domain supplies step flavour, NEVER the success criteria —
+killing the mismatch at the source. **Tie logged:** this is exactly the job the dead `--brief`/`driver`
+spec-shaping was meant to do → further evidence for mechanical-batch D1 (wire `--brief` into the spec prompt);
+the knowledge note carries A3 today without blocking on it. Checklist lesson (with #55's mid-state rule): a
+template must frame its goal by what it DEMONSTRATES, not the artifact's domain.
+
+Fakes (`test_m7_rehab.py`): suite-aware + scope prompt, label→text mapping, credit persistence, credit-recheck
+demote/keep/degraded, goal-framing note. P1 + P2a cite this consult as ratification. Green bar **223** + 11 + hygiene.

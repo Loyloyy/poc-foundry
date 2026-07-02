@@ -659,12 +659,17 @@ def p4_iterate(state, ctx: Ctx) -> dict:
 
 
 # ── critic gate + verdict ladder (design §5.4, §5.8) ─────────────────────────
-def _critic_adequacy(ctx: Ctx, criterion: str, test_src: str):
+def _critic_adequacy(ctx: Ctx, criterion: str, test_src: str, siblings: list | None = None):
     """Critic adequacy review: is passing this staged test trustworthy evidence for the criterion?
-    Defaults to adequate if the critic endpoint is unreachable (the ledger/red-first/scanner walls
-    still gate — the critic is an ADDED layer, never the sole gate)."""
+    ``siblings`` = ``[(criterion_text, test_src), …]`` for the currently-MET, WILL-SHIP tests (suite-aware
+    adequacy, M7 #57): a shortcut that a sibling already forecloses does NOT make this test inadequate.
+    Defaults to adequate if the critic endpoint is unreachable (the ledger/red-first/scanner walls still
+    gate — the critic is an ADDED layer, never the sole gate). Any credited siblings come back as criterion
+    TEXTS in ``review.credited_siblings`` (mapped from the labels shown to the critic)."""
     from poc_foundry import tracing
     from poc_foundry.state import AdequacyReview
+    labelled = [(f"S{n}", ctext, src) for n, (ctext, src) in enumerate(siblings or [], start=1)]
+    label_to_text = {lab: ctext for lab, ctext, _ in labelled}
     try:
         from poc_foundry.models import build_chat_model
         # Give the structured-output call headroom: a reasoning model can spend tokens "thinking" and
@@ -673,12 +678,34 @@ def _critic_adequacy(ctx: Ctx, criterion: str, test_src: str):
         llm = build_chat_model("critic", max_tokens=8000).with_structured_output(AdequacyReview)
         with tracing.span("critic", criterion=criterion[:200]) as _sp:
             rv = llm.invoke([("system", prompts.CRITIC_SYSTEM),
-                             ("human", prompts.critic_adequacy_prompt(criterion, test_src, ctx.template.interface))])
+                             ("human", prompts.critic_adequacy_prompt(criterion, test_src,
+                                                                      ctx.template.interface, labelled))])
             review = AdequacyReview(**rv) if isinstance(rv, dict) else rv
+            # map the labels the critic echoed (S1/S2/…, or a raw text) back to sibling criterion TEXTS
+            review.credited_siblings = [label_to_text.get(s, s) for s in (review.credited_siblings or [])
+                                        if s in label_to_text or s in label_to_text.values()]
             _sp.update(output={"adequate": review.adequate, "reason": (review.reason or "")[:300]})
             return review
     except Exception as e:  # noqa: BLE001 — critic is additive; never crash the build on its absence
         return AdequacyReview(adequate=True, reason=f"critic unavailable ({type(e).__name__}); defaulting adequate")
+
+
+def _sibling_met_tests(state, ctx, exclude_file: str) -> list:
+    """(criterion_text, test_src) for the currently-MET, WILL-SHIP staged tests except ``exclude_file`` —
+    the suite context for suite-aware adequacy (#57). GUARDRAIL 1: only green/met tests ship, so only they
+    can be credited (a descoped sibling isn't published → can't secure another criterion's claim)."""
+    text_of: dict[str, str] = {}
+    for idx, it in enumerate(state.plan.iterations if state.plan else []):
+        tf = it.test_file or f"test_iter_{idx}.py"
+        if it.acceptance:
+            text_of.setdefault(tf, it.acceptance[0])
+    staging = ctx.staging_dir / "tests"
+    out: list = []
+    for tf in state.green_test_files:
+        if tf == exclude_file or not (staging / tf).exists():
+            continue
+        out.append((text_of.get(tf, tf), (staging / tf).read_text()))
+    return out
 
 
 def p_critic(state, ctx: Ctx) -> dict:
@@ -711,10 +738,17 @@ def p_critic(state, ctx: Ctx) -> dict:
         # met-existing test is FRESHLY authored, never adequacy-vetted, and (for i>0) never proven red — its
         # gaming vector is the TESTER (a weak/tautological test green against existing code). So it consults
         # adequacy too; an inadequate one routes to the weak-test re-author rung (#42), NOT straight to accept.
-        review = _critic_adequacy(ctx, state.pending_criterion, state.pending_test_src)
+        # SUITE-AWARE adequacy (#57): show the critic the sibling MET (will-ship) tests, so it does not
+        # descope a criterion whose shortcut a sibling already forecloses (e.g. the varied-K case).
+        cur_tf = (it.test_file or f"test_iter_{i}.py") if it else ""
+        siblings = _sibling_met_tests(state, ctx, cur_tf)
+        review = _critic_adequacy(ctx, state.pending_criterion, state.pending_test_src, siblings)
         if review.adequate:
             disposition, reason = "accept", review.reason or (
                 "criterion met by existing implementation" if status == "met-existing" else "adequate")
+            if review.credited_siblings and it and it.acceptance:   # persist the dependency (guardrail 2)
+                upd["adequacy_credits"] = {**state.adequacy_credits,
+                                           it.acceptance[0]: list(review.credited_siblings)}
         elif degraded:
             # A same-family critic can't INDEPENDENTLY certify adequacy (design §5.4) → ADVISORY
             # (recorded, non-blocking). The hard walls still gate; blocking adequacy returns with a
@@ -902,7 +936,8 @@ def _rehabilitation_sweep(state, ctx: Ctx):
                 continue
             if not _verify_file(sbx, tf):          # must be GREEN against the final workspace
                 continue
-            review = _critic_adequacy(ctx, c.text, (staging_tests / tf).read_text())   # guardrail 2
+            siblings = _sibling_met_tests(state, ctx, tf)   # suite-aware (#57): credit only shipping tests
+            review = _critic_adequacy(ctx, c.text, (staging_tests / tf).read_text(), siblings)  # guardrail 2
             if not review.adequate and not degraded:
                 notes.append(f"rehab: '{c.text[:60]}' passes on the final workspace but the critic judged "
                              f"the test inadequate ({(review.reason or '')[:80]}) — left descoped")
@@ -931,13 +966,61 @@ def _rehabilitation_sweep(state, ctx: Ctx):
     return promoted_files, new_report, notes
 
 
+def _credit_recheck(state, ctx: Ctx, descope_report: list):
+    """GUARDRAIL 2 (#57): a criterion certified adequate ONLY because a sibling test forecloses its shortcut
+    is unsound if that sibling was later descoped (its test won't ship, so the shortcut-proofing is gone from
+    the clean-room bundle). For each MET criterion whose credited sibling is no longer met, re-run adequacy
+    against the FINAL met suite; demote it if now inadequate. Runs at P5 (same point as rehab) — one pass, no
+    new phase. Mutates ``state.spec`` in place; returns ``(demoted_files, new_descope_report, notes)``."""
+    spec = state.spec
+    if not spec or not state.adequacy_credits:
+        return [], descope_report, []
+    from poc_foundry.models import same_family
+    degraded = same_family("critic", "coder")
+    met_texts = {c.text for c in spec.success_criteria if c.status == "met"}
+    test_of = _test_file_for_criterion(state)
+    staging = ctx.staging_dir / "tests"
+    demoted_files: list[str] = []
+    notes: list[str] = []
+    report = list(descope_report)
+    for c in spec.success_criteria:
+        if c.status != "met":
+            continue
+        credits = state.adequacy_credits.get(c.text) or []
+        lost = [b for b in credits if b not in met_texts]
+        if not lost:
+            continue                                      # all credited siblings still ship → sound
+        tf = test_of.get(c.text)
+        if not tf or not (staging / tf).exists():
+            continue
+        siblings = _sibling_met_tests(state, ctx, tf)     # against the FINAL met suite
+        review = _critic_adequacy(ctx, c.text, (staging / tf).read_text(), siblings)
+        if review.adequate or degraded:
+            continue                                      # still secured (or degraded → advisory, non-blocking)
+        c.status = "descoped"                             # shortcut-proofing lost → honest demotion
+        demoted_files.append(tf)
+        report.append({"criterion": c.text, "attempts_made": 0,
+                       "why_failed": ("adequacy credited sibling(s) that were later descoped ("
+                                      + ", ".join(l[:40] for l in lost) + "); suite re-check now inadequate: "
+                                      + (review.reason or "")[:120]),
+                       "finish_path": "re-run with `refine`, or finish by hand in OpenCode"})
+        notes.append(f"credit re-check: '{c.text[:50]}' demoted — a credited sibling was descoped, "
+                     f"shortcut-proofing lost")
+        ctx.say(f"P5 credit re-check: criterion demoted met→descoped (credited sibling descoped): {c.text[:60]}")
+    return demoted_files, report, notes
+
+
 def p5_docs(state, ctx: Ctx) -> dict:
     # Layer-1: promote descoped-but-now-passing criteria BEFORE publish, so their tests ship + the
-    # clean-room re-runs them in a fresh clone (the second independent pass).
+    # clean-room re-runs them in a fresh clone (the second independent pass). Suite-aware adequacy (#57).
     promoted_files, new_report, rehab_notes = _rehabilitation_sweep(state, ctx)
     if promoted_files:
         state.green_test_files = state.green_test_files + [f for f in promoted_files
                                                            if f not in state.green_test_files]
+    # #57 guardrail 2: after the met set is final, re-check any criterion whose credited sibling was lost.
+    demoted_files, new_report, recheck_notes = _credit_recheck(state, ctx, new_report)
+    if demoted_files:
+        state.green_test_files = [f for f in state.green_test_files if f not in demoted_files]
     published = _publish_tests(state, ctx)
     (ctx.workspace_dir / "DEMO.md").write_text(_scribe_demo(ctx, state.spec))
     chown_to_builder(ctx.workspace_dir)   # published tests + DEMO must be writable/readable by uid 1000
@@ -945,12 +1028,14 @@ def p5_docs(state, ctx: Ctx) -> dict:
     ctx.say(f"P5 docs: DEMO.md + published {published} criterion test file(s) into tests/")
     log = state.log + ([f"P5 rehab: {len(promoted_files)} descoped criterion(s) promoted to met"]
                        if promoted_files else [])
+    log = log + ([f"P5 credit re-check: {len(demoted_files)} criterion(s) demoted (credited sibling descoped)"]
+                 if demoted_files else [])
     log = log + [f"P5 docs: DEMO.md + {published} test file(s) published"]
     return {"phase": "docs", "commit_sha": sha, "demo_quality": "thin",
             "spec": state.spec,
             "green_test_files": state.green_test_files,
             "descope_report": new_report,
-            "caveats": state.caveats + rehab_notes,
+            "caveats": state.caveats + rehab_notes + recheck_notes,
             "log": log}
 
 

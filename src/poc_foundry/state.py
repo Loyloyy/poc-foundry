@@ -31,6 +31,11 @@ class AdequacyReview(BaseModel):
     adequate: bool = True
     reason: str = ""
     suggestion: str = ""
+    # M7 suite-aware adequacy (planning-chat ruling 2026-07-02 → DECISIONS #57): sibling criteria whose
+    # SHIPPED tests foreclose the shortcut that would otherwise make THIS test inadequate. If A is adequate
+    # only because sibling B ships, that credit is unsound if B is later descoped — persisted so the rehab
+    # sweep re-checks A when a credited sibling is lost. Holds sibling criterion TEXTS (mapped from labels).
+    credited_siblings: list[str] = Field(default_factory=list)
 
 
 class IterationPlan(BaseModel):
@@ -109,6 +114,7 @@ class BuildState(BaseModel):
     pending_criterion: str = ""      # transient: the criterion text under review
     descope_report: list[dict] = Field(default_factory=list)    # → PoCBuildArtifact.descope_report[]
     green_test_files: list[str] = Field(default_factory=list)   # staged tests of MET iterations → published to clean-room
+    adequacy_credits: dict = Field(default_factory=dict)        # M7 #57: criterion text → sibling texts its adequacy relied on
     demo_quality: str = ""
     demonstrates_core_value: str = "no"
 
